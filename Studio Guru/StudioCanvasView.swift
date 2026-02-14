@@ -47,6 +47,9 @@ struct StudioCanvasView: View {
     @State private var isShowingDeviceEditor: Bool = false
     @State private var editingDeviceId: UUID? = nil
 
+    // Guru
+    @State private var isShowingGuru: Bool = false
+
     // Draft fields for Device Editor
     @State private var draftNickname: String = ""
     @State private var draftManufacturer: String = ""
@@ -145,6 +148,12 @@ struct StudioCanvasView: View {
                 Label("New Studio", systemImage: "plus")
             }
 
+            Button {
+                isShowingGuru = true
+            } label: {
+                Label("Guru", systemImage: "sparkles")
+            }
+
             if let studio = currentStudio {
                 Button { duplicateStudio(from: studio) } label: {
                     Label("Duplicate", systemImage: "plus.square.on.square")
@@ -209,6 +218,9 @@ struct StudioCanvasView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(exportResultMessage)
+        }
+        .sheet(isPresented: $isShowingGuru) {
+            GuruHomeView()
         }
     }
 
@@ -1458,4 +1470,282 @@ private struct DeviceEditorSheet: View {
 private struct IdentifiableURL: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+// MARK: - Guru Module (v1)
+
+private enum GuruProcess: String, CaseIterable, Identifiable {
+    case compressor = "Compressor"
+    case equalizer = "Equalizer"
+    case reverb = "Reverb"
+    case delay = "Delay"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .compressor: return "waveform"
+        case .equalizer: return "slider.horizontal.3"
+        case .reverb: return "drop"
+        case .delay: return "timer"
+        }
+    }
+}
+
+private enum GuruSource: String, CaseIterable, Identifiable {
+    case vocalLead = "Vocal (Lead)"
+    case bass = "Bass"
+    case kick = "Kick"
+    case snare = "Snare"
+    case piano = "Piano"
+    case drumBus = "Drum Bus"
+    case mixBus = "Mix Bus"
+
+    var id: String { rawValue }
+}
+
+private struct GuruHomeView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedSource: GuruSource = .vocalLead
+    @State private var selectedProcess: GuruProcess = .compressor
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    GroupBox("Choose") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("Source", selection: $selectedSource) {
+                                ForEach(GuruSource.allCases) { s in
+                                    Text(s.rawValue).tag(s)
+                                }
+                            }
+
+                            Picker("Process", selection: $selectedProcess) {
+                                ForEach(GuruProcess.allCases) { p in
+                                    Label(p.rawValue, systemImage: p.symbol).tag(p)
+                                }
+                            }
+                        }
+                        .padding(8)
+                    }
+
+                    GuruPluginPanel(source: selectedSource, process: selectedProcess)
+                }
+                .padding(16)
+            }
+            .navigationTitle("Guru")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .frame(minWidth: 620, idealWidth: 760, maxWidth: .infinity,
+               minHeight: 640, idealHeight: 760, maxHeight: .infinity)
+    }
+}
+
+private struct GuruPluginPanel: View {
+    let source: GuruSource
+    let process: GuruProcess
+
+    var body: some View {
+        Group {
+            switch process {
+            case .compressor:
+                CompressorPluginView(source: source)
+            case .equalizer:
+                PlaceholderPluginView(title: "Equalizer", subtitle: "EQ starter settings coming next")
+            case .reverb:
+                PlaceholderPluginView(title: "Reverb", subtitle: "Reverb starter settings coming next")
+            case .delay:
+                PlaceholderPluginView(title: "Delay", subtitle: "Delay starter settings coming next")
+            }
+        }
+    }
+}
+
+private struct PlaceholderPluginView: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.title2)
+                .bold()
+            Text(subtitle)
+                .foregroundStyle(.secondary)
+
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThickMaterial)
+                .frame(height: 280)
+                .overlay(
+                    VStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("Coming soon")
+                            .foregroundStyle(.secondary)
+                    }
+                )
+        }
+    }
+}
+
+private struct CompressorPreset {
+    var ratio: Double          // 1...10 (displayed as 1:1 ... 10:1)
+    var attackMs: Double       // 0.1...100
+    var releaseMs: Double      // 10...500
+    var knee: Double           // 0...1 (soft..hard)
+    var grDb: Double           // 0...12 (target gain reduction)
+
+    static func forSource(_ s: GuruSource) -> CompressorPreset {
+        switch s {
+        case .vocalLead:
+            return .init(ratio: 3.5, attackMs: 20, releaseMs: 90, knee: 0.2, grDb: 5)
+        case .bass:
+            return .init(ratio: 4.0, attackMs: 30, releaseMs: 120, knee: 0.35, grDb: 6)
+        case .kick:
+            return .init(ratio: 5.0, attackMs: 30, releaseMs: 80, knee: 0.5, grDb: 5)
+        case .snare:
+            return .init(ratio: 5.0, attackMs: 18, releaseMs: 90, knee: 0.5, grDb: 6)
+        case .piano:
+            return .init(ratio: 2.5, attackMs: 40, releaseMs: 160, knee: 0.25, grDb: 3)
+        case .drumBus:
+            return .init(ratio: 3.0, attackMs: 30, releaseMs: 100, knee: 0.35, grDb: 3)
+        case .mixBus:
+            return .init(ratio: 2.0, attackMs: 30, releaseMs: 120, knee: 0.3, grDb: 1.5)
+        }
+    }
+}
+
+private struct CompressorPluginView: View {
+    let source: GuruSource
+
+    private var preset: CompressorPreset { .forSource(source) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Compressor")
+                    .font(.title2)
+                    .bold()
+                Spacer()
+                Text(source.rawValue)
+                    .foregroundStyle(.secondary)
+            }
+
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThickMaterial)
+                .overlay(
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 14) {
+                            GuruKnob(title: "Ratio", value01: ratio01(preset.ratio), valueText: String(format: "%.1f:1", preset.ratio))
+                            GuruKnob(title: "Attack", value01: log01(preset.attackMs, min: 0.1, max: 100), valueText: "\(Int(preset.attackMs)) ms")
+                            GuruKnob(title: "Release", value01: log01(preset.releaseMs, min: 10, max: 500), valueText: "\(Int(preset.releaseMs)) ms")
+                            GuruKnob(title: "Knee", value01: preset.knee, valueText: preset.knee < 0.33 ? "Soft" : (preset.knee < 0.66 ? "Med" : "Hard"))
+                            GuruKnob(title: "GR", value01: clamp01(preset.grDb / 12.0), valueText: String(format: "%.1f dB", preset.grDb))
+                        }
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Starting point")
+                                .font(.headline)
+                            Text(startingPointNote(for: source))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(14)
+                )
+                .frame(height: 320)
+        }
+    }
+
+    private func startingPointNote(for s: GuruSource) -> String {
+        switch s {
+        case .vocalLead:
+            return "Aim for 3–6 dB gain reduction on peaks; adjust threshold to taste. Slightly slower attack keeps articulation intact."
+        case .bass:
+            return "Target 4–8 dB gain reduction for even sustain. If transients feel dull, slow the attack a touch."
+        case .kick:
+            return "Keep attack slow enough to preserve punch. Shorter release tightens the low end."
+        case .snare:
+            return "Shorter release increases snap; longer release smooths. Keep an eye on pumping."
+        case .piano:
+            return "Use light control (2–4 dB). Longer attack keeps dynamics natural."
+        case .drumBus:
+            return "Glue rather than slam: 2–4 dB is usually enough."
+        case .mixBus:
+            return "Very subtle: 1–2 dB gain reduction. If the mix narrows, back off."
+        }
+    }
+
+    private func clamp01(_ v: Double) -> Double { min(max(v, 0), 1) }
+
+    private func ratio01(_ ratio: Double) -> Double {
+        // Map 1...10 to 0...1
+        clamp01((ratio - 1.0) / 9.0)
+    }
+
+    private func log01(_ value: Double, min minValue: Double, max maxValue: Double) -> Double {
+        // Log-ish mapping for time constants so small values have more visual resolution.
+        let v = Swift.max(minValue, Swift.min(value, maxValue))
+        let a = log(minValue)
+        let b = log(maxValue)
+        let x = log(v)
+        return clamp01((x - a) / (b - a))
+    }
+}
+
+private struct GuruKnob: View {
+    let title: String
+    let value01: Double       // 0...1
+    let valueText: String
+
+    private var angle: Double {
+        // From -135° to +135° like many plugins
+        (-135.0) + (270.0 * min(max(value01, 0), 1))
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+
+                // Track
+                Circle()
+                    .strokeBorder(.secondary.opacity(0.25), lineWidth: 6)
+
+                // Value arc
+                Circle()
+                    .trim(from: 0.0, to: CGFloat(min(max(value01, 0), 1)))
+                    .stroke(style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .foregroundStyle(.primary)
+
+                // Pointer
+                Rectangle()
+                    .fill(.primary)
+                    .frame(width: 2, height: 18)
+                    .offset(y: -18)
+                    .rotationEffect(.degrees(angle))
+            }
+            .frame(width: 74, height: 74)
+
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text(valueText)
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 92)
+    }
 }

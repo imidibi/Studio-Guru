@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 import SwiftData
 import UniformTypeIdentifiers
@@ -73,6 +74,10 @@ struct StudioCanvasView: View {
     // Delete device confirm
     @State private var isShowingDeleteDeviceConfirm: Bool = false
     @State private var deviceIdPendingDelete: UUID? = nil
+
+    // Delete connection confirm
+    @State private var isShowingDeleteConnectionConfirm: Bool = false
+    @State private var connectionPendingDelete: Connection? = nil
 
     var body: some View {
         let sidebarView = AnyView(sidebar)
@@ -265,6 +270,13 @@ struct StudioCanvasView: View {
                             },
                             subtitleForDevice: { d in
                                 ioSummary(from: d.ports)
+                            },
+                            onSelectConnection: { conn in
+                                selectionState.selection = .connection(conn.id)
+                            },
+                            onRequestDeleteConnection: { conn in
+                                connectionPendingDelete = conn
+                                isShowingDeleteConnectionConfirm = true
                             }
                         )
                         .environmentObject(selectionState)
@@ -321,6 +333,33 @@ struct StudioCanvasView: View {
                     Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
                 } message: {
                     Text("This will permanently delete the device from the studio.")
+                }
+                .alert("Delete Connection?", isPresented: $isShowingDeleteConnectionConfirm) {
+                    Button("Delete", role: .destructive) {
+                        guard let studio = currentStudio else { return }
+                        guard let conn = connectionPendingDelete else { return }
+                        if let idx = studio.connections.firstIndex(where: { $0.id == conn.id }) {
+                            studio.connections.remove(at: idx)
+                        }
+                        // Clear selection if it was this connection
+                        if case .connection(let selectedId) = selectionState.selection,
+                           selectedId == conn.id {
+                            selectionState.selection = nil
+                        }
+                        connectionPendingDelete = nil
+                    }
+                    Button("Cancel", role: .cancel) {
+                        connectionPendingDelete = nil
+                    }
+                } message: {
+                    if let studio = currentStudio,
+                       let conn = connectionPendingDelete,
+                       let a = studio.devices.first(where: { $0.id == conn.fromDeviceId }),
+                       let b = studio.devices.first(where: { $0.id == conn.toDeviceId }) {
+                        Text("This will remove the connection between \(a.nickname) and \(b.nickname).")
+                    } else {
+                        Text("This will remove the selected connection.")
+                    }
                 }
             } else {
                 VStack(spacing: 12) {
@@ -767,6 +806,8 @@ private struct CanvasSurfaceView: View {
     let background: Color
     let iconForDevice: (DeviceInstance) -> String
     let subtitleForDevice: (DeviceInstance) -> String
+    let onSelectConnection: (Connection) -> Void
+    let onRequestDeleteConnection: (Connection) -> Void
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -781,6 +822,29 @@ private struct CanvasSurfaceView: View {
         GeometryReader { geo in
             ZStack {
                 Rectangle().fill(background)
+
+                // Connection lines (one per saved device pair)
+                ForEach(studio.connections, id: \.id) { c in
+                    if let a = studio.devices.first(where: { $0.id == c.fromDeviceId }),
+                       let b = studio.devices.first(where: { $0.id == c.toDeviceId }) {
+                        ConnectionLineView(
+                            from: CGPoint(x: a.posX, y: a.posY),
+                            to: CGPoint(x: b.posX, y: b.posY),
+                            isSelected: isSelectedConnection(from: c.fromDeviceId, to: c.toDeviceId)
+                        )
+                        .onTapGesture { onSelectConnection(c) }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                onRequestDeleteConnection(c)
+                            } label: {
+                                Label("Delete Connection", systemImage: "trash")
+                            }
+                        }
+#if os(iOS)
+                        .onLongPressGesture { onRequestDeleteConnection(c) }
+#endif
+                    }
+                }
 
                 ForEach(studio.devices, id: \.id) { d in
                     VStack(alignment: .leading, spacing: 6) {
@@ -841,6 +905,13 @@ private struct CanvasSurfaceView: View {
     private func isSelected(_ id: UUID) -> Bool {
         if case .device(let did) = selection.selection { return did == id }
         return false
+    }
+
+    private func isSelectedConnection(from: UUID, to: UUID) -> Bool {
+        guard case .connection(let selectedConnectionId) = selection.selection else { return false }
+        guard let selected = studio.connections.first(where: { $0.id == selectedConnectionId }) else { return false }
+        return (selected.fromDeviceId == from && selected.toDeviceId == to)
+            || (selected.fromDeviceId == to && selected.toDeviceId == from)
     }
 }
 
@@ -1026,9 +1097,18 @@ private struct InspectorPanel: View {
                         .padding()
                 }
 
-            case .connection:
-                Text("Connections next")
-                    .padding()
+            case .connection(_):
+                VStack(spacing: 12) {
+                    Image(systemName: "cursorarrow.rays")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.secondary)
+                    Text("No Selection")
+                        .font(.title3)
+                    Text("Select a device.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
             }
         }
     }
@@ -1142,6 +1222,43 @@ private struct ZoomableScrollView<Content: View>: View {
     }
 }
 
+
+// MARK: - Selection State and CanvasSelection
+
+
+// MARK: - Connection Line View
+
+private struct ConnectionLineView: View {
+    let from: CGPoint
+    let to: CGPoint
+    let isSelected: Bool
+
+    private var path: Path {
+        var p = Path()
+        p.move(to: from)
+        let dx = to.x - from.x
+        let c1 = CGPoint(x: from.x + dx * 0.35, y: from.y)
+        let c2 = CGPoint(x: from.x + dx * 0.65, y: to.y)
+        p.addCurve(to: to, control1: c1, control2: c2)
+        return p
+    }
+
+    var body: some View {
+        ZStack {
+            // Wide invisible stroke for easy hit-testing
+            path
+                .stroke(Color.clear, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+
+            // Visible line
+            path
+                .stroke(
+                    isSelected ? Color.accentColor : Color.secondary.opacity(0.55),
+                    style: StrokeStyle(lineWidth: isSelected ? 3 : 2, lineCap: .round)
+                )
+        }
+        .contentShape(Rectangle())
+    }
+}
 
 // MARK: - DeviceInstance UI Helpers
 

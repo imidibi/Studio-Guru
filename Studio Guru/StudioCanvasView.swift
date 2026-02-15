@@ -39,6 +39,11 @@ struct StudioCanvasView: View {
 
     // Selection (devices/connections)
     @StateObject private var selectionState = SelectionState()
+    // Connections (persisted in UserDefaults)
+    @StateObject private var connectionsStore = ConnectionsStore()
+
+    @State private var isShowingConnectionsEditor: Bool = false
+    @State private var connectionEditorLinkId: UUID? = nil
 
     // Canvas sizing (used to place new devices without overlap)
     @State private var canvasSize: CGSize = CGSize(width: 1200, height: 800)
@@ -92,9 +97,15 @@ struct StudioCanvasView: View {
             if selectedStudioId == nil {
                 selectedStudioId = studios.first?.id
             }
+            if let sid = selectedStudioId {
+                connectionsStore.load(studioId: sid)
+            }
         }
         .onChange(of: selectedStudioId) { _, _ in
             selectionState.selection = nil
+        }
+        if let sid = selectedStudioId {
+            connectionsStore.load(studioId: sid)
         }
     }
 
@@ -265,17 +276,16 @@ struct StudioCanvasView: View {
                         CanvasSurfaceView(
                             studio: studio,
                             background: canvasBackground,
-                            iconForDevice: { d in
-                                d.categorySymbolName
+                            iconForDevice: { d in d.categorySymbolName },
+                            subtitleForDevice: { d in ioSummary(from: d.ports) },
+                            connectionsStore: connectionsStore,
+                            onSelectLink: { link in
+                                selectionState.selection = .connection(link.id)
+                                connectionEditorLinkId = link.id
+                                isShowingConnectionsEditor = true
                             },
-                            subtitleForDevice: { d in
-                                ioSummary(from: d.ports)
-                            },
-                            onSelectConnection: { conn in
-                                selectionState.selection = .connection(conn.id)
-                            },
-                            onRequestDeleteConnection: { conn in
-                                connectionPendingDelete = conn
+                            onRequestDeleteLink: { link in
+                                connectionEditorLinkId = link.id
                                 isShowingDeleteConnectionConfirm = true
                             }
                         )
@@ -328,6 +338,21 @@ struct StudioCanvasView: View {
                             .padding()
                     }
                 }
+                .sheet(isPresented: $isShowingConnectionsEditor) {
+                    if let studio = currentStudio,
+                       let linkId = connectionEditorLinkId,
+                       let bundle = connectionsStore.bundle(for: studio.id, linkId: linkId) {
+                        ConnectionsDialogView(
+                            studio: studio,
+                            fromDeviceId: bundle.fromDeviceId,
+                            toDeviceId: bundle.toDeviceId,
+                            store: connectionsStore
+                        )
+                        .id(bundle.id)
+                    } else {
+                        Text("No connection selected").padding()
+                    }
+                }
                 .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
                     Button("Delete", role: .destructive) { deletePendingDevice() }
                     Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
@@ -337,29 +362,21 @@ struct StudioCanvasView: View {
                 .alert("Delete Connection?", isPresented: $isShowingDeleteConnectionConfirm) {
                     Button("Delete", role: .destructive) {
                         guard let studio = currentStudio else { return }
-                        guard let conn = connectionPendingDelete else { return }
-                        if let idx = studio.connections.firstIndex(where: { $0.id == conn.id }) {
-                            studio.connections.remove(at: idx)
-                        }
-                        // Clear selection if it was this connection
-                        if case .connection(let selectedId) = selectionState.selection,
-                           selectedId == conn.id {
+                        guard let linkId = connectionEditorLinkId else { return }
+
+                        _ = connectionsStore.deleteBundle(studioId: studio.id, linkId: linkId)
+
+                        if case .connection(let selectedId) = selectionState.selection, selectedId == linkId {
                             selectionState.selection = nil
                         }
-                        connectionPendingDelete = nil
+
+                        connectionEditorLinkId = nil
                     }
                     Button("Cancel", role: .cancel) {
-                        connectionPendingDelete = nil
+                        connectionEditorLinkId = nil
                     }
                 } message: {
-                    if let studio = currentStudio,
-                       let conn = connectionPendingDelete,
-                       let a = studio.devices.first(where: { $0.id == conn.fromDeviceId }),
-                       let b = studio.devices.first(where: { $0.id == conn.toDeviceId }) {
-                        Text("This will remove the connection between \(a.nickname) and \(b.nickname).")
-                    } else {
-                        Text("This will remove the selected connection.")
-                    }
+                    Text("This will remove the selected connection.")
                 }
             } else {
                 VStack(spacing: 12) {
@@ -806,94 +823,73 @@ private struct CanvasSurfaceView: View {
     let background: Color
     let iconForDevice: (DeviceInstance) -> String
     let subtitleForDevice: (DeviceInstance) -> String
-    let onSelectConnection: (Connection) -> Void
-    let onRequestDeleteConnection: (Connection) -> Void
+    let connectionsStore: ConnectionsStore
+    let onSelectLink: (ConnectionLinkSummary) -> Void
+    let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
+    @State private var activeConnectionDrag: (fromId: UUID, location: CGPoint)? = nil
 
-    private func beginDragIfNeeded(for device: DeviceInstance) {
-        if dragOrigin?.id != device.id {
-            dragOrigin = (device.id, device.posX, device.posY)
-        }
+    private var links: [ConnectionLinkSummary] {
+        connectionsStore.links(for: studio.id)
     }
+
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Rectangle().fill(background)
 
-                // Connection lines (one per saved device pair)
-                ForEach(studio.connections, id: \.id) { c in
-                    if let a = studio.devices.first(where: { $0.id == c.fromDeviceId }),
-                       let b = studio.devices.first(where: { $0.id == c.toDeviceId }) {
-                        ConnectionLineView(
-                            from: CGPoint(x: a.posX, y: a.posY),
-                            to: CGPoint(x: b.posX, y: b.posY),
-                            isSelected: isSelectedConnection(from: c.fromDeviceId, to: c.toDeviceId)
-                        )
-                        .onTapGesture { onSelectConnection(c) }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                onRequestDeleteConnection(c)
-                            } label: {
-                                Label("Delete Connection", systemImage: "trash")
-                            }
+                ForEach(links, id: \.id) { link in
+                    ConnectionLineRow(
+                        link: link,
+                        studio: studio,
+                        isSelected: isSelectedConnection(linkId: link.id),
+                        onSelect: {
+                            onSelectLink(link)
+                        },
+                        onDelete: {
+                            onRequestDeleteLink(link)
                         }
-#if os(iOS)
-                        .onLongPressGesture { onRequestDeleteConnection(c) }
-#endif
-                    }
+                    )
                 }
-
+                if let temp = activeConnectionDrag,
+                   let fromDevice = studio.devices.first(where: { $0.id == temp.fromId }) {
+                    ConnectionLineView(
+                        from: CGPoint(x: fromDevice.posX, y: fromDevice.posY),
+                        to: temp.location,
+                        isSelected: true
+                    )
+                }
                 ForEach(studio.devices, id: \.id) { d in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Image(systemName: iconForDevice(d))
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
-                            Text(d.nickname)
-                                .font(.headline)
+                    DeviceCardView(
+                        device: d,
+                        iconName: iconForDevice(d),
+                        subtitle: subtitleForDevice(d),
+                        studioId: studio.id,
+                        connectionsStore: connectionsStore,
+                        isSelected: isSelected(d.id),
+                        canvasSize: geo.size,
+                        dragOrigin: $dragOrigin,
+                        beginDragIfNeeded: { device in
+                            if dragOrigin?.id != device.id {
+                                dragOrigin = (device.id, device.posX, device.posY)
+                            }
+                        },
+                        onBeginConnectionDrag: { device, point in
+                            activeConnectionDrag = (fromId: device.id, location: point)
+                        },
+                        onUpdateConnectionDrag: { _, point in
+                            if activeConnectionDrag != nil {
+                                activeConnectionDrag!.location = point
+                            }
+                        },
+                        onEndConnectionDrag: {
+                            activeConnectionDrag = nil
                         }
-
-                        Text(subtitleForDevice(d))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .frame(width: 260, alignment: .leading)
-                    .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected(d.id) ? Color.accentColor : Color.secondary.opacity(0.25),
-                                    lineWidth: isSelected(d.id) ? 3 : 1)
                     )
-                    .position(x: d.posX, y: d.posY)
-                    .onTapGesture { selection.selection = .device(d.id) }
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { v in
-                                beginDragIfNeeded(for: d)
-                                guard let origin = dragOrigin, origin.id == d.id else { return }
-
-                                // Approx label size; used for clamping so it stays on-screen.
-                                let cardSize = CGSize(width: 260, height: 96)
-                                let halfW = Double(cardSize.width / 2)
-                                let halfH = Double(cardSize.height / 2)
-
-                                let rawX = origin.x + Double(v.translation.width)
-                                let rawY = origin.y + Double(v.translation.height)
-
-                                let clampedX = min(max(rawX, halfW), Double(geo.size.width) - halfW)
-                                let clampedY = min(max(rawY, halfH), Double(geo.size.height) - halfH)
-
-                                d.posX = clampedX
-                                d.posY = clampedY
-                            }
-                            .onEnded { _ in
-                                dragOrigin = nil
-                            }
-                    )
+                    .environmentObject(selection)
                 }
             }
             .contentShape(Rectangle())
@@ -907,11 +903,122 @@ private struct CanvasSurfaceView: View {
         return false
     }
 
-    private func isSelectedConnection(from: UUID, to: UUID) -> Bool {
-        guard case .connection(let selectedConnectionId) = selection.selection else { return false }
-        guard let selected = studio.connections.first(where: { $0.id == selectedConnectionId }) else { return false }
-        return (selected.fromDeviceId == from && selected.toDeviceId == to)
-            || (selected.fromDeviceId == to && selected.toDeviceId == from)
+    private func isSelectedConnection(linkId: UUID) -> Bool {
+        if case .connection(let selectedId) = selection.selection {
+            return selectedId == linkId
+        }
+        return false
+    }
+}
+
+// MARK: - Device Card (extracted to reduce SwiftUI type-check complexity)
+
+private struct DeviceCardView: View {
+    let device: DeviceInstance
+    let iconName: String
+    let subtitle: String
+    let studioId: UUID
+    let connectionsStore: ConnectionsStore
+    let isSelected: Bool
+    let canvasSize: CGSize
+
+    @Binding var dragOrigin: (id: UUID, x: Double, y: Double)?
+    let beginDragIfNeeded: (DeviceInstance) -> Void
+    let onBeginConnectionDrag: (DeviceInstance, CGPoint) -> Void
+    let onUpdateConnectionDrag: (DeviceInstance, CGPoint) -> Void
+    let onEndConnectionDrag: () -> Void
+
+    @EnvironmentObject var selection: SelectionState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: iconName)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Text(device.nickname)
+                    .font(.headline)
+            }
+
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(width: 260, alignment: .leading)
+        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.25),
+                        lineWidth: isSelected ? 3 : 1)
+        )
+        .overlay(alignment: .topTrailing) {
+            GeometryReader { localGeo in
+                // A small hit area containing the handle; we attach a drag to update a live line
+                ZStack {
+                    DeviceConnectionHandle(deviceId: device.id)
+                        .offset(x: 18, y: -12)
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            // Convert the drag location into the canvas coordinate space by using the card's position
+                            let globalPoint = CGPoint(x: device.posX + Double(value.translation.width),
+                                                      y: device.posY + Double(value.translation.height))
+                            onBeginConnectionDrag(device, CGPoint(x: device.posX, y: device.posY))
+                            onUpdateConnectionDrag(device, globalPoint)
+                        }
+                        .onEnded { _ in
+                            onEndConnectionDrag()
+                        }
+                )
+            }
+            .frame(width: 0, height: 0) // GeometryReader needs a frame; zero so it doesn't affect layout
+        }
+        .onDrop(of: [UTType.text.identifier], isTargeted: nil) { providers in
+            guard let item = providers.first else { return false }
+            item.loadObject(ofClass: NSString.self) { obj, _ in
+                guard let ns = obj as? NSString else { return }
+                let s = String(ns)
+                guard let fromId = UUID(uuidString: s) else { return }
+                if fromId == device.id { return }
+                DispatchQueue.main.async {
+                    connectionsStore.ensureLinkSummary(studioId: studioId, fromId: fromId, toId: device.id)
+                }
+            }
+            return true
+        }
+        .position(x: device.posX, y: device.posY)
+        .onTapGesture {
+            selection.selection = .device(device.id)
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { v in
+                    // Capture original pos for this drag
+                    beginDragIfNeeded(device)
+
+                    guard let origin = dragOrigin, origin.id == device.id else { return }
+
+                    // Approx label size; used for clamping so it stays on-screen.
+                    let cardSize = CGSize(width: 260, height: 96)
+                    let halfW = Double(cardSize.width / 2)
+                    let halfH = Double(cardSize.height / 2)
+
+                    let rawX = origin.x + Double(v.translation.width)
+                    let rawY = origin.y + Double(v.translation.height)
+
+                    let clampedX = min(max(rawX, halfW), Double(canvasSize.width) - halfW)
+                    let clampedY = min(max(rawY, halfH), Double(canvasSize.height) - halfH)
+
+                    device.posX = clampedX
+                    device.posY = clampedY
+                }
+                .onEnded { _ in
+                    dragOrigin = nil
+                }
+        )
     }
 }
 
@@ -1114,6 +1221,65 @@ private struct InspectorPanel: View {
     }
 }
 
+private struct ConnectionsDialogView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let studio: Studio
+    let fromDeviceId: UUID
+    let toDeviceId: UUID
+    @ObservedObject var store: ConnectionsStore
+
+    private var fromDevice: DeviceInstance? { studio.devices.first(where: { $0.id == fromDeviceId }) }
+    private var toDevice: DeviceInstance? { studio.devices.first(where: { $0.id == toDeviceId }) }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(fromDevice?.nickname ?? "Device")
+                            .font(.title3).bold()
+                        Text("Source")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.left.and.right")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(toDevice?.nickname ?? "Device")
+                            .font(.title3).bold()
+                        Text("Destination")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                Text("Patchbay mappings will appear here next.")
+                    .foregroundStyle(.secondary)
+
+                if let bundle = store.bundle(for: studio.id, fromId: fromDeviceId, toId: toDeviceId) {
+                    Text("Current bundle has \(bundle.edges.count) mapping(s).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .navigationTitle("Connections")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .frame(minWidth: 860, idealWidth: 980, maxWidth: .infinity,
+               minHeight: 560, idealHeight: 680, maxHeight: .infinity)
+    }
+}
+
 #if os(iOS)
 private typealias PlatformImage = UIImage
 #elseif os(macOS)
@@ -1225,6 +1391,37 @@ private struct ZoomableScrollView<Content: View>: View {
 
 // MARK: - Selection State and CanvasSelection
 
+// MARK: - Connection Line Row Helper
+
+private struct ConnectionLineRow: View {
+    let link: ConnectionLinkSummary
+    let studio: Studio
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        if let a = studio.devices.first(where: { $0.id == link.fromDeviceId }),
+           let b = studio.devices.first(where: { $0.id == link.toDeviceId }) {
+
+            ConnectionLineView(
+                from: CGPoint(x: a.posX, y: a.posY),
+                to: CGPoint(x: b.posX, y: b.posY),
+                isSelected: isSelected
+            )
+            .onTapGesture {
+                onSelect()
+            }
+            .contextMenu {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Connection", systemImage: "trash")
+                }
+            }
+        }
+    }
+}
 
 // MARK: - Connection Line View
 
@@ -1259,7 +1456,38 @@ private struct ConnectionLineView: View {
         .contentShape(Rectangle())
     }
 }
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
 
+private struct DeviceConnectionHandle: View {
+    let deviceId: UUID
+
+    var body: some View {
+        ZStack {
+            Triangle()
+                .fill(Color.blue)
+                .frame(width: 18, height: 16)
+                .rotationEffect(.degrees(90))
+                .shadow(radius: 1.5)
+            Triangle()
+                .stroke(Color.primary.opacity(0.35), lineWidth: 1)
+                .frame(width: 18, height: 16)
+                .rotationEffect(.degrees(90))
+        }
+        .padding(10) // larger hit target for drag
+        .contentShape(Rectangle())
+        .onDrag { NSItemProvider(object: deviceId.uuidString as NSString) }
+        .accessibilityLabel("Drag to connect")
+    }
+}
 // MARK: - DeviceInstance UI Helpers
 
 private extension DeviceInstance {
@@ -1866,3 +2094,4 @@ private struct GuruKnob: View {
         .frame(width: 92)
     }
 }
+

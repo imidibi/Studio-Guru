@@ -816,6 +816,15 @@ private struct CanvasSizePreferenceKey: PreferenceKey {
     }
 }
 
+// MARK: - Connection Handle Tip Preference
+
+private struct ConnectionHandleTipPreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGPoint] = [:]
+    static func reduce(value: inout [UUID: CGPoint], nextValue: () -> [UUID: CGPoint]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 // MARK: - Canvas
 
 private struct CanvasSurfaceView: View {
@@ -829,7 +838,9 @@ private struct CanvasSurfaceView: View {
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
-    @State private var activeConnectionDrag: (fromId: UUID, location: CGPoint)? = nil
+    @State private var activeConnectionDrag: (fromId: UUID, start: CGPoint, location: CGPoint)? = nil
+    @State private var hoveredConnectionTargetId: UUID? = nil
+    @State private var connectionHandleTips: [UUID: CGPoint] = [:]
 
     private var links: [ConnectionLinkSummary] {
         connectionsStore.links(for: studio.id)
@@ -854,10 +865,9 @@ private struct CanvasSurfaceView: View {
                         }
                     )
                 }
-                if let temp = activeConnectionDrag,
-                   let fromDevice = studio.devices.first(where: { $0.id == temp.fromId }) {
+                if let temp = activeConnectionDrag {
                     ConnectionLineView(
-                        from: CGPoint(x: fromDevice.posX, y: fromDevice.posY),
+                        from: temp.start,
                         to: temp.location,
                         isSelected: true
                     )
@@ -870,22 +880,33 @@ private struct CanvasSurfaceView: View {
                         studioId: studio.id,
                         connectionsStore: connectionsStore,
                         isSelected: isSelected(d.id),
+                        isConnectionTarget: (hoveredConnectionTargetId == d.id) && (activeConnectionDrag?.fromId != d.id),
                         canvasSize: geo.size,
+                        connectionHandleTip: connectionHandleTips[d.id],
                         dragOrigin: $dragOrigin,
                         beginDragIfNeeded: { device in
                             if dragOrigin?.id != device.id {
                                 dragOrigin = (device.id, device.posX, device.posY)
                             }
                         },
-                        onBeginConnectionDrag: { device, point in
-                            activeConnectionDrag = (fromId: device.id, location: point)
+                        onBeginConnectionDrag: { device, startPoint in
+                            activeConnectionDrag = (fromId: device.id, start: startPoint, location: startPoint)
+                            hoveredConnectionTargetId = nil
                         },
-                        onUpdateConnectionDrag: { _, point in
-                            if activeConnectionDrag != nil {
-                                activeConnectionDrag!.location = point
-                            }
+                        onUpdateConnectionDrag: { fromDevice, point in
+                            guard activeConnectionDrag != nil else { return }
+                            activeConnectionDrag!.location = point
+
+                            // Determine which device card (if any) the drag is currently over.
+                            let target = deviceId(at: point, excluding: fromDevice.id)
+                            hoveredConnectionTargetId = target
                         },
                         onEndConnectionDrag: {
+                            if let drag = activeConnectionDrag,
+                               let targetId = hoveredConnectionTargetId {
+                                connectionsStore.ensureLinkSummary(studioId: studio.id, fromId: drag.fromId, toId: targetId)
+                            }
+                            hoveredConnectionTargetId = nil
                             activeConnectionDrag = nil
                         }
                     )
@@ -895,6 +916,8 @@ private struct CanvasSurfaceView: View {
             .contentShape(Rectangle())
             .onTapGesture { selection.selection = nil }
             .preference(key: CanvasSizePreferenceKey.self, value: geo.size)
+            .coordinateSpace(name: "canvas")
+            .onPreferenceChange(ConnectionHandleTipPreferenceKey.self) { connectionHandleTips = $0 }
         }
     }
 
@@ -909,6 +932,26 @@ private struct CanvasSurfaceView: View {
         }
         return false
     }
+
+    // Helper to find which device (if any) is under the given point, excluding a device.
+    private func deviceId(at point: CGPoint, excluding excludedId: UUID) -> UUID? {
+        // Must match the card frame used by DeviceCardView.
+        let cardSize = CGSize(width: 260, height: 96)
+        let halfW = Double(cardSize.width / 2)
+        let halfH = Double(cardSize.height / 2)
+
+        for d in studio.devices {
+            if d.id == excludedId { continue }
+            let rect = CGRect(
+                x: d.posX - halfW,
+                y: d.posY - halfH,
+                width: Double(cardSize.width),
+                height: Double(cardSize.height)
+            )
+            if rect.contains(point) { return d.id }
+        }
+        return nil
+    }
 }
 
 // MARK: - Device Card (extracted to reduce SwiftUI type-check complexity)
@@ -920,7 +963,9 @@ private struct DeviceCardView: View {
     let studioId: UUID
     let connectionsStore: ConnectionsStore
     let isSelected: Bool
+    let isConnectionTarget: Bool
     let canvasSize: CGSize
+    let connectionHandleTip: CGPoint?
 
     @Binding var dragOrigin: (id: UUID, x: Double, y: Double)?
     let beginDragIfNeeded: (DeviceInstance) -> Void
@@ -929,6 +974,7 @@ private struct DeviceCardView: View {
     let onEndConnectionDrag: () -> Void
 
     @EnvironmentObject var selection: SelectionState
+    @State private var isDraggingConnection: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -953,28 +999,48 @@ private struct DeviceCardView: View {
                         lineWidth: isSelected ? 3 : 1)
         )
         .overlay(alignment: .topTrailing) {
-            GeometryReader { localGeo in
-                // A small hit area containing the handle; we attach a drag to update a live line
-                ZStack {
-                    DeviceConnectionHandle(deviceId: device.id)
-                        .offset(x: 18, y: -12)
-                }
-                .contentShape(Rectangle())
+            // Handle is visually anchored to the card corner.
+            // We compute the drag line start point in the CANVAS coordinate space from the device position.
+            DeviceConnectionHandle(deviceId: device.id)
+                .offset(x: 18, y: -12)
+                .background(
+                    GeometryReader { proxy in
+                        // The handle view includes padding; use the visible arrow tip at the right edge
+                        // and vertically centered.
+                        let frame = proxy.frame(in: .named("canvas"))
+                        let tip = CGPoint(x: frame.maxX - 8, y: frame.midY)
+                        Color.clear
+                            .preference(key: ConnectionHandleTipPreferenceKey.self, value: [device.id: tip])
+                    }
+                )
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            // Convert the drag location into the canvas coordinate space by using the card's position
-                            let globalPoint = CGPoint(x: device.posX + Double(value.translation.width),
-                                                      y: device.posY + Double(value.translation.height))
-                            onBeginConnectionDrag(device, CGPoint(x: device.posX, y: device.posY))
-                            onUpdateConnectionDrag(device, globalPoint)
+                            let start = connectionHandleTip ?? CGPoint(x: device.posX, y: device.posY)
+                            if !isDraggingConnection {
+                                isDraggingConnection = true
+                                onBeginConnectionDrag(device, start)
+                            }
+                            let end = CGPoint(
+                                x: start.x + value.translation.width,
+                                y: start.y + value.translation.height
+                            )
+                            onUpdateConnectionDrag(device, end)
                         }
                         .onEnded { _ in
+                            isDraggingConnection = false
                             onEndConnectionDrag()
                         }
                 )
+        }
+        .overlay {
+            if isConnectionTarget {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.green)
+                    .shadow(radius: 2)
+                    .transition(.opacity)
             }
-            .frame(width: 0, height: 0) // GeometryReader needs a frame; zero so it doesn't affect layout
         }
         .onDrop(of: [UTType.text.identifier], isTargeted: nil) { providers in
             guard let item = providers.first else { return false }
@@ -992,6 +1058,9 @@ private struct DeviceCardView: View {
         .position(x: device.posX, y: device.posY)
         .onTapGesture {
             selection.selection = .device(device.id)
+        }
+        .onDisappear {
+            isDraggingConnection = false
         }
         .gesture(
             DragGesture(minimumDistance: 1)
@@ -1473,18 +1542,18 @@ private struct DeviceConnectionHandle: View {
     var body: some View {
         ZStack {
             Triangle()
-                .fill(Color.blue)
-                .frame(width: 18, height: 16)
+                .fill(Color.accentColor.opacity(0.9))
+                .frame(width: 16, height: 14)
                 .rotationEffect(.degrees(90))
                 .shadow(radius: 1.5)
+
             Triangle()
                 .stroke(Color.primary.opacity(0.35), lineWidth: 1)
-                .frame(width: 18, height: 16)
+                .frame(width: 16, height: 14)
                 .rotationEffect(.degrees(90))
         }
-        .padding(10) // larger hit target for drag
+        .padding(8)
         .contentShape(Rectangle())
-        .onDrag { NSItemProvider(object: deviceId.uuidString as NSString) }
         .accessibilityLabel("Drag to connect")
     }
 }

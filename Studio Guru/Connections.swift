@@ -295,6 +295,10 @@ struct ConnectionsDialogView: View {
     // Staged edits (one Save)
     @State private var workingBundle: ConnectionBundle
 
+    // Delete mapping (edge) flow
+    @State private var edgePendingDelete: ConnectionEdge? = nil
+    @State private var isShowingEdgeDeleteAlert: Bool = false
+
     init(studio: Studio, fromDeviceId: UUID, toDeviceId: UUID, store: ConnectionsStore) {
         self.studio = studio
         self.fromDeviceId = fromDeviceId
@@ -464,6 +468,52 @@ struct ConnectionsDialogView: View {
                     }
                 }
 
+                // Interactive hit targets for existing lines (needed for right-click / long-press / double-click)
+                .overlayPreferenceValue(EndpointFramePreferenceKey.self) { anchors in
+                    GeometryReader { proxy in
+                        ZStack {
+                            ForEach(workingBundle.edges) { edge in
+                                let fromKey = endpointKey(for: edge.from)
+                                let toKey = endpointKey(for: edge.to)
+
+                                if let a1 = anchors[fromKey], let a2 = anchors[toKey] {
+                                    let r1 = proxy[a1]
+                                    let r2 = proxy[a2]
+
+                                    let start = CGPoint(x: r1.maxX, y: r1.midY)
+                                    let end = CGPoint(x: r2.minX, y: r2.midY)
+
+                                    EdgeHitPathView(from: start, to: end)
+                                        // Double-click (macOS) / double-tap (iOS) to delete
+                                        .highPriorityGesture(
+                                            TapGesture(count: 2)
+                                                .onEnded {
+                                                    edgePendingDelete = edge
+                                                    isShowingEdgeDeleteAlert = true
+                                                }
+                                        )
+                                        // Long-press on iPad/iPhone to delete
+                                        .onLongPressGesture {
+                                            edgePendingDelete = edge
+                                            isShowingEdgeDeleteAlert = true
+                                        }
+                                        // Right-click / context menu
+                                        .contextMenu {
+                                            Button(role: .destructive) {
+                                                edgePendingDelete = edge
+                                                isShowingEdgeDeleteAlert = true
+                                            } label: {
+                                                Label("Delete Mapping", systemImage: "trash")
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                        // Give the overlay a real layout box
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                }
+
                 if let d = tempDrag {
                     Canvas { context, _ in
                         var path = Path()
@@ -503,6 +553,18 @@ struct ConnectionsDialogView: View {
                 Button("OK") {}
             } message: {
                 Text(saveBlockedMessage)
+            }
+            .alert("Delete mapping?", isPresented: $isShowingEdgeDeleteAlert) {
+                Button("Delete", role: .destructive) {
+                    guard let e = edgePendingDelete else { return }
+                    workingBundle.edges.removeAll(where: { $0.id == e.id })
+                    edgePendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    edgePendingDelete = nil
+                }
+            } message: {
+                Text("This will remove the selected mapping.")
             }
         }
         .frame(minWidth: 860, idealWidth: 980, maxWidth: .infinity,
@@ -883,6 +945,30 @@ fileprivate struct EndpointRowView: View {
                 return true
             }
             .accessibilityLabel("Drop to connect")
+    }
+}
+
+// MARK: - Edge interactive overlay
+
+fileprivate struct EdgeHitPathView: View {
+    let from: CGPoint
+    let to: CGPoint
+
+    private var path: Path {
+        var p = Path()
+        p.move(to: from)
+        let dx = to.x - from.x
+        let c1 = CGPoint(x: from.x + dx * 0.35, y: from.y)
+        let c2 = CGPoint(x: from.x + dx * 0.65, y: to.y)
+        p.addCurve(to: to, control1: c1, control2: c2)
+        return p
+    }
+
+    var body: some View {
+        // Invisible but wide stroke to make it easy to hit
+        path
+            .stroke(Color.clear, style: StrokeStyle(lineWidth: 22, lineCap: .round))
+            .contentShape(path.strokedPath(StrokeStyle(lineWidth: 22, lineCap: .round)))
     }
 }
 

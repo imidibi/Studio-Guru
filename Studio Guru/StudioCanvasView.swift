@@ -1459,11 +1459,20 @@ private struct ConnectionLineRow: View {
                 // IMPORTANT: give the line a full-size layout box so macOS can attach a context menu
                 // while hit-testing still remains constrained to the stroked curve via ConnectionLineView.contentShape.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                // Selection on click/tap
+                // Double-click (macOS) / double-tap (iOS) to delete
+                .highPriorityGesture(
+                    TapGesture(count: 2)
+                        .onEnded { onDelete() }
+                )
+                // Single click/tap selects
                 .onTapGesture {
                     onSelect()
                 }
-                // Right-click on macOS / long-press on iOS/iPadOS
+                // Long-press on iPad/iPhone to delete (we use the same confirm flow via onDelete())
+                .onLongPressGesture {
+                    onDelete()
+                }
+                // Right-click on macOS / long-press menu on iOS (kept for discoverability)
                 .contextMenu {
                     Button(role: .destructive) {
                         onDelete()

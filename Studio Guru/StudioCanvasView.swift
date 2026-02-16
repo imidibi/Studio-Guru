@@ -851,15 +851,19 @@ private struct CanvasSurfaceView: View {
                 ForEach(links, id: \.id) { link in
                     linkRow(link)
                 }
+
+                ForEach(studio.devices, id: \.id) { d in
+                    deviceCard(d, canvasSize: geo.size)
+                }
+
                 if let temp = activeConnectionDrag {
                     ConnectionLineView(
                         from: temp.start,
                         to: temp.location,
                         isSelected: true
                     )
-                }
-                ForEach(studio.devices, id: \.id) { d in
-                    deviceCard(d, canvasSize: geo.size)
+                    .allowsHitTesting(false)
+                    .zIndex(10)
                 }
             }
             .contentShape(Rectangle())
@@ -1452,9 +1456,14 @@ private struct ConnectionLineRow: View {
                     to: toPoint,
                     isSelected: isSelected
                 )
+                // IMPORTANT: give the line a full-size layout box so macOS can attach a context menu
+                // while hit-testing still remains constrained to the stroked curve via ConnectionLineView.contentShape.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // Selection on click/tap
                 .onTapGesture {
                     onSelect()
                 }
+                // Right-click on macOS / long-press on iOS/iPadOS
                 .contextMenu {
                     Button(role: .destructive) {
                         onDelete()

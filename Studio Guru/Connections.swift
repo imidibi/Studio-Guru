@@ -277,8 +277,6 @@ struct ConnectionsDialogView: View {
     let toDeviceId: UUID
     @ObservedObject var store: ConnectionsStore
 
-    // Staged edits (one Save)
-    @State private var workingBundle: ConnectionBundle
 
     // Conflict / replace flow
     @State private var pendingEdge: (from: IOEndpointRef, to: IOEndpointRef)? = nil
@@ -289,6 +287,13 @@ struct ConnectionsDialogView: View {
     // Save validation
     @State private var isShowingSaveBlockedAlert: Bool = false
     @State private var saveBlockedMessage: String = ""
+
+    // Live drag line while connecting inside the overlay
+    @State private var tempDrag: (from: IOEndpointRef, start: CGPoint, location: CGPoint)? = nil
+    @State private var endpointRects: [String: CGRect] = [:]
+
+    // Staged edits (one Save)
+    @State private var workingBundle: ConnectionBundle
 
     init(studio: Studio, fromDeviceId: UUID, toDeviceId: UUID, store: ConnectionsStore) {
         self.studio = studio
@@ -307,44 +312,54 @@ struct ConnectionsDialogView: View {
         NavigationStack {
             ZStack {
                 HStack(spacing: 0) {
-
                     // LEFT: source (outputs)
                     VStack(alignment: .leading, spacing: 10) {
                         Text(fromDevice?.nickname ?? "Source")
                             .font(.title3).bold()
 
-                        if let fromDevice, !fromDevice.computerInterfaces.isEmpty {
-                            Text("Computer")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if let fromDevice, !fromDevice.computerInterfaces.isEmpty {
+                                    Text("Computer")
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
 
-                            ComputerEndpointsColumnView(
-                                studioId: studio.id,
-                                device: fromDevice,
-                                direction: .output,
-                                side: .left,
-                                bundle: $workingBundle,
-                                store: store,
-                                onCreateEdge: stageEdge
-                            )
-                            .padding(.bottom, 6)
+                                    ComputerEndpointsColumnView(
+                                        studioId: studio.id,
+                                        device: fromDevice,
+                                        direction: .output,
+                                        side: .left,
+                                        bundle: $workingBundle,
+                                        store: store,
+                                        onCreateEdge: stageEdge,
+                                        onBeginDrag: beginTempDrag,
+                                        onUpdateDrag: updateTempDrag,
+                                        onEndDrag: endTempDrag
+                                    )
+                                    .padding(.bottom, 6)
+                                }
+
+                                Text("Outputs")
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+
+                                EndpointsColumnView(
+                                    studioId: studio.id,
+                                    device: fromDevice,
+                                    direction: .output,
+                                    side: .left,
+                                    bundle: $workingBundle,
+                                    store: store,
+                                    onCreateEdge: stageEdge,
+                                    onBeginDrag: beginTempDrag,
+                                    onUpdateDrag: updateTempDrag,
+                                    onEndDrag: endTempDrag
+                                )
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.top, 4)
                         }
-
-                        Text("Outputs")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-
-                        EndpointsColumnView(
-                            studioId: studio.id,
-                            device: fromDevice,
-                            direction: .output,
-                            side: .left,
-                            bundle: $workingBundle,
-                            store: store,
-                            onCreateEdge: stageEdge
-                        )
-
-                        Spacer(minLength: 0)
                     }
                     .frame(minWidth: 320, idealWidth: 380, maxWidth: .infinity)
                     .padding(16)
@@ -370,43 +385,55 @@ struct ConnectionsDialogView: View {
                         Text(toDevice?.nickname ?? "Destination")
                             .font(.title3).bold()
 
-                        if let toDevice, !toDevice.computerInterfaces.isEmpty {
-                            Text("Computer")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if let toDevice, !toDevice.computerInterfaces.isEmpty {
+                                    Text("Computer")
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
 
-                            ComputerEndpointsColumnView(
-                                studioId: studio.id,
-                                device: toDevice,
-                                direction: .input,
-                                side: .right,
-                                bundle: $workingBundle,
-                                store: store,
-                                onCreateEdge: stageEdge
-                            )
-                            .padding(.bottom, 6)
+                                    ComputerEndpointsColumnView(
+                                        studioId: studio.id,
+                                        device: toDevice,
+                                        direction: .input,
+                                        side: .right,
+                                        bundle: $workingBundle,
+                                        store: store,
+                                        onCreateEdge: stageEdge,
+                                        onBeginDrag: beginTempDrag,
+                                        onUpdateDrag: updateTempDrag,
+                                        onEndDrag: endTempDrag
+                                    )
+                                    .padding(.bottom, 6)
+                                }
+
+                                Text("Inputs")
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+
+                                EndpointsColumnView(
+                                    studioId: studio.id,
+                                    device: toDevice,
+                                    direction: .input,
+                                    side: .right,
+                                    bundle: $workingBundle,
+                                    store: store,
+                                    onCreateEdge: stageEdge,
+                                    onBeginDrag: beginTempDrag,
+                                    onUpdateDrag: updateTempDrag,
+                                    onEndDrag: endTempDrag
+                                )
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.top, 4)
                         }
-
-                        Text("Inputs")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-
-                        EndpointsColumnView(
-                            studioId: studio.id,
-                            device: toDevice,
-                            direction: .input,
-                            side: .right,
-                            bundle: $workingBundle,
-                            store: store,
-                            onCreateEdge: stageEdge
-                        )
-
-                        Spacer(minLength: 0)
                     }
                     .frame(minWidth: 320, idealWidth: 380, maxWidth: .infinity)
                     .padding(16)
                 }
-
+                .coordinateSpace(name: "connections")
+                .onPreferenceChange(EndpointRectPreferenceKey.self) { endpointRects = $0 }
                 // Draw lines across both columns, into the grey center gutter
                 .overlayPreferenceValue(EndpointFramePreferenceKey.self) { anchors in
                     GeometryReader { proxy in
@@ -435,6 +462,19 @@ struct ConnectionsDialogView: View {
                         }
                         .allowsHitTesting(false)
                     }
+                }
+
+                if let d = tempDrag {
+                    Canvas { context, _ in
+                        var path = Path()
+                        path.move(to: d.start)
+                        let dx = d.location.x - d.start.x
+                        let c1 = CGPoint(x: d.start.x + dx * 0.35, y: d.start.y)
+                        let c2 = CGPoint(x: d.start.x + dx * 0.65, y: d.location.y)
+                        path.addCurve(to: d.location, control1: c1, control2: c2)
+                        context.stroke(path, with: .color(Color.accentColor.opacity(0.75)), lineWidth: 2)
+                    }
+                    .allowsHitTesting(false)
                 }
             }
             .navigationTitle("Connections")
@@ -467,6 +507,32 @@ struct ConnectionsDialogView: View {
         }
         .frame(minWidth: 860, idealWidth: 980, maxWidth: .infinity,
                minHeight: 560, idealHeight: 680, maxHeight: .infinity)
+    }
+    // MARK: - Live drag helpers (overlay)
+
+    private func beginTempDrag(_ endpoint: IOEndpointRef) {
+        let key = endpointKey(for: endpoint)
+        guard let rect = endpointRects[key] else { return }
+        // Start at the arrow side of the row: right edge for outputs, left edge for inputs.
+        let startX: CGFloat = (endpoint.direction == .output) ? rect.maxX : rect.minX
+        let start = CGPoint(x: startX, y: rect.midY)
+        tempDrag = (from: endpoint, start: start, location: start)
+    }
+
+    private func updateTempDrag(location: CGPoint) {
+        guard tempDrag != nil else { return }
+        tempDrag!.location = location
+    }
+
+    private func endTempDrag(location: CGPoint) {
+        defer { tempDrag = nil }
+        guard let d = tempDrag else { return }
+
+        // Find which endpoint row the drag ended over.
+        if let (key, rect) = endpointRects.first(where: { $0.value.contains(location) }),
+           let target = parseEndpointKey(key) {
+            stageEdge(d.from, target)
+        }
     }
 
     // MARK: - Staging
@@ -575,6 +641,9 @@ fileprivate struct EndpointsColumnView: View {
     @ObservedObject var store: ConnectionsStore
 
     let onCreateEdge: (IOEndpointRef, IOEndpointRef) -> Void
+    let onBeginDrag: (IOEndpointRef) -> Void
+    let onUpdateDrag: (CGPoint) -> Void
+    let onEndDrag: (CGPoint) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -606,7 +675,10 @@ fileprivate struct EndpointsColumnView: View {
                                 direction: direction,
                                 bundle: $bundle,
                                 store: store,
-                                onCreateEdge: onCreateEdge
+                                onCreateEdge: onCreateEdge,
+                                onBeginDrag: onBeginDrag,
+                                onUpdateDrag: onUpdateDrag,
+                                onEndDrag: onEndDrag
                             )
                         }
                     }
@@ -630,6 +702,9 @@ fileprivate struct ComputerEndpointsColumnView: View {
     @ObservedObject var store: ConnectionsStore
 
     let onCreateEdge: (IOEndpointRef, IOEndpointRef) -> Void
+    let onBeginDrag: (IOEndpointRef) -> Void
+    let onUpdateDrag: (CGPoint) -> Void
+    let onEndDrag: (CGPoint) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -654,7 +729,10 @@ fileprivate struct ComputerEndpointsColumnView: View {
                     direction: direction,
                     bundle: $bundle,
                     store: store,
-                    onCreateEdge: onCreateEdge
+                    onCreateEdge: onCreateEdge,
+                    onBeginDrag: onBeginDrag,
+                    onUpdateDrag: onUpdateDrag,
+                    onEndDrag: onEndDrag
                 )
             }
         }
@@ -674,6 +752,11 @@ fileprivate struct EndpointRowView: View {
     @ObservedObject var store: ConnectionsStore
 
     let onCreateEdge: (IOEndpointRef, IOEndpointRef) -> Void
+    let onBeginDrag: (IOEndpointRef) -> Void
+    let onUpdateDrag: (CGPoint) -> Void
+    let onEndDrag: (CGPoint) -> Void
+
+    @State private var tempDragStartNeeded: Bool = true
 
     private var labelText: String {
         channelName.isEmpty ? portName : "\(portName) \(channelName)"
@@ -743,6 +826,15 @@ fileprivate struct EndpointRowView: View {
         .anchorPreference(key: EndpointFramePreferenceKey.self, value: .bounds) { anchor in
             [endpointKey: anchor]
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: EndpointRectPreferenceKey.self,
+                        value: [endpointKey: proxy.frame(in: .named("connections"))]
+                    )
+            }
+        )
     }
 
     private var dragHandle: some View {
@@ -752,9 +844,21 @@ fileprivate struct EndpointRowView: View {
             .rotationEffect(.degrees(90))
             .padding(8)
             .contentShape(Rectangle())
-            .onDrag {
-                NSItemProvider(object: endpointKey as NSString)
-            }
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("connections"))
+                    .onChanged { value in
+                        // Start the temp line on first movement
+                        if tempDragStartNeeded {
+                            onBeginDrag(endpoint)
+                            tempDragStartNeeded = false
+                        }
+                        onUpdateDrag(value.location)
+                    }
+                    .onEnded { value in
+                        onEndDrag(value.location)
+                        tempDragStartNeeded = true
+                    }
+            )
             .accessibilityLabel("Drag to connect")
     }
 
@@ -787,6 +891,13 @@ fileprivate struct EndpointRowView: View {
 fileprivate struct EndpointFramePreferenceKey: PreferenceKey {
     static var defaultValue: [String: Anchor<CGRect>] = [:]
     static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+fileprivate struct EndpointRectPreferenceKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }

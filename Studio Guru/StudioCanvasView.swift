@@ -1025,7 +1025,7 @@ private struct DeviceCardView: View {
                             .preference(key: ConnectionHandleTipPreferenceKey.self, value: [device.id: tip])
                     }
                 )
-                .gesture(
+                .highPriorityGesture(
                     DragGesture(minimumDistance: 0, coordinateSpace: .named("canvas"))
                         .onChanged { value in
                             let start = connectionHandleTip ?? CGPoint(x: device.posX, y: device.posY)
@@ -1176,6 +1176,16 @@ private struct InspectorPanel: View {
                                     Text("\(p.typeRaw) • \(p.directionRaw) • \(p.channels.count) ch")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                }
+                            }
+                            if !d.computerInterfaces.isEmpty {
+                                Divider().padding(.vertical, 4)
+                                Text("Computer Interfaces")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                ForEach(d.computerInterfaces.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
+                                    Text(iface.rawValue)
                                 }
                             }
                         }
@@ -1487,7 +1497,8 @@ private struct ConnectionLineView: View {
                     style: StrokeStyle(lineWidth: isSelected ? 3 : 2, lineCap: .round)
                 )
         }
-        .contentShape(Rectangle())
+        // IMPORTANT: hit-test only the stroked curve, not the whole rectangular area.
+        .contentShape(path.strokedPath(StrokeStyle(lineWidth: 18, lineCap: .round)))
     }
 }
 private struct Triangle: Shape {

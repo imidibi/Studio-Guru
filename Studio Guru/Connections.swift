@@ -650,6 +650,11 @@ struct ConnectionsDialogView: View {
         for edge in workingBundle.edges {
             let input = edge.to
             if let c = store.conflictForDestinationInput(studioId: studio.id, destination: input) {
+                // If the "conflict" is coming from THIS bundle (i.e. existing mapping), allow Save.
+                if c.existingBundle.id == workingBundle.id {
+                    continue
+                }
+
                 let key = endpointKey(for: input)
                 if !replaceTargets.contains(key) {
                     saveBlockedMessage = c.message + "\n\nResolve this by re-dragging to that input and choosing Replace, or pick a free input."

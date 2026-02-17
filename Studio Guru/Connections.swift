@@ -710,16 +710,21 @@ fileprivate struct EndpointsColumnView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let device {
-                ForEach(device.ports.filter { port in
-                    (direction == .output && port.directionRaw == "output") ||
-                    (direction == .input && port.directionRaw == "input")
-                }, id: \.id) { port in
+                let ports = device.ports
+                    .filter { port in
+                        (direction == .output && port.directionRaw == "output") ||
+                        (direction == .input && port.directionRaw == "input")
+                    }
+                    .sorted(by: { connectionPortSortKey($0.name) < connectionPortSortKey($1.name) })
+
+                ForEach(ports, id: \.id) { port in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(port.name)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        ForEach(port.channels, id: \.id) { ch in
+                        let channels = port.channels.sorted(by: { connectionChannelSortKey($0.nameShort) < connectionChannelSortKey($1.nameShort) })
+                        ForEach(channels, id: \.id) { ch in
                             let endpoint = IOEndpointRef(
                                 deviceId: device.id,
                                 portId: port.id,
@@ -989,6 +994,41 @@ fileprivate struct EndpointRectPreferenceKey: PreferenceKey {
 }
 
 // MARK: - Utilities
+
+// MARK: - Sorting helpers (Connections overlay)
+
+fileprivate func connectionPortSortKey(_ name: String) -> (Int, Int, String) {
+    // Goal: Analog 1, Analog 2, ... then ADAT, S/PDIF, AES, MIDI, etc.
+    // We sort by a coarse type rank, then by extracted number, then by raw name.
+    let lower = name.lowercased()
+
+    let rank: Int
+    if lower.contains("analog") { rank = 0 }
+    else if lower.contains("adat") { rank = 1 }
+    else if lower.contains("spdif") || lower.contains("s/pdif") { rank = 2 }
+    else if lower.contains("aes") { rank = 3 }
+    else if lower.contains("midi") { rank = 4 }
+    else { rank = 9 }
+
+    return (rank, extractFirstInt(from: name) ?? Int.max, name)
+}
+
+fileprivate func connectionChannelSortKey(_ shortName: String) -> (Int, String) {
+    // Typical channel labels are "1", "2", ... or "Ch 1" etc.
+    return (extractFirstInt(from: shortName) ?? Int.max, shortName)
+}
+
+fileprivate func extractFirstInt(from s: String) -> Int? {
+    var current = ""
+    for ch in s {
+        if ch.isNumber {
+            current.append(ch)
+        } else if !current.isEmpty {
+            break
+        }
+    }
+    return Int(current)
+}
 
 fileprivate func parseEndpointKey(_ key: String) -> IOEndpointRef? {
     // "deviceId:portId:channelId:direction"

@@ -80,6 +80,9 @@ struct StudioCanvasView: View {
     @State private var isShowingDeleteDeviceConfirm: Bool = false
     @State private var deviceIdPendingDelete: UUID? = nil
 
+    // Device inspector overlay
+    @State private var presentedInspectorDeviceId: UUID? = nil
+
     // Delete connection confirm
     @State private var isShowingDeleteConnectionConfirm: Bool = false
     @State private var connectionPendingDelete: Connection? = nil
@@ -293,19 +296,6 @@ struct StudioCanvasView: View {
                                 canvasSize = newSize
                             }
                         }
-
-                        Divider()
-
-                        InspectorPanel(
-                            studio: studio,
-                            onEditDevice: { d in beginEditDevice(d) },
-                            onRequestDeleteDevice: { d in
-                                deviceIdPendingDelete = d.id
-                                isShowingDeleteDeviceConfirm = true
-                            }
-                        )
-                        .environmentObject(selectionState)
-                        .frame(width: 360)
                     }
                 }
                 .sheet(isPresented: $isShowingDeviceEditor) {
@@ -348,6 +338,42 @@ struct StudioCanvasView: View {
                         .id(bundle.id)
                     } else {
                         Text("No connection selected").padding()
+                    }
+                }
+                // Device Inspector Overlay Sheet
+                .onReceive(selectionState.$selection) { sel in
+                    if case .device(let id) = sel {
+                        presentedInspectorDeviceId = id
+                    } else {
+                        presentedInspectorDeviceId = nil
+                    }
+                }
+                .sheet(
+                    item: Binding<IdentifiableUUID?>(
+                        get: {
+                            guard let id = presentedInspectorDeviceId else { return nil }
+                            return IdentifiableUUID(id: id)
+                        },
+                        set: { newValue in
+                            presentedInspectorDeviceId = newValue?.id
+                            if newValue == nil {
+                                selectionState.selection = nil
+                            }
+                        }
+                    )
+                ) { item in
+                    if let studio = currentStudio {
+                        DeviceInspectorOverlay(
+                            studio: studio,
+                            deviceId: item.id,
+                            onEditDevice: { d in beginEditDevice(d) },
+                            onRequestDeleteDevice: { d in
+                                deviceIdPendingDelete = d.id
+                                isShowingDeleteDeviceConfirm = true
+                            }
+                        )
+                    } else {
+                        Text("No studio").padding()
                     }
                 }
                 .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
@@ -1875,6 +1901,11 @@ private struct DeviceEditorSheet: View {
 }
 
 // Helper for sheet binding
+private struct IdentifiableUUID: Identifiable {
+    let id: UUID
+}
+
+// Helper for sheet binding
 private struct IdentifiableURL: Identifiable {
     let id = UUID()
     let url: URL
@@ -1882,3 +1913,196 @@ private struct IdentifiableURL: Identifiable {
 
 
 
+
+
+private struct DeviceInspectorOverlay: View {
+    let studio: Studio
+    let deviceId: UUID
+    let onEditDevice: (DeviceInstance) -> Void
+    let onRequestDeleteDevice: (DeviceInstance) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var isImportingManual: Bool = false
+    @State private var manualViewerItem: IdentifiableURL? = nil
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let d = studio.devices.first(where: { $0.id == deviceId }) {
+                    Form {
+                        Section("Device") {
+                            LabeledContent("Nickname", value: d.nickname)
+
+                            if !d.manufacturer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                LabeledContent("Manufacturer", value: d.manufacturer)
+                            }
+
+                            if !d.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                LabeledContent("Product ID", value: d.model)
+                            }
+
+                            LabeledContent("Category", value: d.category.rawValue)
+
+                            if !d.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                LabeledContent("Serial Number", value: d.serialNumber)
+                            }
+
+                            if !d.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                LabeledContent("Location", value: d.location)
+                            }
+
+                            if let url = d.supportPageURL {
+                                LabeledContent("Support Page") {
+                                    Link(url.absoluteString, destination: url).lineLimit(1)
+                                }
+                            }
+
+                            if let url = d.downloadsPageURL {
+                                LabeledContent("Downloads Page") {
+                                    Link(url.absoluteString, destination: url).lineLimit(1)
+                                }
+                            }
+                        }
+
+                        Section("Ports") {
+                            if d.ports.isEmpty {
+                                Text("No ports defined yet.")
+                                    .foregroundStyle(.secondary)
+                            }
+                            ForEach(d.ports, id: \.id) { p in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.name)
+                                    Text("\(p.typeRaw) • \(p.directionRaw) • \(p.channels.count) ch")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            if !d.computerInterfaces.isEmpty {
+                                Divider().padding(.vertical, 4)
+                                Text("Computer Interfaces")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                ForEach(d.computerInterfaces.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
+                                    Text(iface.rawValue)
+                                }
+                            }
+                        }
+
+                        Section("Manuals") {
+                            Button {
+                                isImportingManual = true
+                            } label: {
+                                Label("Add Manual", systemImage: "doc.badge.plus")
+                            }
+
+                            if d.docs.isEmpty {
+                                Text("No manuals attached.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(d.docs, id: \.id) { doc in
+                                    HStack {
+                                        Image(systemName: "doc.richtext")
+                                            .foregroundStyle(.secondary)
+                                        Text(doc.title)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Button(role: .destructive) {
+                                            if let idx = d.docs.firstIndex(where: { $0.id == doc.id }) {
+                                                d.docs.remove(at: idx)
+                                            }
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if let urlString = doc.urlString,
+                                           let url = URL(string: urlString) {
+                                            manualViewerItem = IdentifiableURL(url: url)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Section {
+                            HStack(spacing: 12) {
+                                Button {
+                                    onEditDevice(d)
+                                } label: {
+                                    Label("Edit Device", systemImage: "pencil")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button(role: .destructive) {
+                                    onRequestDeleteDevice(d)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.red)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .formStyle(.grouped)
+                    .fileImporter(
+                        isPresented: $isImportingManual,
+                        allowedContentTypes: [.pdf],
+                        allowsMultipleSelection: false
+                    ) { result in
+                        guard case .success(let urls) = result,
+                              let pickedURL = urls.first,
+                              let device = studio.devices.first(where: { $0.id == deviceId })
+                        else { return }
+
+                        do {
+                            let storedURL = try ManualStorage.copyPDFIntoAppSupport(
+                                pickedURL: pickedURL,
+                                deviceId: device.id
+                            )
+
+                            let doc = DocLink(
+                                title: storedURL.lastPathComponent,
+                                kind: .manual,
+                                url: storedURL
+                            )
+                            device.docs.append(doc)
+                        } catch {
+                            print("Manual import failed: \(error)")
+                        }
+                    }
+                    .sheet(item: $manualViewerItem) { item in
+                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("Device not found")
+                            .font(.title3)
+                        Text("This device may have been deleted.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                }
+            }
+            .navigationTitle("Device")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}

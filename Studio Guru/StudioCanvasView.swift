@@ -83,6 +83,10 @@ struct StudioCanvasView: View {
     // Device inspector overlay
     @State private var presentedInspectorDeviceId: UUID? = nil
 
+    // When saving from the device editor we often set selection to the saved device.
+    // That should NOT immediately pop the inspector overlay.
+    @State private var suppressNextInspectorPresentation: Bool = false
+
     // Delete connection confirm
     @State private var isShowingDeleteConnectionConfirm: Bool = false
     @State private var connectionPendingDelete: Connection? = nil
@@ -342,6 +346,12 @@ struct StudioCanvasView: View {
                 }
                 // Device Inspector Overlay Sheet
                 .onReceive(selectionState.$selection) { sel in
+                    // If we just saved from the editor, don't immediately present the inspector.
+                    if suppressNextInspectorPresentation {
+                        suppressNextInspectorPresentation = false
+                        return
+                    }
+
                     if case .device(let id) = sel {
                         presentedInspectorDeviceId = id
                     } else {
@@ -543,6 +553,8 @@ struct StudioCanvasView: View {
             digitalOutputs: device.digitalOutputs
         )
 
+        // Keep selection for highlighting, but do not pop the inspector immediately after saving.
+        suppressNextInspectorPresentation = true
         selectionState.selection = .device(device.id)
         isShowingDeviceEditor = false
     }

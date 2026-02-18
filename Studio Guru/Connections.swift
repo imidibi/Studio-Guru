@@ -591,7 +591,7 @@ struct ConnectionsDialogView: View {
         guard let d = tempDrag else { return }
 
         // Find which endpoint row the drag ended over.
-        if let (key, rect) = endpointRects.first(where: { $0.value.contains(location) }),
+        if let (key, _) = endpointRects.first(where: { $0.value.contains(location) }),
            let target = parseEndpointKey(key) {
             stageEdge(d.from, target)
         }

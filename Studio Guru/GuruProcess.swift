@@ -87,7 +87,7 @@ struct GuruHomeView: View {
                     }
                     .padding(16)
                 }
-                .navigationTitle("Guru - Suggested Processing Starting Points")
+                .navigationTitle("Guru")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") { dismiss() }

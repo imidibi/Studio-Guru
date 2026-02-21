@@ -69,6 +69,9 @@ struct StudioCanvasView: View {
 
     @State private var draftAudioInputs: Int = 0
     @State private var draftAudioOutputs: Int = 0
+    @State private var draftAdatInputPorts: Int = 0
+    @State private var draftAdatOutputPorts: Int = 0
+    @State private var draftSampleRate: SampleRate = SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
 
     @State private var draftDigitalInputs: Set<DigitalFormat> = []
     @State private var draftDigitalOutputs: Set<DigitalFormat> = []
@@ -317,6 +320,9 @@ struct StudioCanvasView: View {
                             downloadsPageURL: $draftDownloadsPageURL,
                             audioInputs: $draftAudioInputs,
                             audioOutputs: $draftAudioOutputs,
+                            adatInputPorts: $draftAdatInputPorts,
+                            adatOutputPorts: $draftAdatOutputPorts,
+                            sampleRate: $draftSampleRate,
                             digitalInputs: $draftDigitalInputs,
                             digitalOutputs: $draftDigitalOutputs,
                             computerInterfaces: $draftComputerInterfaces,
@@ -446,6 +452,9 @@ struct StudioCanvasView: View {
 
         draftAudioInputs = 0
         draftAudioOutputs = 0
+        draftAdatInputPorts = 0
+        draftAdatOutputPorts = 0
+        if let first = SampleRate.allCases.first { draftSampleRate = first }
         draftDigitalInputs = []
         draftDigitalOutputs = []
         draftComputerInterfaces = []
@@ -469,6 +478,9 @@ struct StudioCanvasView: View {
 
         draftAudioInputs = max(0, d.audioInputsCount)
         draftAudioOutputs = max(0, d.audioOutputsCount)
+        draftAdatInputPorts = max(0, d.adatInputPortsCount)
+        draftAdatOutputPorts = max(0, d.adatOutputPortsCount)
+        if let sr = SampleRate(rawValue: d.sampleRateRaw) { draftSampleRate = sr }
 
         draftDigitalInputs = Set(d.digitalInputs)
         draftDigitalOutputs = Set(d.digitalOutputs)
@@ -520,14 +532,19 @@ struct StudioCanvasView: View {
                 location: location,
                 audioInputsCount: draftAudioInputs,
                 audioOutputsCount: draftAudioOutputs,
+                adatInputPortsCount: max(0, draftAdatInputPorts),
+                adatOutputPortsCount: max(0, draftAdatOutputPorts),
+                sampleRate: draftSampleRate,
                 digitalInputs: Array(draftDigitalInputs),
                 digitalOutputs: Array(draftDigitalOutputs),
+                computerInterfaces: Array(draftComputerInterfaces),
                 posX: pos.x,
-                posY: pos.y
+                posY: pos.y,
+                scale: 1.0,
+                zIndex: 0
             )
             studio.devices.append(device)
-            device.supportPageURLString = supportURL.isEmpty ? nil : supportURL
-            device.downloadsPageURLString = downloadsURL.isEmpty ? nil : downloadsURL
+            
         }
 
         device.nickname = nickname
@@ -541,6 +558,9 @@ struct StudioCanvasView: View {
         device.downloadsPageURLString = downloadsURL.isEmpty ? nil : downloadsURL
         device.audioInputsCount = max(0, draftAudioInputs)
         device.audioOutputsCount = max(0, draftAudioOutputs)
+        device.adatInputPortsCount = max(0, draftAdatInputPorts)
+        device.adatOutputPortsCount = max(0, draftAdatOutputPorts)
+        device.sampleRateRaw = draftSampleRate.rawValue
         device.digitalInputs = Array(draftDigitalInputs)
         device.digitalOutputs = Array(draftDigitalOutputs)
         device.computerInterfaces = Array(draftComputerInterfaces)
@@ -550,7 +570,10 @@ struct StudioCanvasView: View {
             audioInputs: device.audioInputsCount,
             audioOutputs: device.audioOutputsCount,
             digitalInputs: device.digitalInputs,
-            digitalOutputs: device.digitalOutputs
+            digitalOutputs: device.digitalOutputs,
+            adatInputPorts: device.adatInputPortsCount,
+            adatOutputPorts: device.adatOutputPortsCount,
+            sampleRate: draftSampleRate
         )
 
         // Keep selection for highlighting, but do not pop the inspector immediately after saving.
@@ -572,27 +595,58 @@ struct StudioCanvasView: View {
     private func addExampleRig(to studio: Studio) {
         // Keep this as a convenient demo rig, but fully manual-editable.
         if studio.devices.isEmpty {
+            let defaultSR = SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
             let d = DeviceInstance(
                 manufacturer: "Solid State Logic",
                 model: "SSL 18",
                 nickname: "SSL 18",
                 category: .audioInterface,
+                serialNumber: "",
                 location: "Rack",
                 audioInputsCount: 8,
                 audioOutputsCount: 10,
+                adatInputPortsCount: 1,
+                adatOutputPortsCount: 1,
+                sampleRate: defaultSR,
                 digitalInputs: [.adat, .spdif],
                 digitalOutputs: [.adat, .spdif],
+                computerInterfaces: [],
                 posX: 320,
-                posY: 240
+                posY: 240,
+                scale: 1.0,
+                zIndex: 0
             )
-            d.ports = buildPorts(audioInputs: d.audioInputsCount, audioOutputs: d.audioOutputsCount, digitalInputs: d.digitalInputs, digitalOutputs: d.digitalOutputs)
+            d.ports = buildPorts(
+                audioInputs: d.audioInputsCount,
+                audioOutputs: d.audioOutputsCount,
+                digitalInputs: d.digitalInputs,
+                digitalOutputs: d.digitalOutputs,
+                adatInputPorts: d.adatInputPortsCount,
+                adatOutputPorts: d.adatOutputPortsCount,
+                sampleRate: defaultSR
+            )
             studio.devices.append(d)
             selectionState.selection = .device(d.id)
         }
     }
 
-    private func buildPorts(audioInputs: Int, audioOutputs: Int, digitalInputs: [DigitalFormat], digitalOutputs: [DigitalFormat]) -> [Port] {
+    private func buildPorts(
+        audioInputs: Int,
+        audioOutputs: Int,
+        digitalInputs: [DigitalFormat],
+        digitalOutputs: [DigitalFormat],
+        adatInputPorts: Int,
+        adatOutputPorts: Int,
+        sampleRate: SampleRate
+    ) -> [Port] {
         var ports: [Port] = []
+        
+        let adatChannelsPerPort: Int = sampleRateRawHz(sampleRate) >= 88_200 ? 4 : 8
+
+        func portLetter(_ i: Int) -> String {
+            let scalar = UnicodeScalar(65 + max(0, i))!
+            return String(Character(scalar)) // A, B, C...
+        }
 
         if audioInputs > 0 {
             let p = Port(name: "Analog In", type: .analogIn, direction: .input)
@@ -615,7 +669,11 @@ struct StudioCanvasView: View {
         for f in digitalInputs.sorted(by: { $0.rawValue < $1.rawValue }) {
             switch f {
             case .adat:
-                ports.append(digitalPort(type: .adatIn, name: "Digital In (ADAT)", direction: .input, channels: 8))
+                let count = max(1, adatInputPorts)
+                for i in 0..<count {
+                    let name = "ADAT In \(portLetter(i))"
+                    ports.append(digitalPort(type: .adatIn, name: name, direction: .input, channels: adatChannelsPerPort))
+                }
             case .spdif:
                 ports.append(digitalPort(type: .spdifIn, name: "Digital In (S/PDIF)", direction: .input, channels: 2))
             default:
@@ -627,7 +685,11 @@ struct StudioCanvasView: View {
         for f in digitalOutputs.sorted(by: { $0.rawValue < $1.rawValue }) {
             switch f {
             case .adat:
-                ports.append(digitalPort(type: .adatOut, name: "Digital Out (ADAT)", direction: .output, channels: 8))
+                let count = max(1, adatOutputPorts)
+                for i in 0..<count {
+                    let name = "ADAT Out \(portLetter(i))"
+                    ports.append(digitalPort(type: .adatOut, name: name, direction: .output, channels: adatChannelsPerPort))
+                }
             case .spdif:
                 ports.append(digitalPort(type: .spdifOut, name: "Digital Out (S/PDIF)", direction: .output, channels: 2))
             default:
@@ -727,10 +789,13 @@ struct StudioCanvasView: View {
                                centerY + (idx * 16).truncatingRemainder(dividingBy: 200) - 100)
         return (fx, fy)
     }
+    
 
     private func ioSummary(from ports: [Port]) -> String {
         func chCount(_ type: PortType, _ dir: PortDirection) -> Int {
-            ports.first(where: { $0.type == type && $0.direction == dir })?.channels.count ?? 0
+            ports
+                .filter { $0.type == type && $0.direction == dir }
+                .reduce(0) { $0 + $1.channels.count }
         }
 
         let ain = chCount(.analogIn, .input)
@@ -1212,13 +1277,31 @@ private struct InspectorPanel: View {
                                 Text("No ports defined yet.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(d.ports, id: \.id) { p in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(p.name)
-                                    Text("\(p.typeRaw) • \(p.directionRaw) • \(p.channels.count) ch")
+                            ForEach(d.ports.sorted(by: portSort), id: \.id) { p in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(p.name)
+                                        Spacer()
+                                        Text("\(p.channels.count) ch")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .font(.subheadline)
+
+                                    if !p.channels.isEmpty {
+                                        Text(
+                                            p.channels
+                                                .sorted(by: { $0.index < $1.index })
+                                                .map { ch in
+                                                    ch.nameShort.isEmpty ? "\(ch.index)" : ch.nameShort
+                                                }
+                                                .joined(separator: ", ")
+                                        )
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                    }
                                 }
+                                .padding(.vertical, 4)
                             }
                             if !d.computerInterfaces.isEmpty {
                                 Divider().padding(.vertical, 4)
@@ -1633,6 +1716,10 @@ private struct DeviceEditorSheet: View {
 
     @Binding var audioInputs: Int
     @Binding var audioOutputs: Int
+    @Binding var adatInputPorts: Int
+    @Binding var adatOutputPorts: Int
+    @Binding var sampleRate: SampleRate
+    
 
     @Binding var digitalInputs: Set<DigitalFormat>
     @Binding var digitalOutputs: Set<DigitalFormat>
@@ -1728,6 +1815,32 @@ private struct DeviceEditorSheet: View {
                                     Text("Audio Outputs")
                                     Spacer()
                                     Text("\(audioOutputs)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Divider().padding(.vertical, 4)
+
+                            Picker("Sample Rate", selection: $sampleRate) {
+                                ForEach(SampleRate.allCases, id: \.self) { r in
+                                    Text(r.displayName).tag(r)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            Stepper(value: $adatInputPorts, in: 0...8) {
+                                HStack {
+                                    Text("ADAT Input Ports")
+                                    Spacer()
+                                    Text("\(adatInputPorts)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Stepper(value: $adatOutputPorts, in: 0...8) {
+                                HStack {
+                                    Text("ADAT Output Ports")
+                                    Spacer()
+                                    Text("\(adatOutputPorts)")
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -1846,6 +1959,30 @@ private struct DeviceEditorSheet: View {
                             Text("Audio Outputs")
                             Spacer()
                             Text("\(audioOutputs)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Picker("Sample Rate", selection: $sampleRate) {
+                        ForEach(SampleRate.allCases, id: \.self) { r in
+                            Text(r.displayName).tag(r)
+                        }
+                    }
+
+                    Stepper(value: $adatInputPorts, in: 0...8) {
+                        HStack {
+                            Text("ADAT Input Ports")
+                            Spacer()
+                            Text("\(adatInputPorts)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Stepper(value: $adatOutputPorts, in: 0...8) {
+                        HStack {
+                            Text("ADAT Output Ports")
+                            Spacer()
+                            Text("\(adatOutputPorts)")
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -1982,13 +2119,31 @@ private struct DeviceInspectorOverlay: View {
                                 Text("No ports defined yet.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(d.ports, id: \.id) { p in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(p.name)
-                                    Text("\(p.typeRaw) • \(p.directionRaw) • \(p.channels.count) ch")
+                            ForEach(d.ports.sorted(by: portSort), id: \.id) { p in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(p.name)
+                                        Spacer()
+                                        Text("\(p.channels.count) ch")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .font(.subheadline)
+
+                                    if !p.channels.isEmpty {
+                                        Text(
+                                            p.channels
+                                                .sorted(by: { $0.index < $1.index })
+                                                .map { ch in
+                                                    ch.nameShort.isEmpty ? "\(ch.index)" : ch.nameShort
+                                                }
+                                                .joined(separator: ", ")
+                                        )
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                    }
                                 }
+                                .padding(.vertical, 4)
                             }
 
                             if !d.computerInterfaces.isEmpty {
@@ -2118,3 +2273,40 @@ private struct DeviceInspectorOverlay: View {
         }
     }
 }
+
+// MARK: - UI Helpers for SampleRate
+
+private func sampleRateRawHz(_ rate: SampleRate) -> Int {
+    // Prefer rawValue if it already encodes Hz (common pattern).
+    // If rawValue is an index (0,1,2...), this still returns a small number and will default to 8ch ADAT.
+    return rate.rawValue
+}
+
+// MARK: - Port Sorting Helper
+
+private func portSort(_ a: Port, _ b: Port) -> Bool {
+    func dirRank(_ d: PortDirection) -> Int { d == .input ? 0 : 1 }
+
+    func typeRank(_ t: PortType) -> Int {
+        switch t {
+        case .analogIn: return 0
+        case .analogOut: return 1
+        case .adatIn: return 2
+        case .adatOut: return 3
+        case .spdifIn: return 4
+        case .spdifOut: return 5
+        default: return 99
+        }
+    }
+
+    let da = dirRank(a.direction)
+    let db = dirRank(b.direction)
+    if da != db { return da < db }
+
+    let ta = typeRank(a.type)
+    let tb = typeRank(b.type)
+    if ta != tb { return ta < tb }
+
+    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+}
+

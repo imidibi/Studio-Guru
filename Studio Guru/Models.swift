@@ -67,6 +67,33 @@ enum ComputerInterface: String, Codable, CaseIterable {
     case usbc = "USB-C"
 }
 
+enum SampleRate: Int, Codable, CaseIterable {
+    case hz44100 = 44100
+    case hz48000 = 48000
+    case hz88200 = 88200
+    case hz96000 = 96000
+    case hz176400 = 176400
+    case hz192000 = 192000
+
+    var displayName: String {
+        switch self {
+        case .hz44100: return "44.1 kHz"
+        case .hz48000: return "48 kHz"
+        case .hz88200: return "88.2 kHz"
+        case .hz96000: return "96 kHz"
+        case .hz176400: return "176.4 kHz"
+        case .hz192000: return "192 kHz"
+        }
+    }
+
+    var adatChannelsPerPort: Int {
+        switch self {
+        case .hz44100, .hz48000: return 8
+        default: return 4
+        }
+    }
+}
+
 // MARK: - Studio
 
 @Model
@@ -109,6 +136,9 @@ final class DeviceInstance {
     // I/O summary (high-level counts)
     var audioInputsCount: Int
     var audioOutputsCount: Int
+    var adatInputPortsCount: Int
+    var adatOutputPortsCount: Int
+    var sampleRateRaw: Int
 
     // Digital formats stored as raw strings
     var digitalInputsRaw: [String]
@@ -138,6 +168,9 @@ final class DeviceInstance {
          location: String = "",
          audioInputsCount: Int = 0,
          audioOutputsCount: Int = 0,
+         adatInputPortsCount: Int = 0,
+         adatOutputPortsCount: Int = 0,
+         sampleRate: SampleRate = .hz48000,
          digitalInputs: [DigitalFormat] = [],
          digitalOutputs: [DigitalFormat] = [],
          computerInterfaces: [ComputerInterface] = [],
@@ -160,6 +193,9 @@ final class DeviceInstance {
 
         self.audioInputsCount = audioInputsCount
         self.audioOutputsCount = audioOutputsCount
+        self.adatInputPortsCount = adatInputPortsCount
+        self.adatOutputPortsCount = adatOutputPortsCount
+        self.sampleRateRaw = sampleRate.rawValue
 
         self.digitalInputsRaw = digitalInputs.map { $0.rawValue }
         self.digitalOutputsRaw = digitalOutputs.map { $0.rawValue }
@@ -194,6 +230,11 @@ final class DeviceInstance {
     var computerInterfaces: [ComputerInterface] {
         get { computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) } }
         set { computerInterfacesRaw = newValue.map { $0.rawValue } }
+    }
+
+    var sampleRate: SampleRate {
+        get { SampleRate(rawValue: sampleRateRaw) ?? .hz48000 }
+        set { sampleRateRaw = newValue.rawValue }
     }
 
     var supportPageURL: URL? {

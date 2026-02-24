@@ -73,7 +73,6 @@ struct StudioCanvasView: View {
     @State private var draftAdatOutputPorts: Int = 0
     @State private var draftMadiInputPorts: Int = 0
     @State private var draftMadiOutputPorts: Int = 0
-    @State private var draftEthernetPorts: Int = 0
     @State private var draftSampleRate: SampleRate = SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
 
     @State private var draftDigitalInputs: Set<DigitalFormat> = []
@@ -327,7 +326,6 @@ struct StudioCanvasView: View {
                             adatOutputPorts: $draftAdatOutputPorts,
                             madiInputPorts: $draftMadiInputPorts,
                             madiOutputPorts: $draftMadiOutputPorts,
-                            ethernetPorts: $draftEthernetPorts,
                             sampleRate: $draftSampleRate,
                             digitalInputs: $draftDigitalInputs,
                             digitalOutputs: $draftDigitalOutputs,
@@ -462,7 +460,6 @@ struct StudioCanvasView: View {
         draftAdatOutputPorts = 0
         draftMadiInputPorts = 0
         draftMadiOutputPorts = 0
-        draftEthernetPorts = 0
         if let first = SampleRate.allCases.first { draftSampleRate = first }
         draftDigitalInputs = []
         draftDigitalOutputs = []
@@ -492,7 +489,6 @@ struct StudioCanvasView: View {
         draftAdatOutputPorts = max(0, d.adatOutputPortsCount)
         draftMadiInputPorts = max(0, d.madiInputPortsCount)
         draftMadiOutputPorts = max(0, d.madiOutputPortsCount)
-        draftEthernetPorts = max(0, d.ethernetPortsCount)
         if let sr = SampleRate(rawValue: d.sampleRateRaw) { draftSampleRate = sr }
 
         draftDigitalInputs = Set(d.digitalInputs)
@@ -504,8 +500,8 @@ struct StudioCanvasView: View {
         }
         draftComputerInterfaceCounts = counts
 
-        isShowingDeviceEditor = true
         suppressNextInspectorPresentation = true
+        isShowingDeviceEditor = true
         }
 
     private func expandComputerInterfaces(from counts: [ComputerInterface: Int]) -> [ComputerInterface] {
@@ -565,8 +561,7 @@ struct StudioCanvasView: View {
                 adatOutputPortsCount: max(0, draftAdatOutputPorts),
                 madiInputPortsCount: max(0, draftMadiInputPorts),
                 madiOutputPortsCount: max(0, draftMadiOutputPorts),
-                ethernetPortsCount: max(0, draftEthernetPorts),
-                sampleRate: draftSampleRate,
+                ethernetPortsCount: 0,                sampleRate: draftSampleRate,
                 digitalInputs: Array(draftDigitalInputs),
                 digitalOutputs: Array(draftDigitalOutputs),
                 computerInterfaces: expandComputerInterfaces(from: draftComputerInterfaceCounts),
@@ -593,7 +588,6 @@ struct StudioCanvasView: View {
         device.adatOutputPortsCount = max(0, draftAdatOutputPorts)
         device.madiInputPortsCount = max(0, draftMadiInputPorts)
         device.madiOutputPortsCount = max(0, draftMadiOutputPorts)
-        device.ethernetPortsCount = max(0, draftEthernetPorts)
         device.sampleRateRaw = draftSampleRate.rawValue
         device.digitalInputs = Array(draftDigitalInputs)
         device.digitalOutputs = Array(draftDigitalOutputs)
@@ -609,7 +603,6 @@ struct StudioCanvasView: View {
             adatOutputPorts: device.adatOutputPortsCount,
             madiInputPorts: device.madiInputPortsCount,
             madiOutputPorts: device.madiOutputPortsCount,
-            ethernetPorts: device.ethernetPortsCount,
             sampleRate: draftSampleRate
         )
 
@@ -665,7 +658,6 @@ struct StudioCanvasView: View {
                 adatOutputPorts: d.adatOutputPortsCount,
                 madiInputPorts: d.madiInputPortsCount,
                 madiOutputPorts: d.madiOutputPortsCount,
-                ethernetPorts: d.ethernetPortsCount,
                 sampleRate: defaultSR
             )
             studio.devices.append(d)
@@ -682,7 +674,6 @@ struct StudioCanvasView: View {
         adatOutputPorts: Int,
         madiInputPorts: Int,
         madiOutputPorts: Int,
-        ethernetPorts: Int,
         sampleRate: SampleRate
     ) -> [Port] {
         var ports: [Port] = []
@@ -763,15 +754,7 @@ struct StudioCanvasView: View {
             }
         }
 
-        // Add physical Ethernet ports (bidirectional as in/out pair)
-        if ethernetPorts > 0 {
-            let count = max(0, ethernetPorts)
-            for i in 0..<count {
-                let letter = portLetter(i)
-                ports.append(digitalPort(type: .ethernet, name: "Ethernet \(letter) In", direction: .input, channels: 1))
-                ports.append(digitalPort(type: .ethernet, name: "Ethernet \(letter) Out", direction: .output, channels: 1))
-            }
-        }
+
 
         return ports
     }
@@ -880,8 +863,6 @@ struct StudioCanvasView: View {
         let adatout = chCount(.adatOut, .output)
         let madiin = chCount(.madiIn, .input)
         let madiout = chCount(.madiOut, .output)
-        let ethIn = chCount(.ethernet, .input)
-        let ethOut = chCount(.ethernet, .output)
         let spdifin = chCount(.spdifIn, .input)
         let spdifout = chCount(.spdifOut, .output)
 
@@ -889,7 +870,6 @@ struct StudioCanvasView: View {
         if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
         if adatin > 0 || adatout > 0 { parts.append("ADAT \(adatin)/\(adatout)") }
         if madiin > 0 || madiout > 0 { parts.append("MADI \(madiin)/\(madiout)") }
-        if ethIn > 0 || ethOut > 0 { parts.append("ETH \(ethIn)/\(ethOut)") }
         if spdifin > 0 || spdifout > 0 { parts.append("S/PDIF \(spdifin)/\(spdifout)") }
 
         return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
@@ -1804,7 +1784,6 @@ private struct DeviceEditorSheet: View {
     @Binding var adatOutputPorts: Int
     @Binding var madiInputPorts: Int
     @Binding var madiOutputPorts: Int
-    @Binding var ethernetPorts: Int
     @Binding var sampleRate: SampleRate
 
     @Binding var digitalInputs: Set<DigitalFormat>
@@ -1968,13 +1947,7 @@ private struct DeviceEditorSheet: View {
                                 }
                             }
 
-                            Stepper(value: $ethernetPorts, in: 0...8) {
-                                HStack {
-                                    Text("Ethernet Ports")
-                                    Spacer()
-                                    Text("\(ethernetPorts)").foregroundStyle(.secondary)
-                                }
-                            }
+
                         }
                         .padding(8)
                     }
@@ -2116,9 +2089,7 @@ private struct DeviceEditorSheet: View {
                     Stepper(value: $madiOutputPorts, in: 0...8) {
                         HStack { Text("MADI Output Ports"); Spacer(); Text("\(madiOutputPorts)").foregroundStyle(.secondary) }
                     }
-                    Stepper(value: $ethernetPorts, in: 0...8) {
-                        HStack { Text("Ethernet Ports"); Spacer(); Text("\(ethernetPorts)").foregroundStyle(.secondary) }
-                    }
+
                 }
 
                 Section("Digital Inputs") {

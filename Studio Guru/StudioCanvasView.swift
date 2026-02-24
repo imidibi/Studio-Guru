@@ -473,6 +473,7 @@ struct StudioCanvasView: View {
 
     private func beginEditDevice(_ d: DeviceInstance) {
         editingDeviceId = d.id
+        presentedInspectorDeviceId = nil
         deviceEditorError = nil
 
         draftNickname = d.nickname
@@ -504,6 +505,7 @@ struct StudioCanvasView: View {
         draftComputerInterfaceCounts = counts
 
         isShowingDeviceEditor = true
+        suppressNextInspectorPresentation = true
         }
 
     private func expandComputerInterfaces(from counts: [ComputerInterface: Int]) -> [ComputerInterface] {
@@ -1150,7 +1152,6 @@ private struct CanvasSurfaceView: View {
         return nil
     }
 }
-
 // MARK: - Device Card (extracted to reduce SwiftUI type-check complexity)
 
 private struct DeviceCardView: View {
@@ -1814,6 +1815,25 @@ private struct DeviceEditorSheet: View {
 
     let onCancel: () -> Void
     let onSave: () -> Void
+    
+    private func syncCountBasedDigitalFormats() {
+        // ADAT is count-based
+        if adatInputPorts > 0 { digitalInputs.insert(.adat) } else { digitalInputs.remove(.adat) }
+        if adatOutputPorts > 0 { digitalOutputs.insert(.adat) } else { digitalOutputs.remove(.adat) }
+
+        // MADI is count-based
+        if madiInputPorts > 0 { digitalInputs.insert(.madi) } else { digitalInputs.remove(.madi) }
+        if madiOutputPorts > 0 { digitalOutputs.insert(.madi) } else { digitalOutputs.remove(.madi) }
+    }
+
+    private var digitalInputFormatChoices: [DigitalFormat] {
+        // Count-based formats configured via steppers
+        DigitalFormat.allCases.filter { $0 != .adat && $0 != .madi }
+    }
+
+    private var digitalOutputFormatChoices: [DigitalFormat] {
+        DigitalFormat.allCases.filter { $0 != .adat && $0 != .madi }
+    }
 
     var body: some View {
         NavigationStack {
@@ -1885,26 +1905,28 @@ private struct DeviceEditorSheet: View {
                         .padding(8)
                     }
 
-                    GroupBox("Audio") {
+                    GroupBox("Analog I/O") {
                         VStack(alignment: .leading, spacing: 10) {
                             Stepper(value: $audioInputs, in: 0...128) {
                                 HStack {
-                                    Text("Audio Inputs")
+                                    Text("Analog Inputs")
                                     Spacer()
-                                    Text("\(audioInputs)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(audioInputs)").foregroundStyle(.secondary)
                                 }
                             }
                             Stepper(value: $audioOutputs, in: 0...128) {
                                 HStack {
-                                    Text("Audio Outputs")
+                                    Text("Analog Outputs")
                                     Spacer()
-                                    Text("\(audioOutputs)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(audioOutputs)").foregroundStyle(.secondary)
                                 }
                             }
-                            Divider().padding(.vertical, 4)
-
+                        }
+                        .padding(8)
+                    }
+                    
+                    GroupBox("Digital I/O") {
+                        VStack(alignment: .leading, spacing: 10) {
                             Picker("Sample Rate", selection: $sampleRate) {
                                 ForEach(SampleRate.allCases, id: \.self) { r in
                                     Text(r.displayName).tag(r)
@@ -1912,12 +1934,13 @@ private struct DeviceEditorSheet: View {
                             }
                             .pickerStyle(.segmented)
 
+                            Divider().padding(.vertical, 4)
+
                             Stepper(value: $adatInputPorts, in: 0...8) {
                                 HStack {
                                     Text("ADAT Input Ports")
                                     Spacer()
-                                    Text("\(adatInputPorts)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(adatInputPorts)").foregroundStyle(.secondary)
                                 }
                             }
 
@@ -1925,8 +1948,7 @@ private struct DeviceEditorSheet: View {
                                 HStack {
                                     Text("ADAT Output Ports")
                                     Spacer()
-                                    Text("\(adatOutputPorts)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(adatOutputPorts)").foregroundStyle(.secondary)
                                 }
                             }
 
@@ -1934,8 +1956,7 @@ private struct DeviceEditorSheet: View {
                                 HStack {
                                     Text("MADI Input Ports")
                                     Spacer()
-                                    Text("\(madiInputPorts)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(madiInputPorts)").foregroundStyle(.secondary)
                                 }
                             }
 
@@ -1943,8 +1964,7 @@ private struct DeviceEditorSheet: View {
                                 HStack {
                                     Text("MADI Output Ports")
                                     Spacer()
-                                    Text("\(madiOutputPorts)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(madiOutputPorts)").foregroundStyle(.secondary)
                                 }
                             }
 
@@ -1952,8 +1972,7 @@ private struct DeviceEditorSheet: View {
                                 HStack {
                                     Text("Ethernet Ports")
                                     Spacer()
-                                    Text("\(ethernetPorts)")
-                                        .foregroundStyle(.secondary)
+                                    Text("\(ethernetPorts)").foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1962,7 +1981,7 @@ private struct DeviceEditorSheet: View {
 
                     GroupBox("Digital Inputs") {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(DigitalFormat.allCases, id: \.self) { f in
+                            ForEach(digitalInputFormatChoices, id: \.self) { f in
                                 Toggle(f.rawValue, isOn: Binding(
                                     get: { digitalInputs.contains(f) },
                                     set: { isOn in
@@ -1976,7 +1995,7 @@ private struct DeviceEditorSheet: View {
 
                     GroupBox("Digital Outputs") {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(DigitalFormat.allCases, id: \.self) { f in
+                            ForEach(digitalOutputFormatChoices, id: \.self) { f in
                                 Toggle(f.rawValue, isOn: Binding(
                                     get: { digitalOutputs.contains(f) },
                                     set: { isOn in
@@ -1988,7 +2007,7 @@ private struct DeviceEditorSheet: View {
                         .padding(8)
                     }
                     
-                    GroupBox("Computer Interface") {
+                    GroupBox("Computer I/O"){
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(ComputerInterface.allCases, id: \.self) { f in
                                 Stepper(value: Binding(
@@ -2018,6 +2037,11 @@ private struct DeviceEditorSheet: View {
                 }
                 .padding(16)
             }
+            .onAppear { syncCountBasedDigitalFormats() }
+            .onChange(of: adatInputPorts) { _, _ in syncCountBasedDigitalFormats() }
+            .onChange(of: adatOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
+            .onChange(of: madiInputPorts) { _, _ in syncCountBasedDigitalFormats() }
+            .onChange(of: madiOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
             .frame(minWidth: 560, idealWidth: 640, maxWidth: .infinity,
                    minHeight: 640, idealHeight: 720, maxHeight: .infinity)
             .navigationTitle(title)
@@ -2064,25 +2088,16 @@ private struct DeviceEditorSheet: View {
                         .keyboardType(.URL)
                 }
 
-                Section("Audio") {
+                Section("Analog I/O") {
                     Stepper(value: $audioInputs, in: 0...128) {
-                        HStack {
-                            Text("Audio Inputs")
-                            Spacer()
-                            Text("\(audioInputs)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("Analog Inputs"); Spacer(); Text("\(audioInputs)").foregroundStyle(.secondary) }
                     }
-
                     Stepper(value: $audioOutputs, in: 0...128) {
-                        HStack {
-                            Text("Audio Outputs")
-                            Spacer()
-                            Text("\(audioOutputs)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("Analog Outputs"); Spacer(); Text("\(audioOutputs)").foregroundStyle(.secondary) }
                     }
+                }
 
+                Section("Digital I/O") {
                     Picker("Sample Rate", selection: $sampleRate) {
                         ForEach(SampleRate.allCases, id: \.self) { r in
                             Text(r.displayName).tag(r)
@@ -2090,53 +2105,24 @@ private struct DeviceEditorSheet: View {
                     }
 
                     Stepper(value: $adatInputPorts, in: 0...8) {
-                        HStack {
-                            Text("ADAT Input Ports")
-                            Spacer()
-                            Text("\(adatInputPorts)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("ADAT Input Ports"); Spacer(); Text("\(adatInputPorts)").foregroundStyle(.secondary) }
                     }
-
                     Stepper(value: $adatOutputPorts, in: 0...8) {
-                        HStack {
-                            Text("ADAT Output Ports")
-                            Spacer()
-                            Text("\(adatOutputPorts)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("ADAT Output Ports"); Spacer(); Text("\(adatOutputPorts)").foregroundStyle(.secondary) }
                     }
-
                     Stepper(value: $madiInputPorts, in: 0...8) {
-                        HStack {
-                            Text("MADI Input Ports")
-                            Spacer()
-                            Text("\(madiInputPorts)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("MADI Input Ports"); Spacer(); Text("\(madiInputPorts)").foregroundStyle(.secondary) }
                     }
-
                     Stepper(value: $madiOutputPorts, in: 0...8) {
-                        HStack {
-                            Text("MADI Output Ports")
-                            Spacer()
-                            Text("\(madiOutputPorts)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("MADI Output Ports"); Spacer(); Text("\(madiOutputPorts)").foregroundStyle(.secondary) }
                     }
-
                     Stepper(value: $ethernetPorts, in: 0...8) {
-                        HStack {
-                            Text("Ethernet Ports")
-                            Spacer()
-                            Text("\(ethernetPorts)")
-                                .foregroundStyle(.secondary)
-                        }
+                        HStack { Text("Ethernet Ports"); Spacer(); Text("\(ethernetPorts)").foregroundStyle(.secondary) }
                     }
                 }
 
                 Section("Digital Inputs") {
-                    ForEach(DigitalFormat.allCases, id: \.self) { f in
+                    ForEach(digitalInputFormatChoices, id: \.self) { f in
                         Toggle(f.rawValue, isOn: Binding(
                             get: { digitalInputs.contains(f) },
                             set: { isOn in
@@ -2147,7 +2133,7 @@ private struct DeviceEditorSheet: View {
                 }
 
                 Section("Digital Outputs") {
-                    ForEach(DigitalFormat.allCases, id: \.self) { f in
+                    ForEach(digitalOutputFormatChoices, id: \.self) { f in
                         Toggle(f.rawValue, isOn: Binding(
                             get: { digitalOutputs.contains(f) },
                             set: { isOn in
@@ -2157,7 +2143,7 @@ private struct DeviceEditorSheet: View {
                     }
                 }
                 
-                Section("Computer Interface") {
+                Section("Computer I/O") {
                     ForEach(ComputerInterface.allCases, id: \.self) { f in
                         Stepper(value: Binding(
                             get: { max(0, computerInterfaceCounts[f] ?? 0) },
@@ -2184,6 +2170,11 @@ private struct DeviceEditorSheet: View {
                     }
                 }
             }
+            .onAppear { syncCountBasedDigitalFormats() }
+            .onChange(of: adatInputPorts) { _, _ in syncCountBasedDigitalFormats() }
+            .onChange(of: adatOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
+            .onChange(of: madiInputPorts) { _, _ in syncCountBasedDigitalFormats() }
+            .onChange(of: madiOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

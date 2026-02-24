@@ -71,12 +71,15 @@ struct StudioCanvasView: View {
     @State private var draftAudioOutputs: Int = 0
     @State private var draftAdatInputPorts: Int = 0
     @State private var draftAdatOutputPorts: Int = 0
+    @State private var draftMadiInputPorts: Int = 0
+    @State private var draftMadiOutputPorts: Int = 0
+    @State private var draftEthernetPorts: Int = 0
     @State private var draftSampleRate: SampleRate = SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
 
     @State private var draftDigitalInputs: Set<DigitalFormat> = []
     @State private var draftDigitalOutputs: Set<DigitalFormat> = []
-    @State private var draftComputerInterfaces: Set<ComputerInterface> = []
-
+    /// Quantities for host interfaces (USB/Thunderbolt/Ethernet etc.).
+    @State private var draftComputerInterfaceCounts: [ComputerInterface: Int] = [:]
     @State private var deviceEditorError: String? = nil
 
     // Delete device confirm
@@ -322,10 +325,13 @@ struct StudioCanvasView: View {
                             audioOutputs: $draftAudioOutputs,
                             adatInputPorts: $draftAdatInputPorts,
                             adatOutputPorts: $draftAdatOutputPorts,
+                            madiInputPorts: $draftMadiInputPorts,
+                            madiOutputPorts: $draftMadiOutputPorts,
+                            ethernetPorts: $draftEthernetPorts,
                             sampleRate: $draftSampleRate,
                             digitalInputs: $draftDigitalInputs,
                             digitalOutputs: $draftDigitalOutputs,
-                            computerInterfaces: $draftComputerInterfaces,
+                            computerInterfaceCounts: $draftComputerInterfaceCounts,
                             errorMessage: $deviceEditorError,
                             onCancel: { isShowingDeviceEditor = false },
                             onSave: { saveDeviceEdits(into: studio) }
@@ -454,10 +460,13 @@ struct StudioCanvasView: View {
         draftAudioOutputs = 0
         draftAdatInputPorts = 0
         draftAdatOutputPorts = 0
+        draftMadiInputPorts = 0
+        draftMadiOutputPorts = 0
+        draftEthernetPorts = 0
         if let first = SampleRate.allCases.first { draftSampleRate = first }
         draftDigitalInputs = []
         draftDigitalOutputs = []
-        draftComputerInterfaces = []
+        draftComputerInterfaceCounts = [:]
 
         isShowingDeviceEditor = true
     }
@@ -480,15 +489,33 @@ struct StudioCanvasView: View {
         draftAudioOutputs = max(0, d.audioOutputsCount)
         draftAdatInputPorts = max(0, d.adatInputPortsCount)
         draftAdatOutputPorts = max(0, d.adatOutputPortsCount)
+        draftMadiInputPorts = max(0, d.madiInputPortsCount)
+        draftMadiOutputPorts = max(0, d.madiOutputPortsCount)
+        draftEthernetPorts = max(0, d.ethernetPortsCount)
         if let sr = SampleRate(rawValue: d.sampleRateRaw) { draftSampleRate = sr }
 
         draftDigitalInputs = Set(d.digitalInputs)
         draftDigitalOutputs = Set(d.digitalOutputs)
-        draftComputerInterfaces = Set(d.computerInterfaces)
+
+        var counts: [ComputerInterface: Int] = [:]
+        for (k, v) in d.computerInterfaceCounts {
+            counts[k] = max(0, v)
+        }
+        draftComputerInterfaceCounts = counts
 
         isShowingDeviceEditor = true
-    }
+        }
 
+    private func expandComputerInterfaces(from counts: [ComputerInterface: Int]) -> [ComputerInterface] {
+        var result: [ComputerInterface] = []
+        for key in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let n = max(0, counts[key] ?? 0)
+            if n > 0 {
+                result.append(contentsOf: Array(repeating: key, count: n))
+            }
+        }
+        return result
+    }
     @MainActor
     private func saveDeviceEdits(into studio: Studio) {
         let nickname = draftNickname.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -534,17 +561,19 @@ struct StudioCanvasView: View {
                 audioOutputsCount: draftAudioOutputs,
                 adatInputPortsCount: max(0, draftAdatInputPorts),
                 adatOutputPortsCount: max(0, draftAdatOutputPorts),
+                madiInputPortsCount: max(0, draftMadiInputPorts),
+                madiOutputPortsCount: max(0, draftMadiOutputPorts),
+                ethernetPortsCount: max(0, draftEthernetPorts),
                 sampleRate: draftSampleRate,
                 digitalInputs: Array(draftDigitalInputs),
                 digitalOutputs: Array(draftDigitalOutputs),
-                computerInterfaces: Array(draftComputerInterfaces),
+                computerInterfaces: expandComputerInterfaces(from: draftComputerInterfaceCounts),
                 posX: pos.x,
                 posY: pos.y,
                 scale: 1.0,
                 zIndex: 0
             )
             studio.devices.append(device)
-            
         }
 
         device.nickname = nickname
@@ -560,10 +589,13 @@ struct StudioCanvasView: View {
         device.audioOutputsCount = max(0, draftAudioOutputs)
         device.adatInputPortsCount = max(0, draftAdatInputPorts)
         device.adatOutputPortsCount = max(0, draftAdatOutputPorts)
+        device.madiInputPortsCount = max(0, draftMadiInputPorts)
+        device.madiOutputPortsCount = max(0, draftMadiOutputPorts)
+        device.ethernetPortsCount = max(0, draftEthernetPorts)
         device.sampleRateRaw = draftSampleRate.rawValue
         device.digitalInputs = Array(draftDigitalInputs)
         device.digitalOutputs = Array(draftDigitalOutputs)
-        device.computerInterfaces = Array(draftComputerInterfaces)
+        device.computerInterfaces = expandComputerInterfaces(from: draftComputerInterfaceCounts)
 
         // Build ports from counts/formats for visualization and later connection tooling.
         device.ports = buildPorts(
@@ -573,6 +605,9 @@ struct StudioCanvasView: View {
             digitalOutputs: device.digitalOutputs,
             adatInputPorts: device.adatInputPortsCount,
             adatOutputPorts: device.adatOutputPortsCount,
+            madiInputPorts: device.madiInputPortsCount,
+            madiOutputPorts: device.madiOutputPortsCount,
+            ethernetPorts: device.ethernetPortsCount,
             sampleRate: draftSampleRate
         )
 
@@ -607,6 +642,9 @@ struct StudioCanvasView: View {
                 audioOutputsCount: 10,
                 adatInputPortsCount: 1,
                 adatOutputPortsCount: 1,
+                madiInputPortsCount: 0,
+                madiOutputPortsCount: 0,
+                ethernetPortsCount: 0,
                 sampleRate: defaultSR,
                 digitalInputs: [.adat, .spdif],
                 digitalOutputs: [.adat, .spdif],
@@ -623,6 +661,9 @@ struct StudioCanvasView: View {
                 digitalOutputs: d.digitalOutputs,
                 adatInputPorts: d.adatInputPortsCount,
                 adatOutputPorts: d.adatOutputPortsCount,
+                madiInputPorts: d.madiInputPortsCount,
+                madiOutputPorts: d.madiOutputPortsCount,
+                ethernetPorts: d.ethernetPortsCount,
                 sampleRate: defaultSR
             )
             studio.devices.append(d)
@@ -637,11 +678,17 @@ struct StudioCanvasView: View {
         digitalOutputs: [DigitalFormat],
         adatInputPorts: Int,
         adatOutputPorts: Int,
+        madiInputPorts: Int,
+        madiOutputPorts: Int,
+        ethernetPorts: Int,
         sampleRate: SampleRate
     ) -> [Port] {
         var ports: [Port] = []
-        
-        let adatChannelsPerPort: Int = sampleRateRawHz(sampleRate) >= 88_200 ? 4 : 8
+
+        let srHz = sampleRateRawHz(sampleRate)
+        let adatChannelsPerPort: Int = srHz >= 88_200 ? 4 : 8
+        let madiChannelsPerPort: Int = srHz >= 176_400 ? 16 : (srHz >= 88_200 ? 32 : 64)
+        let danteChannelsPerLink: Int = 64
 
         func portLetter(_ i: Int) -> String {
             let scalar = UnicodeScalar(65 + max(0, i))!
@@ -669,11 +716,20 @@ struct StudioCanvasView: View {
         for f in digitalInputs.sorted(by: { $0.rawValue < $1.rawValue }) {
             switch f {
             case .adat:
-                let count = max(1, adatInputPorts)
+                let count = max(1, max(0, adatInputPorts))
                 for i in 0..<count {
                     let name = "ADAT In \(portLetter(i))"
                     ports.append(digitalPort(type: .adatIn, name: name, direction: .input, channels: adatChannelsPerPort))
                 }
+            case .madi:
+                let count = max(1, max(0, madiInputPorts))
+                for i in 0..<count {
+                    let name = "MADI In \(portLetter(i))"
+                    ports.append(digitalPort(type: .madiIn, name: name, direction: .input, channels: madiChannelsPerPort))
+                }
+            case .dante:
+                // Represent Dante as an Ethernet-based digital input (one logical link = 64ch).
+                ports.append(digitalPort(type: .ethernet, name: "Dante In (Ethernet)", direction: .input, channels: danteChannelsPerLink))
             case .spdif:
                 ports.append(digitalPort(type: .spdifIn, name: "Digital In (S/PDIF)", direction: .input, channels: 2))
             default:
@@ -685,15 +741,33 @@ struct StudioCanvasView: View {
         for f in digitalOutputs.sorted(by: { $0.rawValue < $1.rawValue }) {
             switch f {
             case .adat:
-                let count = max(1, adatOutputPorts)
+                let count = max(1, max(0, adatOutputPorts))
                 for i in 0..<count {
                     let name = "ADAT Out \(portLetter(i))"
                     ports.append(digitalPort(type: .adatOut, name: name, direction: .output, channels: adatChannelsPerPort))
                 }
+            case .madi:
+                let count = max(1, max(0, madiOutputPorts))
+                for i in 0..<count {
+                    let name = "MADI Out \(portLetter(i))"
+                    ports.append(digitalPort(type: .madiOut, name: name, direction: .output, channels: madiChannelsPerPort))
+                }
+            case .dante:
+                ports.append(digitalPort(type: .ethernet, name: "Dante Out (Ethernet)", direction: .output, channels: danteChannelsPerLink))
             case .spdif:
                 ports.append(digitalPort(type: .spdifOut, name: "Digital Out (S/PDIF)", direction: .output, channels: 2))
             default:
                 ports.append(digitalPort(type: .analogOut, name: "Digital Out (\(f.rawValue))", direction: .output, channels: 2))
+            }
+        }
+
+        // Add physical Ethernet ports (bidirectional as in/out pair)
+        if ethernetPorts > 0 {
+            let count = max(0, ethernetPorts)
+            for i in 0..<count {
+                let letter = portLetter(i)
+                ports.append(digitalPort(type: .ethernet, name: "Ethernet \(letter) In", direction: .input, channels: 1))
+                ports.append(digitalPort(type: .ethernet, name: "Ethernet \(letter) Out", direction: .output, channels: 1))
             }
         }
 
@@ -802,12 +876,18 @@ struct StudioCanvasView: View {
         let aout = chCount(.analogOut, .output)
         let adatin = chCount(.adatIn, .input)
         let adatout = chCount(.adatOut, .output)
+        let madiin = chCount(.madiIn, .input)
+        let madiout = chCount(.madiOut, .output)
+        let ethIn = chCount(.ethernet, .input)
+        let ethOut = chCount(.ethernet, .output)
         let spdifin = chCount(.spdifIn, .input)
         let spdifout = chCount(.spdifOut, .output)
 
         var parts: [String] = []
         if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
         if adatin > 0 || adatout > 0 { parts.append("ADAT \(adatin)/\(adatout)") }
+        if madiin > 0 || madiout > 0 { parts.append("MADI \(madiin)/\(madiout)") }
+        if ethIn > 0 || ethOut > 0 { parts.append("ETH \(ethIn)/\(ethOut)") }
         if spdifin > 0 || spdifout > 0 { parts.append("S/PDIF \(spdifin)/\(spdifout)") }
 
         return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
@@ -1303,14 +1383,15 @@ private struct InspectorPanel: View {
                                 }
                                 .padding(.vertical, 4)
                             }
-                            if !d.computerInterfaces.isEmpty {
+                            let ifaceCounts = d.computerInterfaceCounts
+                            if !ifaceCounts.isEmpty {
                                 Divider().padding(.vertical, 4)
                                 Text("Computer Interfaces")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
 
-                                ForEach(d.computerInterfaces.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
-                                    Text(iface.rawValue)
+                                ForEach(ifaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
+                                    Text("\(iface.rawValue) ×\(ifaceCounts[iface] ?? 0)")
                                 }
                             }
                         }
@@ -1692,6 +1773,8 @@ private extension DeviceInstance {
         case .multi: return "square.stack.3d.up"
         case .patchbay: return "square.grid.3x3"
         case .preamp: return "waveform.circle"
+        case .usbHub: return "hub"
+        case .usbExpander: return "rectangle.connected.to.line.below"
         case .other: return "shippingbox"
         }
     }
@@ -1718,12 +1801,14 @@ private struct DeviceEditorSheet: View {
     @Binding var audioOutputs: Int
     @Binding var adatInputPorts: Int
     @Binding var adatOutputPorts: Int
+    @Binding var madiInputPorts: Int
+    @Binding var madiOutputPorts: Int
+    @Binding var ethernetPorts: Int
     @Binding var sampleRate: SampleRate
-    
 
     @Binding var digitalInputs: Set<DigitalFormat>
     @Binding var digitalOutputs: Set<DigitalFormat>
-    @Binding var computerInterfaces: Set<ComputerInterface>
+    @Binding var computerInterfaceCounts: [ComputerInterface: Int]
 
     @Binding var errorMessage: String?
 
@@ -1844,6 +1929,33 @@ private struct DeviceEditorSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+
+                            Stepper(value: $madiInputPorts, in: 0...8) {
+                                HStack {
+                                    Text("MADI Input Ports")
+                                    Spacer()
+                                    Text("\(madiInputPorts)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Stepper(value: $madiOutputPorts, in: 0...8) {
+                                HStack {
+                                    Text("MADI Output Ports")
+                                    Spacer()
+                                    Text("\(madiOutputPorts)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Stepper(value: $ethernetPorts, in: 0...8) {
+                                HStack {
+                                    Text("Ethernet Ports")
+                                    Spacer()
+                                    Text("\(ethernetPorts)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         .padding(8)
                     }
@@ -1877,15 +1989,23 @@ private struct DeviceEditorSheet: View {
                     }
                     
                     GroupBox("Computer Interface") {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
                             ForEach(ComputerInterface.allCases, id: \.self) { f in
-                                Toggle(f.rawValue, isOn: Binding(
-                                    get: { computerInterfaces.contains(f) },
-                                    set: { isOn in
-                                        if isOn { computerInterfaces.insert(f) }
-                                        else { computerInterfaces.remove(f) }
+                                Stepper(value: Binding(
+                                    get: { max(0, computerInterfaceCounts[f] ?? 0) },
+                                    set: { newValue in
+                                        let v = max(0, newValue)
+                                        if v == 0 { computerInterfaceCounts.removeValue(forKey: f) }
+                                        else { computerInterfaceCounts[f] = v }
                                     }
-                                ))
+                                ), in: 0...8) {
+                                    HStack {
+                                        Text(f.rawValue)
+                                        Spacer()
+                                        Text("\(computerInterfaceCounts[f] ?? 0)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
                         .padding(8)
@@ -1986,6 +2106,33 @@ private struct DeviceEditorSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    Stepper(value: $madiInputPorts, in: 0...8) {
+                        HStack {
+                            Text("MADI Input Ports")
+                            Spacer()
+                            Text("\(madiInputPorts)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Stepper(value: $madiOutputPorts, in: 0...8) {
+                        HStack {
+                            Text("MADI Output Ports")
+                            Spacer()
+                            Text("\(madiOutputPorts)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Stepper(value: $ethernetPorts, in: 0...8) {
+                        HStack {
+                            Text("Ethernet Ports")
+                            Spacer()
+                            Text("\(ethernetPorts)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 Section("Digital Inputs") {
@@ -2012,13 +2159,21 @@ private struct DeviceEditorSheet: View {
                 
                 Section("Computer Interface") {
                     ForEach(ComputerInterface.allCases, id: \.self) { f in
-                        Toggle(f.rawValue, isOn: Binding(
-                            get: { computerInterfaces.contains(f) },
-                            set: { isOn in
-                                if isOn { computerInterfaces.insert(f) }
-                                else { computerInterfaces.remove(f) }
+                        Stepper(value: Binding(
+                            get: { max(0, computerInterfaceCounts[f] ?? 0) },
+                            set: { newValue in
+                                let v = max(0, newValue)
+                                if v == 0 { computerInterfaceCounts.removeValue(forKey: f) }
+                                else { computerInterfaceCounts[f] = v }
                             }
-                        ))
+                        ), in: 0...8) {
+                            HStack {
+                                Text(f.rawValue)
+                                Spacer()
+                                Text("\(computerInterfaceCounts[f] ?? 0)")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
 

@@ -13,11 +13,13 @@ enum SignalType: String, Codable, CaseIterable { case audio, midi, clock }
 enum PortType: String, Codable, CaseIterable {
     case analogIn, analogOut
     case adatIn, adatOut
+    case madiIn, madiOut
     case spdifIn, spdifOut
     case aesIn, aesOut
     case usbAudio, thunderboltAudio
     case midiIn, midiOut
     case wordClockIn, wordClockOut
+    case ethernet
     case headphoneOut
     case computerHost
 }
@@ -26,7 +28,7 @@ enum PortDirection: String, Codable, CaseIterable { case input, output, bidirect
 
 enum ChannelGrouping: String, Codable, CaseIterable { case mono, stereoPairable, fixedStereoPair }
 
-enum CableType: String, Codable, CaseIterable { case trs, xlr, ts, opticalADAT, usb, thunderbolt, midiDIN, usbMIDI, wordClockBNC, other }
+enum CableType: String, Codable, CaseIterable { case trs, xlr, ts, opticalADAT, usb, thunderbolt, midiDIN, usbMIDI, wordClockBNC, ethernet, other }
 
 enum DocKind: String, Codable, CaseIterable { case manual, driver, firmware, support, other }
 
@@ -48,6 +50,8 @@ enum DeviceCategory: String, Codable, CaseIterable {
     case multi = "Multi"
     case patchbay = "Patchbay"
     case preamp = "Preamp"
+    case usbHub = "USB Hub"
+    case usbExpander = "USB Expander"
     case other = "Other"
 }
 
@@ -55,6 +59,7 @@ enum DigitalFormat: String, Codable, CaseIterable {
     case adat = "ADAT"
     case aesebu = "AES/EBU"
     case dante = "Dante"
+    case madi = "MADI"
     case midi = "MIDI"
     case spdif = "S/PDIF"
     case wordClock = "Word Clock"
@@ -65,6 +70,7 @@ enum ComputerInterface: String, Codable, CaseIterable {
     case thunderbolt = "Thunderbolt"
     case usb = "USB"
     case usbc = "USB-C"
+    case ethernet = "Ethernet"
 }
 
 enum SampleRate: Int, Codable, CaseIterable {
@@ -136,15 +142,24 @@ final class DeviceInstance {
     // I/O summary (high-level counts)
     var audioInputsCount: Int
     var audioOutputsCount: Int
+
+    // Digital audio port counts
     var adatInputPortsCount: Int
     var adatOutputPortsCount: Int
+    var madiInputPortsCount: Int
+    var madiOutputPortsCount: Int
+
+    // Networking / control ports (used for Dante, remote control, etc.)
+    var ethernetPortsCount: Int
+
     var sampleRateRaw: Int
 
     // Digital formats stored as raw strings
     var digitalInputsRaw: [String]
     var digitalOutputsRaw: [String]
 
-    // Computer interfaces (bi-directional host connections)
+    // Computer interfaces (bi-directional host connections).
+    // NOTE: This array supports quantities by allowing duplicates (e.g. ["USB", "USB"] means 2x USB).
     var computerInterfacesRaw: [String]
 
     // Canvas placement
@@ -170,6 +185,9 @@ final class DeviceInstance {
          audioOutputsCount: Int = 0,
          adatInputPortsCount: Int = 0,
          adatOutputPortsCount: Int = 0,
+         madiInputPortsCount: Int = 0,
+         madiOutputPortsCount: Int = 0,
+         ethernetPortsCount: Int = 0,
          sampleRate: SampleRate = .hz48000,
          digitalInputs: [DigitalFormat] = [],
          digitalOutputs: [DigitalFormat] = [],
@@ -193,8 +211,14 @@ final class DeviceInstance {
 
         self.audioInputsCount = audioInputsCount
         self.audioOutputsCount = audioOutputsCount
+
         self.adatInputPortsCount = adatInputPortsCount
         self.adatOutputPortsCount = adatOutputPortsCount
+        self.madiInputPortsCount = madiInputPortsCount
+        self.madiOutputPortsCount = madiOutputPortsCount
+
+        self.ethernetPortsCount = ethernetPortsCount
+
         self.sampleRateRaw = sampleRate.rawValue
 
         self.digitalInputsRaw = digitalInputs.map { $0.rawValue }
@@ -230,6 +254,17 @@ final class DeviceInstance {
     var computerInterfaces: [ComputerInterface] {
         get { computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) } }
         set { computerInterfacesRaw = newValue.map { $0.rawValue } }
+    }
+
+    /// Quantities for host interfaces. This is derived from `computerInterfacesRaw` by counting duplicates.
+    var computerInterfaceCounts: [ComputerInterface: Int] {
+        var counts: [ComputerInterface: Int] = [:]
+        for raw in computerInterfacesRaw {
+            if let iface = ComputerInterface(rawValue: raw) {
+                counts[iface, default: 0] += 1
+            }
+        }
+        return counts
     }
 
     var sampleRate: SampleRate {

@@ -323,7 +323,7 @@ struct ConnectionsDialogView: View {
 
                         ScrollView {
                             VStack(alignment: .leading, spacing: 10) {
-                                if let fromDevice, !fromDevice.computerInterfaces.isEmpty {
+                                if let fromDevice, !fromDevice.computerInterfaceCounts.isEmpty {
                                     Text("Computer")
                                         .font(.headline)
                                         .foregroundStyle(.secondary)
@@ -391,7 +391,7 @@ struct ConnectionsDialogView: View {
 
                         ScrollView {
                             VStack(alignment: .leading, spacing: 10) {
-                                if let toDevice, !toDevice.computerInterfaces.isEmpty {
+                                if let toDevice, !toDevice.computerInterfaceCounts.isEmpty {
                                     Text("Computer")
                                         .font(.headline)
                                         .foregroundStyle(.secondary)
@@ -631,6 +631,12 @@ struct ConnectionsDialogView: View {
             return
         }
 
+        if let reason = validateEdge(output: output, input: input) {
+            saveBlockedMessage = reason
+            isShowingSaveBlockedAlert = true
+            return
+        }
+
         applyEdgeToWorkingBundle(output, input)
     }
 
@@ -688,6 +694,87 @@ struct ConnectionsDialogView: View {
     // Key format must match ConnectionBundle.endpointNames.
     private func endpointKey(for endpoint: IOEndpointRef) -> String {
         "\(endpoint.deviceId.uuidString):\(endpoint.portId.uuidString):\(endpoint.channelId.uuidString):\(endpoint.direction.rawValue)"
+    }
+    // MARK: - Endpoint resolution and validation helpers
+
+    private struct ResolvedEndpoint {
+        enum Kind {
+            case devicePort(type: PortType, portName: String)
+            case computerInterface(ComputerInterface)
+            case unknown
+        }
+        let kind: Kind
+    }
+
+    private func resolveEndpoint(_ e: IOEndpointRef) -> ResolvedEndpoint {
+        guard let device = studio.devices.first(where: { $0.id == e.deviceId }) else {
+            return ResolvedEndpoint(kind: .unknown)
+        }
+
+        // 1) Try resolve as a regular device port
+        if let p = device.ports.first(where: { $0.id == e.portId }) {
+            let t = p.type
+            return ResolvedEndpoint(kind: .devicePort(type: t, portName: p.name))
+        }
+
+        // 2) Try resolve as a computer interface endpoint by matching stable UUIDs.
+        let counts = device.computerInterfaceCounts
+        for iface in counts.keys {
+            let n = max(0, counts[iface] ?? 0)
+            if n == 0 { continue }
+            for i in 1...n {
+                let pid = stableUUID("computerPort|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                if pid == e.portId {
+                    return ResolvedEndpoint(kind: .computerInterface(iface))
+                }
+            }
+        }
+
+        return ResolvedEndpoint(kind: .unknown)
+    }
+
+    private func validateEdge(output: IOEndpointRef, input: IOEndpointRef) -> String? {
+        let outR = resolveEndpoint(output)
+        let inR = resolveEndpoint(input)
+
+        // --- MADI: only MADI Out -> MADI In ---
+        if case let .devicePort(type: outType, portName: _) = outR.kind,
+           case let .devicePort(type: inType, portName: _) = inR.kind {
+            let usesMadi = (outType == .madiOut || outType == .madiIn || inType == .madiOut || inType == .madiIn)
+            if usesMadi && !(outType == .madiOut && inType == .madiIn) {
+                return "MADI connections must go from a MADI output to a MADI input."
+            }
+        } else {
+            if case let .devicePort(type: outType, portName: _) = outR.kind, (outType == .madiOut || outType == .madiIn) {
+                return "MADI connections must go from a MADI output to a MADI input."
+            }
+            if case let .devicePort(type: inType, portName: _) = inR.kind, (inType == .madiOut || inType == .madiIn) {
+                return "MADI connections must go from a MADI output to a MADI input."
+            }
+        }
+
+        // --- Dante: only Dante (Ethernet) <-> Computer Ethernet ---
+        func isDanteDevicePort(_ r: ResolvedEndpoint) -> Bool {
+            if case let .devicePort(type: t, portName: n) = r.kind {
+                return t == .ethernet && n.localizedCaseInsensitiveContains("dante")
+            }
+            return false
+        }
+        func isComputerEthernet(_ r: ResolvedEndpoint) -> Bool {
+            if case let .computerInterface(iface) = r.kind { return iface == .ethernet }
+            return false
+        }
+
+        let outIsDante = isDanteDevicePort(outR)
+        let inIsDante = isDanteDevicePort(inR)
+        if outIsDante || inIsDante {
+            let ok = (outIsDante && isComputerEthernet(inR)) || (inIsDante && isComputerEthernet(outR))
+            if !ok {
+                return "Dante connections must connect between a Dante (Ethernet) port and a computer Ethernet interface."
+            }
+        }
+
+        return nil
     }
 }
 
@@ -780,32 +867,42 @@ fileprivate struct ComputerEndpointsColumnView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(device.computerInterfaces.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
-                let portId = stableUUID("computerPort|\(device.id.uuidString)|\(iface.rawValue)")
-                let channelId = stableUUID("computerCh|\(device.id.uuidString)|\(iface.rawValue)")
+            let counts = device.computerInterfaceCounts
+            let keys = counts.keys.sorted(by: { $0.rawValue < $1.rawValue })
 
-                let endpoint = IOEndpointRef(
-                    deviceId: device.id,
-                    portId: portId,
-                    channelId: channelId,
-                    direction: direction
-                )
+            ForEach(keys, id: \.self) { iface in
+                let n = max(0, counts[iface] ?? 0)
+                if n > 0 {
+                    ForEach(1...n, id: \.self) { idx in
+                        let portId = stableUUID("computerPort|\(device.id.uuidString)|\(iface.rawValue)|\(idx)")
+                        let channelId = stableUUID("computerCh|\(device.id.uuidString)|\(iface.rawValue)|\(idx)")
 
-                EndpointRowView(
-                    studioId: studioId,
-                    endpoint: endpoint,
-                    portName: iface.rawValue,
-                    channelName: "",
-                    allowsNaming: false, // computer endpoints NOT nameable
-                    side: side,
-                    direction: direction,
-                    bundle: $bundle,
-                    store: store,
-                    onCreateEdge: onCreateEdge,
-                    onBeginDrag: onBeginDrag,
-                    onUpdateDrag: onUpdateDrag,
-                    onEndDrag: onEndDrag
-                )
+                        let endpoint = IOEndpointRef(
+                            deviceId: device.id,
+                            portId: portId,
+                            channelId: channelId,
+                            direction: direction
+                        )
+
+                        let label = (n > 1) ? "\(iface.rawValue) \(idx)" : iface.rawValue
+
+                        EndpointRowView(
+                            studioId: studioId,
+                            endpoint: endpoint,
+                            portName: label,
+                            channelName: "",
+                            allowsNaming: false, // computer endpoints NOT nameable
+                            side: side,
+                            direction: direction,
+                            bundle: $bundle,
+                            store: store,
+                            onCreateEdge: onCreateEdge,
+                            onBeginDrag: onBeginDrag,
+                            onUpdateDrag: onUpdateDrag,
+                            onEndDrag: onEndDrag
+                        )
+                    }
+                }
             }
         }
     }
@@ -1003,16 +1100,19 @@ fileprivate struct EndpointRectPreferenceKey: PreferenceKey {
 // MARK: - Sorting helpers (Connections overlay)
 
 fileprivate func connectionPortSortKey(_ name: String) -> (Int, Int, String) {
-    // Goal: Analog 1, Analog 2, ... then ADAT, S/PDIF, AES, MIDI, etc.
+    // Goal: Analog 1, Analog 2, ... then ADAT, MADI, Dante, Ethernet, S/PDIF, AES, MIDI, etc.
     // We sort by a coarse type rank, then by extracted number, then by raw name.
     let lower = name.lowercased()
 
     let rank: Int
     if lower.contains("analog") { rank = 0 }
     else if lower.contains("adat") { rank = 1 }
-    else if lower.contains("spdif") || lower.contains("s/pdif") { rank = 2 }
-    else if lower.contains("aes") { rank = 3 }
-    else if lower.contains("midi") { rank = 4 }
+    else if lower.contains("madi") { rank = 2 }
+    else if lower.contains("dante") { rank = 3 }
+    else if lower.contains("ethernet") { rank = 4 }
+    else if lower.contains("spdif") || lower.contains("s/pdif") { rank = 5 }
+    else if lower.contains("aes") { rank = 6 }
+    else if lower.contains("midi") { rank = 7 }
     else { rank = 9 }
 
     return (rank, extractFirstInt(from: name) ?? Int.max, name)
@@ -1068,4 +1168,8 @@ fileprivate struct Triangle: Shape {
         p.closeSubpath()
         return p
     }
-}
+  
+    }
+
+
+

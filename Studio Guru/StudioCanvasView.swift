@@ -370,12 +370,21 @@ struct StudioCanvasView: View {
                 }
                 
                 .sheet(isPresented: $isShowingConnectionExplosion) {
-                    VStack(spacing: 12) {
-                        Image(systemName: "bolt.fill").foregroundStyle(.yellow)
-                        Text("Connections overview coming soon")
-                        Button("Close") { isShowingConnectionExplosion = false }
+                    if let studio = currentStudio, let centerId = explosionDeviceId, let center = studio.devices.first(where: { $0.id == centerId }) {
+                        ExplosionOverviewView(
+                            studio: studio,
+                            centerDevice: center,
+                            connectionsStore: connectionsStore,
+                            onClose: { isShowingConnectionExplosion = false }
+                        )
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                            Text("No device selected")
+                            Button("Close") { isShowingConnectionExplosion = false }
+                        }
+                        .padding()
                     }
-                    .padding()
                 }
                 
                 .sheet(isPresented: $isShowingMoveDeviceDialog) {
@@ -2619,6 +2628,148 @@ private struct DeviceInspectorOverlay: View {
                     Button("Close") {
                         dismiss()
                     }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - DeviceExplosionDetailView
+
+private struct DeviceExplosionDetailView: View {
+    let studio: Studio
+    let device: DeviceInstance
+    let connectionsStore: ConnectionsStore
+
+    private func endpoint(for port: Port, channel: Channel) -> IOEndpointRef {
+        let dir: IOEndpointRef.Direction = (port.direction == .input) ? .input : .output
+        return IOEndpointRef(deviceId: device.id, portId: port.id, channelId: channel.id, direction: dir)
+    }
+
+    private func rowLabel(port: Port, channel: Channel) -> String {
+        let short = channel.nameShort.trimmingCharacters(in: .whitespacesAndNewlines)
+        if short.isEmpty {
+            return port.name
+        }
+        // Prefer the short label if it already implies index (e.g. "In1"), otherwise keep it readable.
+        return "\(port.name) \(short)"
+    }
+
+    private func statusText(for endpoint: IOEndpointRef) -> String {
+        connectionsStore.connectedToText(studio: studio, studioId: studio.id, endpoint: endpoint) ?? "open"
+    }
+
+    private func isOpen(_ endpoint: IOEndpointRef) -> Bool {
+        connectionsStore.occupancyForEndpoint(studioId: studio.id, endpoint: endpoint) == nil
+    }
+
+    private var inputPorts: [Port] {
+        device.ports
+            .filter { $0.direction == .input }
+            .sorted(by: portSort)
+    }
+
+    private var outputPorts: [Port] {
+        device.ports
+            .filter { $0.direction == .output }
+            .sorted(by: portSort)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(device.nickname)
+                        .font(.title2)
+                        .bold()
+                    let used = (inputPorts + outputPorts).flatMap { p in p.channels.map { endpoint(for: p, channel: $0) } }
+                        .filter { !isOpen($0) }
+                        .count
+                    let total = (inputPorts + outputPorts).reduce(0) { $0 + $1.channels.count }
+                    Text("\(used) in use • \(max(0, total - used)) open")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            if !inputPorts.isEmpty {
+                Section("Inputs") {
+                    ForEach(inputPorts, id: \.id) { p in
+                        ForEach(p.channels.sorted(by: { $0.index < $1.index }), id: \.id) { ch in
+                            let ep = endpoint(for: p, channel: ch)
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(rowLabel(port: p, channel: ch))
+                                    Text(statusText(for: ep))
+                                        .font(.caption)
+                                        .foregroundStyle(isOpen(ep) ? .secondary : .primary)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                Image(systemName: isOpen(ep) ? "circle" : "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            }
+
+            if !outputPorts.isEmpty {
+                Section("Outputs") {
+                    ForEach(outputPorts, id: \.id) { p in
+                        ForEach(p.channels.sorted(by: { $0.index < $1.index }), id: \.id) { ch in
+                            let ep = endpoint(for: p, channel: ch)
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(rowLabel(port: p, channel: ch))
+                                    Text(statusText(for: ep))
+                                        .font(.caption)
+                                        .foregroundStyle(isOpen(ep) ? .secondary : .primary)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                Image(systemName: isOpen(ep) ? "circle" : "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            }
+
+            if inputPorts.isEmpty && outputPorts.isEmpty {
+                Section {
+                    Text("No I/O endpoints found for this device yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Device I/O")
+    }
+}
+
+// MARK: - ExplosionOverviewView
+
+private struct ExplosionOverviewView: View {
+    let studio: Studio
+    let centerDevice: DeviceInstance
+    let connectionsStore: ConnectionsStore
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            DeviceExplosionDetailView(
+                studio: studio,
+                device: centerDevice,
+                connectionsStore: connectionsStore
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { onClose() }
                 }
             }
         }

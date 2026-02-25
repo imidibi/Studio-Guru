@@ -222,6 +222,98 @@ final class ConnectionsStore: ObservableObject {
         }
     }
 
+    // MARK: - Explosion / occupancy helpers
+
+    struct EndpointOccupancy: Hashable {
+        let endpoint: IOEndpointRef
+        let edge: ConnectionEdge
+        let bundle: ConnectionBundle
+        let isEndpointFromSide: Bool  // true if `endpoint` == edge.from, false if `endpoint` == edge.to
+
+        var otherEndpoint: IOEndpointRef { isEndpointFromSide ? edge.to : edge.from }
+        var otherNameFromEdge: String { isEndpointFromSide ? edge.toName : edge.fromName }
+    }
+
+    /// Returns the first edge that uses the given endpoint (either as from or to).
+    func occupancyForEndpoint(studioId: UUID, endpoint: IOEndpointRef) -> EndpointOccupancy? {
+        guard let studioBundles = bundlesByStudio[studioId] else { return nil }
+        for (_, bundle) in studioBundles {
+            if let e = bundle.edges.first(where: { $0.from == endpoint }) {
+                return EndpointOccupancy(endpoint: endpoint, edge: e, bundle: bundle, isEndpointFromSide: true)
+            }
+            if let e = bundle.edges.first(where: { $0.to == endpoint }) {
+                return EndpointOccupancy(endpoint: endpoint, edge: e, bundle: bundle, isEndpointFromSide: false)
+            }
+        }
+        return nil
+    }
+
+    /// Resolve a human-friendly label for an endpoint.
+    /// - Prefers per-endpoint naming stored in the bundle (user-entered names)
+    /// - Falls back to device port + channel labels from the Studio models
+    func endpointDisplayLabel(studio: Studio, bundle: ConnectionBundle?, endpoint: IOEndpointRef) -> String {
+        // 1) Prefer bundle-provided endpoint name (typed by user in the overlay)
+        if let bundle {
+            let key = "\(endpoint.deviceId.uuidString):\(endpoint.portId.uuidString):\(endpoint.channelId.uuidString):\(endpoint.direction.rawValue)"
+            if let named = bundle.endpointNames[key], !named.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return named
+            }
+        }
+
+        // 2) Fall back to device port/channel labels
+        guard let device = studio.devices.first(where: { $0.id == endpoint.deviceId }) else {
+            return "(Unknown)"
+        }
+
+        // Regular device ports
+        if let p = device.ports.first(where: { $0.id == endpoint.portId }) {
+            let portName = p.name
+            if let ch = p.channels.first(where: { $0.id == endpoint.channelId }) {
+                let short = ch.nameShort.trimmingCharacters(in: .whitespacesAndNewlines)
+                return short.isEmpty ? portName : "\(portName) \(short)"
+            }
+            return portName
+        }
+
+        // Computer interface endpoints (stable UUIDs)
+        let counts = device.computerInterfaceCounts
+        for iface in counts.keys {
+            let n = max(0, counts[iface] ?? 0)
+            if n == 0 { continue }
+            for i in 1...n {
+                let pid = stableUUID("computerPort|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                let cid = stableUUID("computerCh|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                if pid == endpoint.portId && cid == endpoint.channelId {
+                    return (n > 1) ? "\(iface.rawValue) \(i)" : iface.rawValue
+                }
+            }
+        }
+
+        return "(Unknown)"
+    }
+
+    /// Returns a display string for what's connected to the given endpoint ("<Other Device> — <Other Endpoint>").
+    func connectedToText(studio: Studio, studioId: UUID, endpoint: IOEndpointRef) -> String? {
+        guard let occ = occupancyForEndpoint(studioId: studioId, endpoint: endpoint) else { return nil }
+
+        let otherDeviceName = studio.devices.first(where: { $0.id == occ.otherEndpoint.deviceId })?.nickname ?? "(Unknown Device)"
+
+        // Prefer other endpoint's user-entered name (from bundle.endpointNames), else edge-provided name, else model label.
+        let otherLabelFromNames = endpointDisplayLabel(studio: studio, bundle: occ.bundle, endpoint: occ.otherEndpoint)
+        let edgeName = occ.otherNameFromEdge.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let rhs: String
+        if !otherLabelFromNames.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && otherLabelFromNames != "(Unknown)" {
+            rhs = otherLabelFromNames
+        } else if !edgeName.isEmpty {
+            rhs = edgeName
+        } else {
+            rhs = endpointDisplayLabel(studio: studio, bundle: nil, endpoint: occ.otherEndpoint)
+        }
+
+        return "\(otherDeviceName) — \(rhs)"
+    }
+
     func load(studioId: UUID) {
         let key = persistenceKey(studioId)
         guard let data = UserDefaults.standard.data(forKey: key) else { return }

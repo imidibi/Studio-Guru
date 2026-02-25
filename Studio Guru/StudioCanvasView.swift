@@ -84,6 +84,14 @@ struct StudioCanvasView: View {
     // Delete device confirm
     @State private var isShowingDeleteDeviceConfirm: Bool = false
     @State private var deviceIdPendingDelete: UUID? = nil
+    
+    // Clone / Move device
+    @State private var isShowingMoveDeviceDialog: Bool = false
+    @State private var deviceIdPendingMove: UUID? = nil
+
+    // Connection “explosion”
+    @State private var isShowingConnectionExplosion: Bool = false
+    @State private var explosionDeviceId: UUID? = nil
 
     // Device inspector overlay
     @State private var presentedInspectorDeviceId: UUID? = nil
@@ -296,6 +304,10 @@ struct StudioCanvasView: View {
                             onRequestDeleteLink: { link in
                                 connectionEditorLinkId = link.id
                                 isShowingDeleteConnectionConfirm = true
+                            },
+                            onExplodeDevice: { device in
+                                explosionDeviceId = device.id
+                                isShowingConnectionExplosion = true
                             }
                         )
                         .environmentObject(selectionState)
@@ -354,6 +366,16 @@ struct StudioCanvasView: View {
                         Text("No connection selected").padding()
                     }
                 }
+                
+                .sheet(isPresented: $isShowingConnectionExplosion) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                        Text("Connections overview coming soon")
+                        Button("Close") { isShowingConnectionExplosion = false }
+                    }
+                    .padding()
+                }
+                
                 // Device Inspector Overlay Sheet
                 .onReceive(selectionState.$selection) { sel in
                     // If we just saved from the editor, don't immediately present the inspector.
@@ -390,6 +412,13 @@ struct StudioCanvasView: View {
                             onRequestDeleteDevice: { d in
                                 deviceIdPendingDelete = d.id
                                 isShowingDeleteDeviceConfirm = true
+                            },
+                            onCloneDevice: { d in
+                                cloneDevice(d, in: studio)
+                            },
+                            onRequestMoveDevice: { d in
+                                deviceIdPendingMove = d.id
+                                isShowingMoveDeviceDialog = true
                             }
                         )
                     } else {
@@ -620,6 +649,46 @@ struct StudioCanvasView: View {
         studio.devices.remove(at: idx)
         deviceIdPendingDelete = nil
         selectionState.selection = nil
+    }
+
+    private func cloneDevice(_ device: DeviceInstance, in studio: Studio) {
+        // Simple clone: duplicate the device with a slight offset and same properties.
+        let newDevice = DeviceInstance(
+            manufacturer: device.manufacturer,
+            model: device.model,
+            nickname: device.nickname + " Copy",
+            category: device.category,
+            serialNumber: "",
+            location: device.location,
+            audioInputsCount: device.audioInputsCount,
+            audioOutputsCount: device.audioOutputsCount,
+            adatInputPortsCount: device.adatInputPortsCount,
+            adatOutputPortsCount: device.adatOutputPortsCount,
+            madiInputPortsCount: device.madiInputPortsCount,
+            madiOutputPortsCount: device.madiOutputPortsCount,
+            sampleRate: SampleRate(rawValue: device.sampleRateRaw) ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
+            digitalInputs: device.digitalInputs,
+            digitalOutputs: device.digitalOutputs,
+            computerInterfaces: device.computerInterfaces,
+            posX: device.posX + 30,
+            posY: device.posY + 30,
+            scale: device.scale,
+            zIndex: device.zIndex
+        )
+        newDevice.ports = device.ports.map { p in
+            let np = Port(name: p.name, type: p.type, direction: p.direction)
+            np.channels = p.channels.map { ch in
+                Channel(index: ch.index, nameLong: ch.nameLong, nameShort: ch.nameShort, signal: ch.signal, grouping: ch.grouping)
+            }
+            return np
+        }
+        studio.devices.append(newDevice)
+        selectionState.selection = .device(newDevice.id)
+    }
+
+    private func moveDevice(_ device: DeviceInstance, to studio: Studio) {
+        // Placeholder: future implementation for moving between studios.
+        // For now, no-op to satisfy compiler.
     }
 
     private func addExampleRig(to studio: Studio) {
@@ -997,8 +1066,9 @@ private struct CanvasSurfaceView: View {
     let connectionsStore: ConnectionsStore
     let onSelectLink: (ConnectionLinkSummary) -> Void
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
+    let onExplodeDevice: (DeviceInstance) -> Void
     @EnvironmentObject var selection: SelectionState
-
+    
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
     @State private var activeConnectionDrag: (fromId: UUID, start: CGPoint, location: CGPoint)? = nil
     @State private var hoveredConnectionTargetId: UUID? = nil
@@ -1068,6 +1138,7 @@ private struct CanvasSurfaceView: View {
             isConnectionTarget: isTarget,
             canvasSize: canvasSize,
             connectionHandleTip: tip,
+            onExplode: { onExplodeDevice(d) },
             dragOrigin: $dragOrigin,
             beginDragIfNeeded: { device in
                 if dragOrigin?.id != device.id {
@@ -1144,6 +1215,7 @@ private struct DeviceCardView: View {
     let isConnectionTarget: Bool
     let canvasSize: CGSize
     let connectionHandleTip: CGPoint?
+    let onExplode: () -> Void
 
     @Binding var dragOrigin: (id: UUID, x: Double, y: Double)?
     let beginDragIfNeeded: (DeviceInstance) -> Void
@@ -1235,6 +1307,9 @@ private struct DeviceCardView: View {
         .onTapGesture {
             selection.selection = .device(device.id)
         }
+        .onLongPressGesture(minimumDuration: 0.35) {
+            onExplode()
+        }
         .onDisappear {
             isDraggingConnection = false
         }
@@ -1273,6 +1348,8 @@ private struct InspectorPanel: View {
     let studio: Studio
     let onEditDevice: (DeviceInstance) -> Void
     let onRequestDeleteDevice: (DeviceInstance) -> Void
+    let onCloneDevice: (DeviceInstance) -> Void
+    let onRequestMoveDevice: (DeviceInstance) -> Void
     @EnvironmentObject var selection: SelectionState
 
     @State private var isImportingManual: Bool = false
@@ -1415,23 +1492,43 @@ private struct InspectorPanel: View {
                             }
                         }
                         Section {
-                            HStack(spacing: 12) {
-                                Button {
-                                    onEditDevice(d)
-                                } label: {
-                                    Label("Edit Device", systemImage: "pencil")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
+                            VStack(spacing: 10) {
+                                HStack(spacing: 12) {
+                                    Button {
+                                        onEditDevice(d)
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
 
-                                Button(role: .destructive) {
-                                    onRequestDeleteDevice(d)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                        .frame(maxWidth: .infinity)
+                                    Button(role: .destructive) {
+                                        onRequestDeleteDevice(d)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.red)
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
+
+                                HStack(spacing: 12) {
+                                    Button {
+                                        onCloneDevice(d)
+                                    } label: {
+                                        Label("Clone", systemImage: "plus.square.on.square")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button {
+                                        onRequestMoveDevice(d)
+                                    } label: {
+                                        Label("Move", systemImage: "arrowshape.turn.up.right")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
                             }
                             .padding(.vertical, 4)
                         }
@@ -2186,6 +2283,8 @@ private struct DeviceInspectorOverlay: View {
     let deviceId: UUID
     let onEditDevice: (DeviceInstance) -> Void
     let onRequestDeleteDevice: (DeviceInstance) -> Void
+    let onCloneDevice: (DeviceInstance) -> Void
+    let onRequestMoveDevice: (DeviceInstance) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -2314,23 +2413,43 @@ private struct DeviceInspectorOverlay: View {
                         }
 
                         Section {
-                            HStack(spacing: 12) {
-                                Button {
-                                    onEditDevice(d)
-                                } label: {
-                                    Label("Edit Device", systemImage: "pencil")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
+                            VStack(spacing: 10) {
+                                HStack(spacing: 12) {
+                                    Button {
+                                        onEditDevice(d)
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
 
-                                Button(role: .destructive) {
-                                    onRequestDeleteDevice(d)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                        .frame(maxWidth: .infinity)
+                                    Button(role: .destructive) {
+                                        onRequestDeleteDevice(d)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(.red)
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
+
+                                HStack(spacing: 12) {
+                                    Button {
+                                        onCloneDevice(d)
+                                    } label: {
+                                        Label("Clone", systemImage: "plus.square.on.square")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button {
+                                        onRequestMoveDevice(d)
+                                    } label: {
+                                        Label("Move", systemImage: "arrowshape.turn.up.right")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
                             }
                             .padding(.vertical, 4)
                         }

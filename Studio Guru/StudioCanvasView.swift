@@ -88,6 +88,8 @@ struct StudioCanvasView: View {
     // Clone / Move device
     @State private var isShowingMoveDeviceDialog: Bool = false
     @State private var deviceIdPendingMove: UUID? = nil
+    @State private var moveTargetStudioId: UUID? = nil
+    @State private var moveErrorMessage: String? = nil
 
     // Connection “explosion”
     @State private var isShowingConnectionExplosion: Bool = false
@@ -376,6 +378,60 @@ struct StudioCanvasView: View {
                     .padding()
                 }
                 
+                .sheet(isPresented: $isShowingMoveDeviceDialog) {
+                    if let deviceId = deviceIdPendingMove,
+                       let sourceStudio = currentStudio,
+                       let device = sourceStudio.devices.first(where: { $0.id == deviceId }) {
+                        NavigationStack {
+                            Form {
+                                Section("Move To Studio") {
+                                    Picker("Destination", selection: Binding(
+                                        get: { moveTargetStudioId ?? studios.first?.id },
+                                        set: { moveTargetStudioId = $0 }
+                                    )) {
+                                        ForEach(studiosSortedByName.filter { $0.id != sourceStudio.id }, id: \.id) { s in
+                                            Text(s.name).tag(s.id as UUID?)
+                                        }
+                                    }
+                                }
+                                if let msg = moveErrorMessage {
+                                    Section {
+                                        Text(msg).foregroundStyle(.red)
+                                    }
+                                }
+                            }
+                            .navigationTitle("Move Device")
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Cancel") {
+                                        moveTargetStudioId = nil
+                                        moveErrorMessage = nil
+                                        deviceIdPendingMove = nil
+                                        isShowingMoveDeviceDialog = false
+                                    }
+                                }
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Move") {
+                                        guard let destId = moveTargetStudioId ?? studios.first?.id,
+                                              let destStudio = studios.first(where: { $0.id == destId }),
+                                              destStudio.id != sourceStudio.id else {
+                                            moveErrorMessage = "Please choose a different destination studio."
+                                            return
+                                        }
+                                        moveDevice(device, from: sourceStudio, to: destStudio)
+                                        moveTargetStudioId = nil
+                                        moveErrorMessage = nil
+                                        deviceIdPendingMove = nil
+                                        isShowingMoveDeviceDialog = false
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text("No device selected").padding()
+                    }
+                }
+                
                 // Device Inspector Overlay Sheet
                 .onReceive(selectionState.$selection) { sel in
                     // If we just saved from the editor, don't immediately present the inspector.
@@ -410,13 +466,18 @@ struct StudioCanvasView: View {
                             deviceId: item.id,
                             onEditDevice: { d in beginEditDevice(d) },
                             onRequestDeleteDevice: { d in
+                                presentedInspectorDeviceId = nil
+                                isShowingDeviceEditor = false
                                 deviceIdPendingDelete = d.id
                                 isShowingDeleteDeviceConfirm = true
                             },
                             onCloneDevice: { d in
+                                presentedInspectorDeviceId = nil
+                                isShowingDeviceEditor = false
                                 cloneDevice(d, in: studio)
                             },
                             onRequestMoveDevice: { d in
+                                presentedInspectorDeviceId = nil
                                 deviceIdPendingMove = d.id
                                 isShowingMoveDeviceDialog = true
                             }
@@ -686,9 +747,63 @@ struct StudioCanvasView: View {
         selectionState.selection = .device(newDevice.id)
     }
 
-    private func moveDevice(_ device: DeviceInstance, to studio: Studio) {
-        // Placeholder: future implementation for moving between studios.
-        // For now, no-op to satisfy compiler.
+    private func moveDevice(_ device: DeviceInstance, from source: Studio, to destination: Studio) {
+        // Remove from source studio
+        if let idx = source.devices.firstIndex(where: { $0.id == device.id }) {
+            // Dismiss any presented inspector overlay during move
+            presentedInspectorDeviceId = nil
+            
+            let removed = source.devices.remove(at: idx)
+            // Append to destination studio
+            let newPos = findAvailableDevicePosition(in: destination, canvas: canvasSize)
+            let moved = DeviceInstance(
+                manufacturer: removed.manufacturer,
+                model: removed.model,
+                nickname: removed.nickname,
+                category: removed.category,
+                serialNumber: removed.serialNumber,
+                location: removed.location,
+                audioInputsCount: removed.audioInputsCount,
+                audioOutputsCount: removed.audioOutputsCount,
+                adatInputPortsCount: removed.adatInputPortsCount,
+                adatOutputPortsCount: removed.adatOutputPortsCount,
+                madiInputPortsCount: removed.madiInputPortsCount,
+                madiOutputPortsCount: removed.madiOutputPortsCount,
+                sampleRate: SampleRate(rawValue: removed.sampleRateRaw) ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
+                digitalInputs: removed.digitalInputs,
+                digitalOutputs: removed.digitalOutputs,
+                computerInterfaces: removed.computerInterfaces,
+                posX: newPos.x,
+                posY: newPos.y,
+                scale: removed.scale,
+                zIndex: removed.zIndex
+            )
+            moved.frontImagePath = removed.frontImagePath
+            moved.rearImagePath = removed.rearImagePath
+            moved.ports = removed.ports.map { p in
+                let np = Port(name: p.name, type: p.type, direction: p.direction)
+                np.channels = p.channels.map { ch in
+                    Channel(index: ch.index, nameLong: ch.nameLong, nameShort: ch.nameShort, signal: ch.signal, grouping: ch.grouping)
+                }
+                return np
+            }
+            destination.devices.append(moved)
+            
+            // Remove any connections involving the old device in the source studio
+            let sourceLinks = connectionsStore.links(for: source.id)
+            for link in sourceLinks where (link.fromDeviceId == device.id || link.toDeviceId == device.id) {
+                _ = connectionsStore.deleteBundle(studioId: source.id, linkId: link.id)
+            }
+            // Ensure there are no connections in destination that reference the new device (should be none yet)
+            let destLinks = connectionsStore.links(for: destination.id)
+            for link in destLinks where (link.fromDeviceId == moved.id || link.toDeviceId == moved.id) {
+                _ = connectionsStore.deleteBundle(studioId: destination.id, linkId: link.id)
+            }
+            
+            // Update selection to moved device and switch selected studio
+            selectedStudioId = destination.id
+            selectionState.selection = .device(moved.id)
+        }
     }
 
     private func addExampleRig(to studio: Studio) {

@@ -94,6 +94,8 @@ struct StudioCanvasView: View {
     // Connection “explosion”
     @State private var isShowingConnectionExplosion: Bool = false
     @State private var explosionDeviceId: UUID? = nil
+    @State private var explosionCooldownUntil: Date? = nil
+    @State private var suppressExplosionReopen: Bool = false
 
     // Device inspector overlay
     @State private var presentedInspectorDeviceId: UUID? = nil
@@ -308,6 +310,11 @@ struct StudioCanvasView: View {
                                 isShowingDeleteConnectionConfirm = true
                             },
                             onExplodeDevice: { device in
+                                // Avoid immediate re-open when dismissing the sheet or during the same gesture cycle.
+                                if suppressExplosionReopen { return }
+                                if let until = explosionCooldownUntil, Date() < until { return }
+                                if isShowingConnectionExplosion { return }
+
                                 explosionDeviceId = device.id
                                 isShowingConnectionExplosion = true
                             }
@@ -369,19 +376,42 @@ struct StudioCanvasView: View {
                     }
                 }
                 
-                .sheet(isPresented: $isShowingConnectionExplosion) {
+                .sheet(isPresented: $isShowingConnectionExplosion, onDismiss: {
+                    suppressExplosionReopen = true
+                    explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                    explosionDeviceId = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        suppressExplosionReopen = false
+                    }
+                }) {
                     if let studio = currentStudio, let centerId = explosionDeviceId, let center = studio.devices.first(where: { $0.id == centerId }) {
                         ExplosionOverviewView(
                             studio: studio,
                             centerDevice: center,
                             connectionsStore: connectionsStore,
-                            onClose: { isShowingConnectionExplosion = false }
+                            onClose: {
+                                suppressExplosionReopen = true
+                                explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                                explosionDeviceId = nil
+                                isShowingConnectionExplosion = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                                    suppressExplosionReopen = false
+                                }
+                            }
                         )
                     } else {
                         VStack(spacing: 12) {
                             Image(systemName: "bolt.fill").foregroundStyle(.yellow)
                             Text("No device selected")
-                            Button("Close") { isShowingConnectionExplosion = false }
+                            Button("Close") {
+                                suppressExplosionReopen = true
+                                explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                                explosionDeviceId = nil
+                                isShowingConnectionExplosion = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                                    suppressExplosionReopen = false
+                                }
+                            }
                         }
                         .padding()
                     }
@@ -702,6 +732,7 @@ struct StudioCanvasView: View {
             adatOutputPorts: device.adatOutputPortsCount,
             madiInputPorts: device.madiInputPortsCount,
             madiOutputPorts: device.madiOutputPortsCount,
+            computerInterfaceCounts: device.computerInterfaceCounts,
             sampleRate: draftSampleRate
         )
 
@@ -851,6 +882,7 @@ struct StudioCanvasView: View {
                 adatOutputPorts: d.adatOutputPortsCount,
                 madiInputPorts: d.madiInputPortsCount,
                 madiOutputPorts: d.madiOutputPortsCount,
+                computerInterfaceCounts: d.computerInterfaceCounts,
                 sampleRate: defaultSR
             )
             studio.devices.append(d)
@@ -867,6 +899,7 @@ struct StudioCanvasView: View {
         adatOutputPorts: Int,
         madiInputPorts: Int,
         madiOutputPorts: Int,
+        computerInterfaceCounts: [ComputerInterface: Int],
         sampleRate: SampleRate
     ) -> [Port] {
         var ports: [Port] = []
@@ -947,7 +980,36 @@ struct StudioCanvasView: View {
             }
         }
 
+        // Computer I/O (USB / Thunderbolt / Ethernet, etc.)
+        // We model these as 1-channel logical ports so they can participate in endpoint occupancy
+        // and show up in DeviceExplosionDetailView.
+        if !computerInterfaceCounts.isEmpty {
+            let sortedIfaces = computerInterfaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue })
+            for iface in sortedIfaces {
+                let count = max(0, computerInterfaceCounts[iface] ?? 0)
+                if count == 0 { continue }
 
+                for i in 0..<count {
+                    let suffix = count > 1 ? " \(i + 1)" : ""
+
+                    // Inputs
+                    do {
+                        let name = "\(iface.rawValue) In\(suffix)"
+                        let p = Port(name: name, type: .ethernet, direction: .input)
+                        p.channels = [Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")]
+                        ports.append(p)
+                    }
+
+                    // Outputs
+                    do {
+                        let name = "\(iface.rawValue) Out\(suffix)"
+                        let p = Port(name: name, type: .ethernet, direction: .output)
+                        p.channels = [Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")]
+                        ports.append(p)
+                    }
+                }
+            }
+        }
 
         return ports
     }
@@ -1432,8 +1494,12 @@ private struct DeviceCardView: View {
             selection.selection = .device(device.id)
         }
         .onLongPressGesture(minimumDuration: 0.35) {
+            // Ensure the first long-press also establishes selection so the inspector
+            // and any explosion UI doesn’t see a nil selection.
+            selection.selection = .device(device.id)
             onExplode()
         }
+// Update all call sites of buildPorts to include computerInterfaceCounts argument:
         .onDisappear {
             isDraggingConnection = false
         }
@@ -1465,6 +1531,7 @@ private struct DeviceCardView: View {
         )
     }
 }
+
 
 // MARK: - Inspector
 
@@ -2692,6 +2759,20 @@ private struct DeviceExplosionDetailView: View {
                 }
                 .padding(.vertical, 4)
             }
+            
+            let ifaceCounts = device.computerInterfaceCounts
+            if !ifaceCounts.isEmpty {
+                Section("Computer Interfaces") {
+                    ForEach(ifaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
+                        HStack {
+                            Text(iface.rawValue)
+                            Spacer()
+                            Text("×\(ifaceCounts[iface] ?? 0)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
 
             if !inputPorts.isEmpty {
                 Section("Inputs") {
@@ -2812,3 +2893,5 @@ private func portSort(_ a: Port, _ b: Port) -> Bool {
     return a.name.localizedStandardCompare(b.name) == .orderedAscending
 }
 
+
+// Search for other buildPorts( calls:

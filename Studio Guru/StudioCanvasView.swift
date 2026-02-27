@@ -95,6 +95,7 @@ struct StudioCanvasView: View {
     // Connection “explosion”
     @State private var isShowingConnectionExplosion: Bool = false
     @State private var explosionDeviceId: UUID? = nil
+    @State private var explosionDeviceSnapshot: DeviceInstance? = nil
     @State private var explosionCooldownUntil: Date? = nil
     @State private var suppressExplosionReopen: Bool = false
 
@@ -251,6 +252,7 @@ struct StudioCanvasView: View {
                 suppressExplosionReopen = true
                 explosionCooldownUntil = Date().addingTimeInterval(0.9)
                 explosionDeviceId = nil
+                explosionDeviceSnapshot = nil
                 suppressNextInspectorPresentation = true
                 selectionState.selection = nil
                 suppressInspectorUntil = Date().addingTimeInterval(0.9)
@@ -358,6 +360,7 @@ struct StudioCanvasView: View {
                     if let until = explosionCooldownUntil, Date() < until { return }
                     if isShowingConnectionExplosion { return }
                     explosionDeviceId = device.id
+                    explosionDeviceSnapshot = device
                     isShowingConnectionExplosion = true
                 },
                 canvasSize: $canvasSize
@@ -375,8 +378,7 @@ struct StudioCanvasView: View {
     @ViewBuilder
     private var explosionSheetContent: some View {
         if let studio = currentStudio,
-           let centerId = explosionDeviceId,
-           let center = studio.devices.first(where: { $0.id == centerId }) {
+           let center = explosionDeviceSnapshot ?? studio.devices.first(where: { $0.id == explosionDeviceId }) {
             ExplosionOverviewView(
                 studio: studio,
                 centerDevice: center,
@@ -385,6 +387,7 @@ struct StudioCanvasView: View {
                     suppressExplosionReopen = true
                     explosionCooldownUntil = Date().addingTimeInterval(0.9)
                     explosionDeviceId = nil
+                    explosionDeviceSnapshot = nil
                     isShowingConnectionExplosion = false
                     suppressNextInspectorPresentation = true
                     selectionState.selection = nil
@@ -403,6 +406,7 @@ struct StudioCanvasView: View {
                     suppressExplosionReopen = true
                     explosionCooldownUntil = Date().addingTimeInterval(0.9)
                     explosionDeviceId = nil
+                    explosionDeviceSnapshot = nil
                     isShowingConnectionExplosion = false
                     suppressNextInspectorPresentation = true
                     selectionState.selection = nil
@@ -2799,6 +2803,11 @@ private struct DeviceInspectorOverlay: View {
                 }
             }
             .navigationTitle("Device")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
         }
     }
 }
@@ -2887,7 +2896,23 @@ private struct DeviceExplosionDetailView: View {
     }
 
     var body: some View {
-        List {
+        Group {
+            #if os(macOS)
+            Form {
+                explosionContent
+            }
+            .formStyle(.grouped)
+            #else
+            List {
+                explosionContent
+            }
+            #endif
+        }
+        .navigationTitle("Device I/O")
+    }
+
+    @ViewBuilder
+    private var explosionContent: some View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.nickname)
@@ -2993,8 +3018,6 @@ private struct DeviceExplosionDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-        .navigationTitle("Device I/O")
     }
 }
 

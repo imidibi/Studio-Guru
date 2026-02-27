@@ -10,6 +10,7 @@ import Combine
 
 import SwiftData
 import UniformTypeIdentifiers
+import CryptoKit
 
 
 #if os(iOS)
@@ -99,6 +100,7 @@ struct StudioCanvasView: View {
 
     // Device inspector overlay
     @State private var presentedInspectorDeviceId: UUID? = nil
+    @State private var suppressInspectorUntil: Date? = nil
 
     // When saving from the device editor we often set selection to the saved device.
     // That should NOT immediately pop the inspector overlay.
@@ -110,72 +112,18 @@ struct StudioCanvasView: View {
 
     var body: some View {
         NavigationSplitView {
-            sidebar
+            StudiosList(
+                studios: studiosSortedByName,
+                selectedStudioId: $selectedStudioId,
+                onDuplicate: { duplicateStudio(from: $0) },
+                onExport: { exportStudio($0) },
+                onRequestDelete: { studio in
+                    studioIdPendingDelete = studio.id
+                    isShowingDeleteStudioConfirm = true
+                }
+            )
         } detail: {
             detail
-        }
-        .onAppear {
-            if selectedStudioId == nil {
-                selectedStudioId = studios.first?.id
-            }
-            if let sid = selectedStudioId {
-                connectionsStore.load(studioId: sid)
-            }
-        }
-        .onChange(of: selectedStudioId) { _, newValue in
-            selectionState.selection = nil
-            if let sid = newValue {
-                connectionsStore.load(studioId: sid)
-            }
-        }
-    }
-
-    // MARK: - Sidebar
-
-    private var sidebar: some View {
-        List(selection: $selectedStudioId) {
-            Section("Studios") {
-                ForEach(studiosSortedByName, id: \.id) { studio in
-                    Text(studio.name)
-                        .tag(studio.id)
-                        .contextMenu {
-                            Button { duplicateStudio(from: studio) } label: {
-                                Label("Duplicate Studio", systemImage: "plus.square.on.square")
-                            }
-
-                            Button { exportStudio(studio) } label: {
-                                Label("Export Studio", systemImage: "square.and.arrow.up")
-                            }
-
-                            Divider()
-
-                            Button(role: .destructive) {
-                                studioIdPendingDelete = studio.id
-                                isShowingDeleteStudioConfirm = true
-                            } label: {
-                                Label("Delete Studio", systemImage: "trash")
-                            }
-                        }
-#if os(iOS)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                studioIdPendingDelete = studio.id
-                                isShowingDeleteStudioConfirm = true
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .tint(.red)
-                        }
-#endif
-                }
-                .onDelete { indexSet in
-                    let sorted = studiosSortedByName
-                    if let first = indexSet.first, sorted.indices.contains(first) {
-                        studioIdPendingDelete = sorted[first].id
-                        isShowingDeleteStudioConfirm = true
-                    }
-                }
-            }
         }
         .toolbar {
             Button {
@@ -259,313 +207,366 @@ struct StudioCanvasView: View {
         .sheet(isPresented: $isShowingGuru) {
             GuruHomeView()
         }
+        .onAppear {
+            if selectedStudioId == nil {
+                selectedStudioId = studios.first?.id
+            }
+            if let sid = selectedStudioId {
+                connectionsStore.load(studioId: sid)
+            }
+        }
+        .onChange(of: selectedStudioId) { _, newValue in
+            selectionState.selection = nil
+            if let sid = newValue {
+                connectionsStore.load(studioId: sid)
+            }
+        }
     }
+
+    // MARK: - Sidebar
+    // Removed - replaced with StudiosList subview
 
     // MARK: - Detail
 
     private var detail: some View {
         Group {
             if let studio = currentStudio {
-                VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        TextField("Studio Name", text: Binding(
-                            get: { studio.name },
-                            set: { studio.name = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.title3)
-                        .frame(minWidth: 240)
-
-                        Spacer()
-
-                        Button {
-                            beginCreateDevice()
-                        } label: {
-                            Label("Add Device", systemImage: "plus.rectangle.on.rectangle")
-                        }
-
-                        Button { addExampleRig(to: studio) } label: {
-                            Label("Example Rig", systemImage: "wand.and.stars")
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 10)
-
-                    Divider()
-
-                    HStack(spacing: 0) {
-                        CanvasSurfaceView(
-                            studio: studio,
-                            background: canvasBackground,
-                            iconForDevice: { d in d.categorySymbolName },
-                            subtitleForDevice: { d in ioSummary(from: d.ports) },
-                            connectionsStore: connectionsStore,
-                            onSelectLink: { link in
-                                selectionState.selection = .connection(link.id)
-                                connectionEditorLinkId = link.id
-                                isShowingConnectionsEditor = true
-                            },
-                            onRequestDeleteLink: { link in
-                                connectionEditorLinkId = link.id
-                                isShowingDeleteConnectionConfirm = true
-                            },
-                            onExplodeDevice: { device in
-                                // Avoid immediate re-open when dismissing the sheet or during the same gesture cycle.
-                                if suppressExplosionReopen { return }
-                                if let until = explosionCooldownUntil, Date() < until { return }
-                                if isShowingConnectionExplosion { return }
-
-                                explosionDeviceId = device.id
-                                isShowingConnectionExplosion = true
-                            }
-                        )
-                        .environmentObject(selectionState)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
-                            if newSize != .zero {
-                                canvasSize = newSize
-                            }
-                        }
-                    }
-                }
-                .sheet(isPresented: $isShowingDeviceEditor) {
-                    if let studio = currentStudio {
-                        DeviceEditorSheet(
-                            title: editingDeviceId == nil ? "Add Device" : "Edit Device",
-                            nickname: $draftNickname,
-                            manufacturer: $draftManufacturer,
-                            productId: $draftProductId,
-                            category: $draftCategory,
-                            serialNumber: $draftSerialNumber,
-                            location: $draftLocation,
-
-                            supportPageURL: $draftSupportPageURL,
-                            downloadsPageURL: $draftDownloadsPageURL,
-                            audioInputs: $draftAudioInputs,
-                            audioOutputs: $draftAudioOutputs,
-                            adatInputPorts: $draftAdatInputPorts,
-                            adatOutputPorts: $draftAdatOutputPorts,
-                            madiInputPorts: $draftMadiInputPorts,
-                            madiOutputPorts: $draftMadiOutputPorts,
-                            sampleRate: $draftSampleRate,
-                            digitalInputs: $draftDigitalInputs,
-                            digitalOutputs: $draftDigitalOutputs,
-                            computerInterfaceCounts: $draftComputerInterfaceCounts,
-                            errorMessage: $deviceEditorError,
-                            onCancel: { isShowingDeviceEditor = false },
-                            onSave: { saveDeviceEdits(into: studio) }
-                        )
-                    } else {
-                        Text("No studio")
-                            .padding()
-                    }
-                }
-                .sheet(isPresented: $isShowingConnectionsEditor) {
-                    if let studio = currentStudio,
-                       let linkId = connectionEditorLinkId,
-                       let bundle = connectionsStore.bundle(for: studio.id, linkId: linkId) {
-                        ConnectionsDialogView(
-                            studio: studio,
-                            fromDeviceId: bundle.fromDeviceId,
-                            toDeviceId: bundle.toDeviceId,
-                            store: connectionsStore
-                        )
-                        .id(bundle.id)
-                    } else {
-                        Text("No connection selected").padding()
-                    }
-                }
-                
-                .sheet(isPresented: $isShowingConnectionExplosion, onDismiss: {
-                    suppressExplosionReopen = true
-                    explosionCooldownUntil = Date().addingTimeInterval(0.9)
-                    explosionDeviceId = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                        suppressExplosionReopen = false
-                    }
-                }) {
-                    if let studio = currentStudio, let centerId = explosionDeviceId, let center = studio.devices.first(where: { $0.id == centerId }) {
-                        ExplosionOverviewView(
-                            studio: studio,
-                            centerDevice: center,
-                            connectionsStore: connectionsStore,
-                            onClose: {
-                                suppressExplosionReopen = true
-                                explosionCooldownUntil = Date().addingTimeInterval(0.9)
-                                explosionDeviceId = nil
-                                isShowingConnectionExplosion = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                                    suppressExplosionReopen = false
-                                }
-                            }
-                        )
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName: "bolt.fill").foregroundStyle(.yellow)
-                            Text("No device selected")
-                            Button("Close") {
-                                suppressExplosionReopen = true
-                                explosionCooldownUntil = Date().addingTimeInterval(0.9)
-                                explosionDeviceId = nil
-                                isShowingConnectionExplosion = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                                    suppressExplosionReopen = false
-                                }
-                            }
-                        }
-                        .padding()
-                    }
-                }
-                
-                .sheet(isPresented: $isShowingMoveDeviceDialog) {
-                    if let deviceId = deviceIdPendingMove,
-                       let sourceStudio = currentStudio,
-                       let device = sourceStudio.devices.first(where: { $0.id == deviceId }) {
-                        NavigationStack {
-                            Form {
-                                Section("Move To Studio") {
-                                    Picker("Destination", selection: Binding(
-                                        get: { moveTargetStudioId ?? studios.first?.id },
-                                        set: { moveTargetStudioId = $0 }
-                                    )) {
-                                        ForEach(studiosSortedByName.filter { $0.id != sourceStudio.id }, id: \.id) { s in
-                                            Text(s.name).tag(s.id as UUID?)
-                                        }
-                                    }
-                                }
-                                if let msg = moveErrorMessage {
-                                    Section {
-                                        Text(msg).foregroundStyle(.red)
-                                    }
-                                }
-                            }
-                            .navigationTitle("Move Device")
-                            .toolbar {
-                                ToolbarItem(placement: .cancellationAction) {
-                                    Button("Cancel") {
-                                        moveTargetStudioId = nil
-                                        moveErrorMessage = nil
-                                        deviceIdPendingMove = nil
-                                        isShowingMoveDeviceDialog = false
-                                    }
-                                }
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Move") {
-                                        guard let destId = moveTargetStudioId ?? studios.first?.id,
-                                              let destStudio = studios.first(where: { $0.id == destId }),
-                                              destStudio.id != sourceStudio.id else {
-                                            moveErrorMessage = "Please choose a different destination studio."
-                                            return
-                                        }
-                                        moveDevice(device, from: sourceStudio, to: destStudio)
-                                        moveTargetStudioId = nil
-                                        moveErrorMessage = nil
-                                        deviceIdPendingMove = nil
-                                        isShowingMoveDeviceDialog = false
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Text("No device selected").padding()
-                    }
-                }
-                
-                // Device Inspector Overlay Sheet
-                .onReceive(selectionState.$selection) { sel in
-                    // If we just saved from the editor, don't immediately present the inspector.
-                    if suppressNextInspectorPresentation {
-                        suppressNextInspectorPresentation = false
-                        return
-                    }
-
-                    if case .device(let id) = sel {
-                        presentedInspectorDeviceId = id
-                    } else {
-                        presentedInspectorDeviceId = nil
-                    }
-                }
-                .sheet(
-                    item: Binding<IdentifiableUUID?>(
-                        get: {
-                            guard let id = presentedInspectorDeviceId else { return nil }
-                            return IdentifiableUUID(id: id)
-                        },
-                        set: { newValue in
-                            presentedInspectorDeviceId = newValue?.id
-                            if newValue == nil {
-                                selectionState.selection = nil
-                            }
-                        }
-                    )
-                ) { item in
-                    if let studio = currentStudio {
-                        DeviceInspectorOverlay(
-                            studio: studio,
-                            deviceId: item.id,
-                            onEditDevice: { d in beginEditDevice(d) },
-                            onRequestDeleteDevice: { d in
-                                presentedInspectorDeviceId = nil
-                                isShowingDeviceEditor = false
-                                deviceIdPendingDelete = d.id
-                                isShowingDeleteDeviceConfirm = true
-                            },
-                            onCloneDevice: { d in
-                                presentedInspectorDeviceId = nil
-                                isShowingDeviceEditor = false
-                                cloneDevice(d, in: studio)
-                            },
-                            onRequestMoveDevice: { d in
-                                presentedInspectorDeviceId = nil
-                                deviceIdPendingMove = d.id
-                                isShowingMoveDeviceDialog = true
-                            }
-                        )
-                    } else {
-                        Text("No studio").padding()
-                    }
-                }
-                .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
-                    Button("Delete", role: .destructive) { deletePendingDevice() }
-                    Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
-                } message: {
-                    Text("This will permanently delete the device from the studio.")
-                }
-                .alert("Delete Connection?", isPresented: $isShowingDeleteConnectionConfirm) {
-                    Button("Delete", role: .destructive) {
-                        guard let studio = currentStudio else { return }
-                        guard let linkId = connectionEditorLinkId else { return }
-
-                        _ = connectionsStore.deleteBundle(studioId: studio.id, linkId: linkId)
-
-                        if case .connection(let selectedId) = selectionState.selection, selectedId == linkId {
-                            selectionState.selection = nil
-                        }
-
-                        connectionEditorLinkId = nil
-                    }
-                    Button("Cancel", role: .cancel) {
-                        connectionEditorLinkId = nil
-                    }
-                } message: {
-                    Text("This will remove the selected connection.")
-                }
+                studioDetailView(studio)
             } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "square.grid.3x3")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.secondary)
-                    Text("No Studio Selected")
-                        .font(.title3)
-                    Text("Create or select a studio.")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
+                noStudioSelectedView
             }
         }
     }
 
+    @ViewBuilder
+    private func studioDetailView(_ studio: Studio) -> some View {
+        studioDetailBase(for: studio)
+            .sheet(isPresented: $isShowingDeviceEditor) {
+                deviceEditorSheetContent
+            }
+            .sheet(isPresented: $isShowingConnectionsEditor) {
+                connectionEditorContent
+            }
+            .sheet(isPresented: $isShowingConnectionExplosion, onDismiss: {
+                suppressExplosionReopen = true
+                explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                explosionDeviceId = nil
+                suppressNextInspectorPresentation = true
+                selectionState.selection = nil
+                suppressInspectorUntil = Date().addingTimeInterval(0.9)
+                presentedInspectorDeviceId = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                    suppressExplosionReopen = false
+                }
+            }) {
+                explosionSheetContent
+            }
+            .sheet(isPresented: $isShowingMoveDeviceDialog) {
+                moveDeviceSheetContent
+            }
+            // Device Inspector Overlay Sheet
+            .onReceive(selectionState.$selection) { sel in
+                if isShowingConnectionExplosion || suppressExplosionReopen {
+                    return
+                }
+                if let until = suppressInspectorUntil, Date() < until {
+                    return
+                }
+                // If we just saved from the editor, don't immediately present the inspector.
+                if suppressNextInspectorPresentation {
+                    suppressNextInspectorPresentation = false
+                    return
+                }
+
+                if case .device(let id) = sel {
+                    presentedInspectorDeviceId = id
+                } else {
+                    presentedInspectorDeviceId = nil
+                }
+            }
+            .sheet(
+                item: Binding<IdentifiableUUID?>(
+                    get: {
+                        guard let id = presentedInspectorDeviceId else { return nil }
+                        return IdentifiableUUID(id: id)
+                    },
+                    set: { newValue in
+                        presentedInspectorDeviceId = newValue?.id
+                        if newValue == nil {
+                            selectionState.selection = nil
+                        }
+                    }
+                )
+            ) { item in
+                inspectorSheetContent(item: item)
+            }
+            .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
+                Button("Delete", role: .destructive) { deletePendingDevice() }
+                Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
+            } message: {
+                Text("This will permanently delete the device from the studio.")
+            }
+            .alert("Delete Connection?", isPresented: $isShowingDeleteConnectionConfirm) {
+                Button("Delete", role: .destructive) {
+                    guard let studio = currentStudio else { return }
+                    guard let linkId = connectionEditorLinkId else { return }
+
+                    _ = connectionsStore.deleteBundle(studioId: studio.id, linkId: linkId)
+
+                    if case .connection(let selectedId) = selectionState.selection, selectedId == linkId {
+                        selectionState.selection = nil
+                    }
+
+                    connectionEditorLinkId = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    connectionEditorLinkId = nil
+                }
+            } message: {
+                Text("This will remove the selected connection.")
+            }
+    }
+
+    private func studioDetailBase(for studio: Studio) -> some View {
+        VStack(spacing: 0) {
+            DetailHeader(
+                studio: studio,
+                onCreateDevice: { beginCreateDevice() },
+                onAddExample: { addExampleRig(to: studio) }
+            )
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            DetailCanvas(
+                studio: studio,
+                background: canvasBackground,
+                connectionsStore: connectionsStore,
+                isExplosionEnabled: isExplosionReady,
+                onSelectLink: { link in
+                    selectionState.selection = .connection(link.id)
+                    connectionEditorLinkId = link.id
+                    isShowingConnectionsEditor = true
+                },
+                onRequestDeleteLink: { link in
+                    connectionEditorLinkId = link.id
+                    isShowingDeleteConnectionConfirm = true
+                },
+                onExplodeDevice: { device in
+                    if suppressExplosionReopen { return }
+                    if let until = explosionCooldownUntil, Date() < until { return }
+                    if isShowingConnectionExplosion { return }
+                    explosionDeviceId = device.id
+                    isShowingConnectionExplosion = true
+                },
+                canvasSize: $canvasSize
+            )
+            .environmentObject(selectionState)
+        }
+    }
+
+    private var isExplosionReady: Bool {
+        if isShowingConnectionExplosion || suppressExplosionReopen { return false }
+        if let until = explosionCooldownUntil, Date() < until { return false }
+        return true
+    }
+
+    @ViewBuilder
+    private var explosionSheetContent: some View {
+        if let studio = currentStudio,
+           let centerId = explosionDeviceId,
+           let center = studio.devices.first(where: { $0.id == centerId }) {
+            ExplosionOverviewView(
+                studio: studio,
+                centerDevice: center,
+                connectionsStore: connectionsStore,
+                onClose: {
+                    suppressExplosionReopen = true
+                    explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                    explosionDeviceId = nil
+                    isShowingConnectionExplosion = false
+                    suppressNextInspectorPresentation = true
+                    selectionState.selection = nil
+                    suppressInspectorUntil = Date().addingTimeInterval(0.9)
+                    presentedInspectorDeviceId = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        suppressExplosionReopen = false
+                    }
+                }
+            )
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                Text("No device selected")
+                Button("Close") {
+                    suppressExplosionReopen = true
+                    explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                    explosionDeviceId = nil
+                    isShowingConnectionExplosion = false
+                    suppressNextInspectorPresentation = true
+                    selectionState.selection = nil
+                    suppressInspectorUntil = Date().addingTimeInterval(0.9)
+                    presentedInspectorDeviceId = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        suppressExplosionReopen = false
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    @ViewBuilder
+    private var moveDeviceSheetContent: some View {
+        if let deviceId = deviceIdPendingMove,
+           let sourceStudio = currentStudio,
+           let device = sourceStudio.devices.first(where: { $0.id == deviceId }) {
+            NavigationStack {
+                Form {
+                    Section("Move To Studio") {
+                        Picker("Destination", selection: Binding(
+                            get: { moveTargetStudioId ?? studios.first?.id },
+                            set: { moveTargetStudioId = $0 }
+                        )) {
+                            ForEach(studiosSortedByName.filter { $0.id != sourceStudio.id }, id: \.id) { s in
+                                Text(s.name).tag(s.id as UUID?)
+                            }
+                        }
+                    }
+                    if let msg = moveErrorMessage {
+                        Section {
+                            Text(msg).foregroundStyle(.red)
+                        }
+                    }
+                }
+                .navigationTitle("Move Device")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            moveTargetStudioId = nil
+                            moveErrorMessage = nil
+                            deviceIdPendingMove = nil
+                            isShowingMoveDeviceDialog = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Move") {
+                            guard let destId = moveTargetStudioId ?? studios.first?.id,
+                                  let destStudio = studios.first(where: { $0.id == destId }),
+                                  destStudio.id != sourceStudio.id else {
+                                moveErrorMessage = "Please choose a different destination studio."
+                                return
+                            }
+                            moveDevice(device, from: sourceStudio, to: destStudio)
+                            moveTargetStudioId = nil
+                            moveErrorMessage = nil
+                            deviceIdPendingMove = nil
+                            isShowingMoveDeviceDialog = false
+                        }
+                    }
+                }
+            }
+        } else {
+            Text("No device selected").padding()
+        }
+    }
+
+    @ViewBuilder
+    private func inspectorSheetContent(item: IdentifiableUUID) -> some View {
+        if let studio = currentStudio {
+            DeviceInspectorOverlay(
+                studio: studio,
+                deviceId: item.id,
+                onEditDevice: { d in beginEditDevice(d) },
+                onRequestDeleteDevice: { d in
+                    presentedInspectorDeviceId = nil
+                    isShowingDeviceEditor = false
+                    deviceIdPendingDelete = d.id
+                    isShowingDeleteDeviceConfirm = true
+                },
+                onCloneDevice: { d in
+                    presentedInspectorDeviceId = nil
+                    isShowingDeviceEditor = false
+                    cloneDevice(d, in: studio)
+                },
+                onRequestMoveDevice: { d in
+                    presentedInspectorDeviceId = nil
+                    deviceIdPendingMove = d.id
+                    isShowingMoveDeviceDialog = true
+                }
+            )
+        } else {
+            Text("No studio").padding()
+        }
+    }
+
+    private var noStudioSelectedView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "square.grid.3x3")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("No Studio Selected")
+                .font(.title3)
+            Text("Create or select a studio.")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+
+    // MARK: - View Helpers for Sheet Content
+    
+    @ViewBuilder
+    private var connectionEditorContent: some View {
+        if let studio = currentStudio,
+           let linkId = connectionEditorLinkId,
+           let bundle = connectionsStore.bundle(for: studio.id, linkId: linkId) {
+            ConnectionsDialogView(
+                studio: studio,
+                fromDeviceId: bundle.fromDeviceId,
+                toDeviceId: bundle.toDeviceId,
+                store: connectionsStore
+            )
+            .id(bundle.id)
+        } else {
+            Text("No connection selected").padding()
+        }
+    }
+    
+    @ViewBuilder
+    private var deviceEditorSheetContent: some View {
+        if let studio = currentStudio {
+            DeviceEditorSheet(
+                title: editingDeviceId == nil ? "Add Device" : "Edit Device",
+                nickname: $draftNickname,
+                manufacturer: $draftManufacturer,
+                productId: $draftProductId,
+                category: $draftCategory,
+                serialNumber: $draftSerialNumber,
+                location: $draftLocation,
+                supportPageURL: $draftSupportPageURL,
+                downloadsPageURL: $draftDownloadsPageURL,
+                audioInputs: $draftAudioInputs,
+                audioOutputs: $draftAudioOutputs,
+                adatInputPorts: $draftAdatInputPorts,
+                adatOutputPorts: $draftAdatOutputPorts,
+                madiInputPorts: $draftMadiInputPorts,
+                madiOutputPorts: $draftMadiOutputPorts,
+                sampleRate: $draftSampleRate,
+                digitalInputs: $draftDigitalInputs,
+                digitalOutputs: $draftDigitalOutputs,
+                computerInterfaceCounts: $draftComputerInterfaceCounts,
+                errorMessage: $deviceEditorError,
+                onCancel: { isShowingDeviceEditor = false },
+                onSave: { saveDeviceEdits(into: studio) }
+            )
+        } else {
+            Text("No studio")
+                .padding()
+        }
+    }
 
     // MARK: - Device Actions
 
@@ -1103,32 +1104,6 @@ struct StudioCanvasView: View {
                                centerY + (idx * 16).truncatingRemainder(dividingBy: 200) - 100)
         return (fx, fy)
     }
-    
-
-    private func ioSummary(from ports: [Port]) -> String {
-        func chCount(_ type: PortType, _ dir: PortDirection) -> Int {
-            ports
-                .filter { $0.type == type && $0.direction == dir }
-                .reduce(0) { $0 + $1.channels.count }
-        }
-
-        let ain = chCount(.analogIn, .input)
-        let aout = chCount(.analogOut, .output)
-        let adatin = chCount(.adatIn, .input)
-        let adatout = chCount(.adatOut, .output)
-        let madiin = chCount(.madiIn, .input)
-        let madiout = chCount(.madiOut, .output)
-        let spdifin = chCount(.spdifIn, .input)
-        let spdifout = chCount(.spdifOut, .output)
-
-        var parts: [String] = []
-        if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
-        if adatin > 0 || adatout > 0 { parts.append("ADAT \(adatin)/\(adatout)") }
-        if madiin > 0 || madiout > 0 { parts.append("MADI \(madiin)/\(madiout)") }
-        if spdifin > 0 || spdifout > 0 { parts.append("S/PDIF \(spdifin)/\(spdifout)") }
-
-        return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
-    }
 
     private func defaultPortsGuess(forManufacturer manufacturer: String, model: String) -> [Port] {
         // Backward compatibility: used only by duplicateStudio if older devices exist.
@@ -1223,6 +1198,138 @@ struct StudioCanvasView: View {
 
 }
 
+// MARK: - File-Level Helper Functions
+
+private func ioSummary(from ports: [Port]) -> String {
+    func chCount(_ type: PortType, _ dir: PortDirection) -> Int {
+        ports
+            .filter { $0.type == type && $0.direction == dir }
+            .reduce(0) { $0 + $1.channels.count }
+    }
+
+    let ain = chCount(.analogIn, .input)
+    let aout = chCount(.analogOut, .output)
+    let adatin = chCount(.adatIn, .input)
+    let adatout = chCount(.adatOut, .output)
+    let madiin = chCount(.madiIn, .input)
+    let madiout = chCount(.madiOut, .output)
+    let spdifin = chCount(.spdifIn, .input)
+    let spdifout = chCount(.spdifOut, .output)
+
+    var parts: [String] = []
+    if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
+    if adatin > 0 || adatout > 0 { parts.append("ADAT \(adatin)/\(adatout)") }
+    if madiin > 0 || madiout > 0 { parts.append("MADI \(madiin)/\(madiout)") }
+    if spdifin > 0 || spdifout > 0 { parts.append("S/PDIF \(spdifin)/\(spdifout)") }
+
+    return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
+}
+
+// MARK: - Detail Header Subview
+
+private struct DetailHeader: View {
+    @Bindable var studio: Studio
+    let onCreateDevice: () -> Void
+    let onAddExample: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TextField("Studio Name", text: .init(get: { studio.name }, set: { studio.name = $0 }))
+                .textFieldStyle(.roundedBorder)
+                .font(.title3)
+                .frame(minWidth: 240)
+
+            Spacer()
+
+            Button(action: onCreateDevice) {
+                Label("Add Device", systemImage: "plus.rectangle.on.rectangle")
+            }
+
+            Button(action: onAddExample) {
+                Label("Example Rig", systemImage: "wand.and.stars")
+            }
+        }
+    }
+}
+
+// MARK: - Detail Canvas Subview
+
+private struct DetailCanvas: View {
+    let studio: Studio
+    let background: Color
+    let connectionsStore: ConnectionsStore
+    let isExplosionEnabled: Bool
+    let onSelectLink: (ConnectionLinkSummary) -> Void
+    let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
+    let onExplodeDevice: (DeviceInstance) -> Void
+    @EnvironmentObject var selectionState: SelectionState
+    @Binding var canvasSize: CGSize
+
+    var body: some View {
+        CanvasSurfaceView(
+            studio: studio,
+            background: background,
+            iconForDevice: { (d: DeviceInstance) -> String in d.categorySymbolName },
+            subtitleForDevice: { (d: DeviceInstance) -> String in ioSummary(from: d.ports) },
+            connectionsStore: connectionsStore,
+            onSelectLink: onSelectLink,
+            onRequestDeleteLink: onRequestDeleteLink,
+            onExplodeDevice: onExplodeDevice,
+            isExplosionEnabled: isExplosionEnabled
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
+            if newSize != .zero { canvasSize = newSize }
+        }
+    }
+}
+
+// MARK: - Studios List Subview
+
+private struct StudiosList: View {
+    let studios: [Studio]
+    @Binding var selectedStudioId: UUID?
+    let onDuplicate: (Studio) -> Void
+    let onExport: (Studio) -> Void
+    let onRequestDelete: (Studio) -> Void
+
+    var body: some View {
+        List(selection: $selectedStudioId) {
+            Section("Studios") {
+                ForEach(studios, id: \.id) { studio in
+                    Text(studio.name)
+                        .tag(studio.id)
+                        .contextMenu {
+                            Button { onDuplicate(studio) } label: {
+                                Label("Duplicate Studio", systemImage: "plus.square.on.square")
+                            }
+                            Button { onExport(studio) } label: {
+                                Label("Export Studio", systemImage: "square.and.arrow.up")
+                            }
+                            Divider()
+                            Button(role: .destructive) { onRequestDelete(studio) } label: {
+                                Label("Delete Studio", systemImage: "trash")
+                            }
+                        }
+#if os(iOS)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) { onRequestDelete(studio) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
+#endif
+                }
+                .onDelete { indexSet in
+                    if let first = indexSet.first, studios.indices.contains(first) {
+                        onRequestDelete(studios[first])
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Canvas Size Preference
 
 private struct CanvasSizePreferenceKey: PreferenceKey {
@@ -1253,6 +1360,7 @@ private struct CanvasSurfaceView: View {
     let onSelectLink: (ConnectionLinkSummary) -> Void
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
     let onExplodeDevice: (DeviceInstance) -> Void
+    let isExplosionEnabled: Bool
     @EnvironmentObject var selection: SelectionState
     
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -1324,6 +1432,7 @@ private struct CanvasSurfaceView: View {
             isConnectionTarget: isTarget,
             canvasSize: canvasSize,
             connectionHandleTip: tip,
+            isExplosionEnabled: isExplosionEnabled,
             onExplode: { onExplodeDevice(d) },
             dragOrigin: $dragOrigin,
             beginDragIfNeeded: { device in
@@ -1401,6 +1510,7 @@ private struct DeviceCardView: View {
     let isConnectionTarget: Bool
     let canvasSize: CGSize
     let connectionHandleTip: CGPoint?
+    let isExplosionEnabled: Bool
     let onExplode: () -> Void
 
     @Binding var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -1494,8 +1604,7 @@ private struct DeviceCardView: View {
             selection.selection = .device(device.id)
         }
         .onLongPressGesture(minimumDuration: 0.35) {
-            // Ensure the first long-press also establishes selection so the inspector
-            // and any explosion UI doesn’t see a nil selection.
+            guard isExplosionEnabled else { return }
             selection.selection = .device(device.id)
             onExplode()
         }
@@ -2690,13 +2799,6 @@ private struct DeviceInspectorOverlay: View {
                 }
             }
             .navigationTitle("Device")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-            }
         }
     }
 }
@@ -2741,6 +2843,48 @@ private struct DeviceExplosionDetailView: View {
             .filter { $0.direction == .output }
             .sorted(by: portSort)
     }
+    
+    private struct ComputerInterfaceRow: Identifiable {
+        let id: String
+        let label: String
+        let inputEndpoint: IOEndpointRef
+        let outputEndpoint: IOEndpointRef
+    }
+
+    private var computerInterfaceRows: [ComputerInterfaceRow] {
+        let counts = device.computerInterfaceCounts
+        let keys = counts.keys.sorted(by: { $0.rawValue < $1.rawValue })
+
+        var rows: [ComputerInterfaceRow] = []
+        for iface in keys {
+            let n = max(0, counts[iface] ?? 0)
+            if n == 0 { continue }
+            for idx in 1...n {
+                let label = (n > 1) ? "\(iface.rawValue) \(idx)" : iface.rawValue
+                let portId = stableComputerPortId(deviceId: device.id, iface: iface, index: idx)
+                let channelId = stableComputerChannelId(deviceId: device.id, iface: iface, index: idx)
+                rows.append(
+                    ComputerInterfaceRow(
+                        id: "\(iface.rawValue)|\(idx)",
+                        label: label,
+                        inputEndpoint: IOEndpointRef(
+                            deviceId: device.id,
+                            portId: portId,
+                            channelId: channelId,
+                            direction: .input
+                        ),
+                        outputEndpoint: IOEndpointRef(
+                            deviceId: device.id,
+                            portId: portId,
+                            channelId: channelId,
+                            direction: .output
+                        )
+                    )
+                )
+            }
+        }
+        return rows
+    }
 
     var body: some View {
         List {
@@ -2760,19 +2904,40 @@ private struct DeviceExplosionDetailView: View {
                 .padding(.vertical, 4)
             }
             
-            let ifaceCounts = device.computerInterfaceCounts
-            if !ifaceCounts.isEmpty {
+            // Computer Interfaces: render the actual generated ports (USB In/Out etc) so we can show connection status.
+            
+            if !computerInterfaceRows.isEmpty {
                 Section("Computer Interfaces") {
-                    ForEach(ifaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
-                        HStack {
-                            Text(iface.rawValue)
+                    ForEach(computerInterfaceRows) { row in
+                        let connectedText = connectionsStore.connectedToText(
+                            studio: studio,
+                            studioId: studio.id,
+                            endpoint: row.inputEndpoint
+                        ) ?? connectionsStore.connectedToText(
+                            studio: studio,
+                            studioId: studio.id,
+                            endpoint: row.outputEndpoint
+                        )
+                        let isOpen = (connectedText == nil)
+
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.label)
+                                Text(connectedText ?? "open")
+                                    .font(.caption)
+                                    .foregroundStyle(isOpen ? .secondary : .primary)
+                                    .lineLimit(2)
+                            }
                             Spacer()
-                            Text("×\(ifaceCounts[iface] ?? 0)")
+                            Image(systemName: isOpen ? "circle" : "checkmark.circle.fill")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             }
+
 
             if !inputPorts.isEmpty {
                 Section("Inputs") {
@@ -2893,5 +3058,21 @@ private func portSort(_ a: Port, _ b: Port) -> Bool {
     return a.name.localizedStandardCompare(b.name) == .orderedAscending
 }
 
+private func stableComputerPortId(deviceId: UUID, iface: ComputerInterface, index: Int) -> UUID {
+    stableUUID("computerPort|\(deviceId.uuidString)|\(iface.rawValue)|\(index)")
+}
 
-// Search for other buildPorts( calls:
+private func stableComputerChannelId(deviceId: UUID, iface: ComputerInterface, index: Int) -> UUID {
+    stableUUID("computerCh|\(deviceId.uuidString)|\(iface.rawValue)|\(index)")
+}
+private func stableUUID(_ s: String) -> UUID {
+    let digest = SHA256.hash(data: Data(s.utf8))
+    let bytes = Array(digest)
+    let uuidBytes = Array(bytes.prefix(16))
+    return UUID(uuid: (
+        uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
+        uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
+        uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
+        uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]
+    ))
+}

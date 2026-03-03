@@ -985,9 +985,10 @@ struct StudioCanvasView: View {
             }
         }
 
-        // Computer I/O (USB / Thunderbolt / Ethernet, etc.)
-        // We model these as 1-channel logical ports so they can participate in endpoint occupancy
-        // and show up in DeviceExplosionDetailView.
+        // Computer Interfaces (USB / Thunderbolt / Ethernet, etc.)
+        // These are *bidirectional* physical ports. We represent each physical port as a single
+        // 1-channel logical port so they can show up in I/O lists and participate in occupancy.
+        // IMPORTANT: Do NOT model these as separate "In" and "Out" ports.
         if !computerInterfaceCounts.isEmpty {
             let sortedIfaces = computerInterfaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue })
             for iface in sortedIfaces {
@@ -996,22 +997,14 @@ struct StudioCanvasView: View {
 
                 for i in 0..<count {
                     let suffix = count > 1 ? " \(i + 1)" : ""
+                    let name = "\(iface.rawValue)\(suffix)"
 
-                    // Inputs
-                    do {
-                        let name = "\(iface.rawValue) In\(suffix)"
-                        let p = Port(name: name, type: .ethernet, direction: .input)
-                        p.channels = [Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")]
-                        ports.append(p)
-                    }
-
-                    // Outputs
-                    do {
-                        let name = "\(iface.rawValue) Out\(suffix)"
-                        let p = Port(name: name, type: .ethernet, direction: .output)
-                        p.channels = [Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")]
-                        ports.append(p)
-                    }
+                    // NOTE: PortDirection only supports input/output in the current model.
+                    // We choose `.input` as a neutral placeholder; UI labels should rely on `name`
+                    // (and not append "In"/"Out" for computer interfaces).
+                    let p = Port(name: name, type: .ethernet, direction: .input)
+                    p.channels = [Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")]
+                    ports.append(p)
                 }
             }
         }
@@ -2841,15 +2834,26 @@ private struct DeviceExplosionDetailView: View {
         connectionsStore.occupancyForEndpoint(studioId: studio.id, endpoint: endpoint) == nil
     }
 
+    private func isComputerInterfacePort(_ p: Port) -> Bool {
+        // Computer interface ports are synthesized from `device.computerInterfaceCounts`.
+        // Their names are the interface rawValue, optionally with a numeric suffix, e.g. "USB 2".
+        let prefixes = device.computerInterfaceCounts.keys.map { $0.rawValue }
+        for prefix in prefixes {
+            if p.name == prefix { return true }
+            if p.name.hasPrefix(prefix + " ") { return true }
+        }
+        return false
+    }
+
     private var inputPorts: [Port] {
         device.ports
-            .filter { $0.direction == .input }
+            .filter { $0.direction == .input && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
 
     private var outputPorts: [Port] {
         device.ports
-            .filter { $0.direction == .output }
+            .filter { $0.direction == .output && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
     

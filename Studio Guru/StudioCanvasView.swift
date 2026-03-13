@@ -1801,9 +1801,26 @@ private struct InspectorPanel: View {
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        if let urlString = doc.urlString,
-                                           let url = URL(string: urlString) {
+                                        // print("📱 Manual tapped: \(doc.title)")
+                                        // print("📱 Has bookmark: \(doc.localBookmarkData != nil)")
+                                        // print("📱 Has URL string: \(doc.urlString != nil)")
+                                        
+                                        // Try bookmark first, fall back to URL string for legacy docs
+                                        if let bookmarkData = doc.localBookmarkData {
+                                            // print("📱 Attempting to resolve bookmark...")
+                                            do {
+                                                let url = try ManualStorage.resolveBookmark(bookmarkData)
+                                                // print("📱 ✅ Bookmark resolved to: \(url.path)")
+                                                manualViewerItem = IdentifiableURL(url: url)
+                                            } catch {
+                                                print("📱 ❌ Bookmark resolution failed: \(error)")
+                                            }
+                                        } else if let urlString = doc.urlString,
+                                                  let url = URL(string: urlString) {
+                                            // print("📱 Using legacy URL string: \(urlString)")
                                             manualViewerItem = IdentifiableURL(url: url)
+                                        } else {
+                                            print("📱 ❌ No bookmark or URL available")
                                         }
                                     }
                                 }
@@ -1863,7 +1880,7 @@ private struct InspectorPanel: View {
                         else { return }
 
                         do {
-                            let storedURL = try ManualStorage.copyPDFIntoAppSupport(
+                            let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
                                 pickedURL: pickedURL,
                                 deviceId: device.id
                             )
@@ -1871,16 +1888,22 @@ private struct InspectorPanel: View {
                             let doc = DocLink(
                                 title: storedURL.lastPathComponent,
                                 kind: .manual,
-                                url: storedURL
+                                bookmarkData: bookmarkData
                             )
                             device.docs.append(doc)
                         } catch {
                             print("Manual import failed: \(error)")
                         }
                     }
+                    #if os(iOS)
+                    .fullScreenCover(item: $manualViewerItem) { item in
+                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
+                    }
+                    #else
                     .sheet(item: $manualViewerItem) { item in
                         ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
                     }
+                    #endif
                 } else {
                     Text("Device not found")
                         .padding()
@@ -2721,9 +2744,26 @@ private struct DeviceInspectorOverlay: View {
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        if let urlString = doc.urlString,
-                                           let url = URL(string: urlString) {
+                                        // print("📱 Manual tapped: \(doc.title)")
+                                        // print("📱 Has bookmark: \(doc.localBookmarkData != nil)")
+                                        // print("📱 Has URL string: \(doc.urlString != nil)")
+                                        
+                                        // Try bookmark first, fall back to URL string for legacy docs
+                                        if let bookmarkData = doc.localBookmarkData {
+                                            // print("📱 Attempting to resolve bookmark...")
+                                            do {
+                                                let url = try ManualStorage.resolveBookmark(bookmarkData)
+                                                // print("📱 ✅ Bookmark resolved to: \(url.path)")
+                                                manualViewerItem = IdentifiableURL(url: url)
+                                            } catch {
+                                                print("📱 ❌ Bookmark resolution failed: \(error)")
+                                            }
+                                        } else if let urlString = doc.urlString,
+                                                  let url = URL(string: urlString) {
+                                            // print("📱 Using legacy URL string: \(urlString)")
                                             manualViewerItem = IdentifiableURL(url: url)
+                                        } else {
+                                            print("📱 ❌ No bookmark or URL available")
                                         }
                                     }
                                 }
@@ -2784,7 +2824,7 @@ private struct DeviceInspectorOverlay: View {
                         else { return }
 
                         do {
-                            let storedURL = try ManualStorage.copyPDFIntoAppSupport(
+                            let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
                                 pickedURL: pickedURL,
                                 deviceId: device.id
                             )
@@ -2792,16 +2832,22 @@ private struct DeviceInspectorOverlay: View {
                             let doc = DocLink(
                                 title: storedURL.lastPathComponent,
                                 kind: .manual,
-                                url: storedURL
+                                bookmarkData: bookmarkData
                             )
                             device.docs.append(doc)
                         } catch {
                             print("Manual import failed: \(error)")
                         }
                     }
+                    #if os(iOS)
+                    .fullScreenCover(item: $manualViewerItem) { item in
+                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
+                    }
+                    #else
                     .sheet(item: $manualViewerItem) { item in
                         ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
                     }
+                    #endif
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "questionmark.circle")

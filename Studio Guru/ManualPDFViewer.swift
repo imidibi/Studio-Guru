@@ -77,28 +77,77 @@ struct ManualPDFViewer: View {
 
                 Divider()
 
-                PDFKitView(
-                    url: url,
-                    document: $document,
-                    matches: $matches,
-                    currentMatchIndex: $currentMatchIndex
-                )
-            }
-            .onAppear {
                 if document == nil {
-                    document = PDFDocument(url: url)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading PDF...")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    PDFKitView(
+                        url: url,
+                        document: $document,
+                        matches: $matches,
+                        currentMatchIndex: $currentMatchIndex
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                loadDocument()
+            }
             .navigationTitle(title)
-        }
 #if os(iOS)
-        .presentationDetents([.large, .medium])
-        .presentationDragIndicator(.visible)
-        .presentationContentInteraction(.resizes)
+            .navigationBarTitleDisplayMode(.inline)
 #endif
+        }
 #if os(macOS)
-        .frame(minWidth: 900, idealWidth: 1100, maxWidth: .infinity, minHeight: 700, idealHeight: 900, maxHeight: .infinity)
+        .frame(minWidth: 800, idealWidth: 1000, minHeight: 600, idealHeight: 800)
+        .fixedSize(horizontal: false, vertical: false)
 #endif
+    }
+    
+    private func loadDocument() {
+        if document == nil {
+            // print("📄 PDF loading attempt...")
+            // print("📄 URL: \(url)")
+            // print("📄 URL path: \(url.path)")
+            // print("📄 URL scheme: \(url.scheme ?? "none")")
+            // print("📄 File exists: \(FileManager.default.fileExists(atPath: url.path))")
+            
+            // Try to access security-scoped resource for saved files
+            let needsScoped = url.startAccessingSecurityScopedResource()
+            defer {
+                if needsScoped {
+                    // Keep access during viewing - don't stop here
+                    // print("📄 Security-scoped access granted")
+                }
+            }
+            
+            // Load the document
+            document = PDFDocument(url: url)
+            
+            // print("📄 Document loaded: \(document != nil)")
+            if let doc = document {
+                // print("📄 ✅ Success! Page count: \(doc.pageCount)")
+                _ = doc // Silence unused variable warning
+            } else {
+                // print("📄 ❌ Failed to load PDF")
+                
+                // Try alternative loading method
+                if let data = try? Data(contentsOf: url) {
+                    // print("📄 Trying to load from Data... (\(data.count) bytes)")
+                    document = PDFDocument(data: data)
+                    // if document != nil {
+                    //     print("📄 ✅ Loaded from Data!")
+                    // }
+                } // else {
+                    // print("📄 ❌ Could not read file data")
+                // }
+            }
+        }
     }
 
     private func performSearch() {
@@ -137,7 +186,12 @@ private struct PDFKitView: UXViewRepresentable {
         v.displayMode = .singlePageContinuous
         v.displayDirection = .vertical
         v.usePageViewController(true, withViewOptions: nil)
-        v.document = document ?? PDFDocument(url: url)
+        v.backgroundColor = .systemBackground
+        
+        if let doc = document {
+            v.document = doc
+        }
+        
         return v
     }
 
@@ -145,9 +199,8 @@ private struct PDFKitView: UXViewRepresentable {
         if let doc = document {
             if view.document !== doc {
                 view.document = doc
+                // print("📱 PDFView updated with document: \(doc.pageCount) pages")
             }
-        } else if view.document?.documentURL != url {
-            view.document = PDFDocument(url: url)
         }
 
         highlightMatches(in: view)
@@ -158,7 +211,11 @@ private struct PDFKitView: UXViewRepresentable {
         v.autoScales = true
         v.displayMode = .singlePageContinuous
         v.displayDirection = .vertical
-        v.document = document ?? PDFDocument(url: url)
+        
+        if let doc = document {
+            v.document = doc
+        }
+        
         return v
     }
 
@@ -166,9 +223,8 @@ private struct PDFKitView: UXViewRepresentable {
         if let doc = document {
             if view.document !== doc {
                 view.document = doc
+                // print("💻 PDFView updated with document: \(doc.pageCount) pages")
             }
-        } else if view.document?.documentURL != url {
-            view.document = PDFDocument(url: url)
         }
 
         highlightMatches(in: view)
@@ -190,8 +246,8 @@ private struct PDFKitView: UXViewRepresentable {
 // MARK: - Manual Storage Helper
 
 enum ManualStorage {
-    /// Copies a picked PDF into Application Support and returns the destination URL.
-    static func copyPDFIntoAppSupport(pickedURL: URL, deviceId: UUID) throws -> URL {
+    /// Copies a picked PDF into Application Support and returns the destination URL and bookmark data.
+    static func copyPDFIntoAppSupport(pickedURL: URL, deviceId: UUID) throws -> (url: URL, bookmarkData: Data) {
         let fm = FileManager.default
         let appSupport = try fm.url(
             for: .applicationSupportDirectory,
@@ -229,8 +285,37 @@ enum ManualStorage {
             try fm.removeItem(at: dest)
         }
         try fm.copyItem(at: pickedURL, to: dest)
+        
+        // print("📁 File copied to: \(dest.path)")
+        // print("📁 File exists after copy: \(fm.fileExists(atPath: dest.path))")
 
-        return dest
+        // Create a security-scoped bookmark for the file
+        let bookmarkData = try dest.bookmarkData(
+            options: .minimalBookmark,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        
+        // print("📁 Bookmark created: \(bookmarkData.count) bytes")
+
+        return (dest, bookmarkData)
+    }
+    
+    /// Resolves a bookmark to a URL, handling stale bookmarks.
+    static func resolveBookmark(_ bookmarkData: Data) throws -> URL {
+        var isStale = false
+        let url = try URL(
+            resolvingBookmarkData: bookmarkData,
+            options: .withoutUI,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        
+        // if isStale {
+        //     print("⚠️ Bookmark is stale, but URL resolved to: \(url.path)")
+        // }
+        
+        return url
     }
 
     private static func sanitizeFileName(_ s: String) -> String {

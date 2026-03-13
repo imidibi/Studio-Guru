@@ -83,10 +83,6 @@ struct ManualPDFViewer: View {
                     matches: $matches,
                     currentMatchIndex: $currentMatchIndex
                 )
-
-#if os(macOS)
-                .frame(minWidth: 800, minHeight: 900)
-#endif
             }
             .onAppear {
                 if document == nil {
@@ -95,6 +91,14 @@ struct ManualPDFViewer: View {
             }
             .navigationTitle(title)
         }
+#if os(iOS)
+        .presentationDetents([.large, .medium])
+        .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.resizes)
+#endif
+#if os(macOS)
+        .frame(minWidth: 900, idealWidth: 1100, maxWidth: .infinity, minHeight: 700, idealHeight: 900, maxHeight: .infinity)
+#endif
     }
 
     private func performSearch() {

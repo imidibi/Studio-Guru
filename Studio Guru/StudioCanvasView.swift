@@ -126,40 +126,6 @@ struct StudioCanvasView: View {
         } detail: {
             detail
         }
-        .toolbar {
-            Button {
-                newStudioNameDraft = "My Studio"
-                isShowingNewStudioPrompt = true
-            } label: {
-                Label("New Studio", systemImage: "plus")
-            }
-
-            Button {
-                isShowingGuru = true
-            } label: {
-                Label("Guru", systemImage: "sparkles")
-            }
-
-            if let studio = currentStudio {
-                Button { duplicateStudio(from: studio) } label: {
-                    Label("Duplicate", systemImage: "plus.square.on.square")
-                }
-
-                Button { exportStudio(studio) } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
-                }
-
-                Button(role: .destructive) {
-                    studioIdPendingDelete = studio.id
-                    isShowingDeleteStudioConfirm = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-#if os(macOS)
-                .keyboardShortcut(.delete, modifiers: [])
-#endif
-            }
-        }
         .alert("New Studio", isPresented: $isShowingNewStudioPrompt) {
             TextField("Studio Name", text: $newStudioNameDraft)
             Button("Create") {
@@ -235,6 +201,50 @@ struct StudioCanvasView: View {
                 studioDetailView(studio)
             } else {
                 noStudioSelectedView
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    newStudioNameDraft = "My Studio"
+                    isShowingNewStudioPrompt = true
+                } label: {
+                    Label("New Studio", systemImage: "plus")
+                }
+            }
+
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    isShowingGuru = true
+                } label: {
+                    Label("Guru", systemImage: "sparkles")
+                }
+            }
+
+            if let studio = currentStudio {
+                ToolbarItem(placement: .automatic) {
+                    Button { duplicateStudio(from: studio) } label: {
+                        Label("Duplicate", systemImage: "plus.square.on.square")
+                    }
+                }
+
+                ToolbarItem(placement: .automatic) {
+                    Button { exportStudio(studio) } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                }
+
+                ToolbarItem(placement: .automatic) {
+                    Button(role: .destructive) {
+                        studioIdPendingDelete = studio.id
+                        isShowingDeleteStudioConfirm = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+#if os(macOS)
+                    .keyboardShortcut(.delete, modifiers: [])
+#endif
+                }
             }
         }
     }
@@ -1309,6 +1319,17 @@ private struct StudiosList: View {
                             }
                         }
 #if os(iOS)
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button { onDuplicate(studio) } label: {
+                                Label("Duplicate", systemImage: "plus.square.on.square")
+                            }
+                            .tint(.blue)
+                            
+                            Button { onExport(studio) } label: {
+                                Label("Export", systemImage: "square.and.arrow.up")
+                            }
+                            .tint(.green)
+                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) { onRequestDelete(studio) } label: {
                                 Label("Delete", systemImage: "trash")

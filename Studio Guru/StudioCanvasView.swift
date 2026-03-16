@@ -37,6 +37,14 @@ struct StudioCanvasView: View {
     // Export result
     @State private var isShowingExportResult: Bool = false
     @State private var exportResultMessage: String = ""
+    @State private var isShowingExportPicker: Bool = false
+    @State private var exportDocument: StudioDocument? = nil
+    
+    // Import
+    @State private var isShowingImportPicker: Bool = false
+    
+    // Settings
+    @State private var isShowingSettings: Bool = false
 
     // Selection (devices/connections)
     @StateObject private var selectionState = SelectionState()
@@ -174,6 +182,24 @@ struct StudioCanvasView: View {
         .sheet(isPresented: $isShowingGuru) {
             GuruHomeView()
         }
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView()
+        }
+        .fileExporter(
+            isPresented: $isShowingExportPicker,
+            document: exportDocument,
+            contentType: .studioGuru,
+            defaultFilename: "Studio.studioguru"
+        ) { result in
+            handleExportResult(result)
+        }
+        .fileImporter(
+            isPresented: $isShowingImportPicker,
+            allowedContentTypes: [.studioGuru, .json],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImportResult(result)
+        }
         .onAppear {
             if selectedStudioId == nil {
                 selectedStudioId = studios.first?.id
@@ -211,6 +237,7 @@ struct StudioCanvasView: View {
                 } label: {
                     Label("New Studio", systemImage: "plus")
                 }
+                .help("Create a new studio")
             }
 
             ToolbarItem(placement: .automatic) {
@@ -219,6 +246,25 @@ struct StudioCanvasView: View {
                 } label: {
                     Label("Guru", systemImage: "sparkles")
                 }
+                .help("Open Guru assistant for device recommendations")
+            }
+            
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    isShowingImportPicker = true
+                } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                }
+                .help("Import a studio from file")
+            }
+            
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gear")
+                }
+                .help("App settings and sync information")
             }
 
             if let studio = currentStudio {
@@ -226,12 +272,14 @@ struct StudioCanvasView: View {
                     Button { duplicateStudio(from: studio) } label: {
                         Label("Duplicate", systemImage: "plus.square.on.square")
                     }
+                    .help("Duplicate this studio")
                 }
 
                 ToolbarItem(placement: .automatic) {
                     Button { exportStudio(studio) } label: {
                         Label("Export", systemImage: "square.and.arrow.up")
                     }
+                    .help("Export this studio to share with others")
                 }
 
                 ToolbarItem(placement: .automatic) {
@@ -241,6 +289,7 @@ struct StudioCanvasView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .help("Delete this studio")
 #if os(macOS)
                     .keyboardShortcut(.delete, modifiers: [])
 #endif
@@ -1197,8 +1246,144 @@ struct StudioCanvasView: View {
     }
 
     private func exportStudio(_ studio: Studio) {
-        exportResultMessage = "Export is a stub for now. Next: Pro Tools / Logic IO exports."
-        isShowingExportResult = true
+        // Create exportable representation
+        let exportable = ExportableStudio(from: studio)
+        
+        // Create document
+        exportDocument = StudioDocument(exportableStudio: exportable)
+        isShowingExportPicker = true
+    }
+    
+    private func importStudio(from url: URL) {
+        do {
+            // Read file
+            let needsScoped = url.startAccessingSecurityScopedResource()
+            defer {
+                if needsScoped { url.stopAccessingSecurityScopedResource() }
+            }
+            
+            let jsonData = try Data(contentsOf: url)
+            
+            // Decode
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let exportable = try decoder.decode(ExportableStudio.self, from: jsonData)
+            
+            // Create new studio
+            let studio = Studio(name: exportable.name)
+            
+            // Import devices
+            var deviceMap: [UUID: DeviceInstance] = [:]
+            for exportableDevice in exportable.devices {
+                let device = DeviceInstance(
+                    manufacturer: exportableDevice.manufacturer,
+                    model: exportableDevice.model,
+                    nickname: exportableDevice.nickname,
+                    category: DeviceCategory(rawValue: exportableDevice.categoryRaw) ?? .other,
+                    serialNumber: exportableDevice.serialNumber,
+                    location: exportableDevice.location,
+                    audioInputsCount: exportableDevice.audioInputsCount,
+                    audioOutputsCount: exportableDevice.audioOutputsCount,
+                    adatInputPortsCount: exportableDevice.adatInputPortsCount,
+                    adatOutputPortsCount: exportableDevice.adatOutputPortsCount,
+                    madiInputPortsCount: exportableDevice.madiInputPortsCount,
+                    madiOutputPortsCount: exportableDevice.madiOutputPortsCount,
+                    ethernetPortsCount: exportableDevice.ethernetPortsCount,
+                    sampleRate: SampleRate(rawValue: exportableDevice.sampleRateRaw) ?? .hz48000,
+                    digitalInputs: exportableDevice.digitalInputsRaw.compactMap { DigitalFormat(rawValue: $0) },
+                    digitalOutputs: exportableDevice.digitalOutputsRaw.compactMap { DigitalFormat(rawValue: $0) },
+                    computerInterfaces: exportableDevice.computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) },
+                    posX: exportableDevice.posX,
+                    posY: exportableDevice.posY,
+                    scale: exportableDevice.scale,
+                    zIndex: exportableDevice.zIndex
+                )
+                
+                device.supportPageURLString = exportableDevice.supportPageURLString
+                device.downloadsPageURLString = exportableDevice.downloadsPageURLString
+                
+                // Import ports
+                var portMap: [UUID: Port] = [:]
+                for exportablePort in exportableDevice.ports {
+                    let port = Port(
+                        name: exportablePort.name,
+                        type: PortType(rawValue: exportablePort.typeRaw) ?? .usbAudio,
+                        direction: PortDirection(rawValue: exportablePort.directionRaw) ?? .bidirectional
+                    )
+                    
+                    // Import channels
+                    for exportableChannel in exportablePort.channels {
+                        let channel = Channel(
+                            index: exportableChannel.index,
+                            nameLong: exportableChannel.nameLong,
+                            nameShort: exportableChannel.nameShort,
+                            signal: SignalType(rawValue: exportableChannel.signalRaw) ?? .audio,
+                            grouping: ChannelGrouping(rawValue: exportableChannel.groupingRaw) ?? .mono
+                        )
+                        port.channels.append(channel)
+                    }
+                    
+                    device.ports.append(port)
+                    portMap[exportablePort.id] = port
+                }
+                
+                studio.devices.append(device)
+                deviceMap[exportableDevice.id] = device
+            }
+            
+            // Import connections
+            for exportableConnection in exportable.connections {
+                let connection = Connection(
+                    fromDeviceId: exportableConnection.fromDeviceId,
+                    fromPortId: exportableConnection.fromPortId,
+                    fromChannelId: exportableConnection.fromChannelId,
+                    toDeviceId: exportableConnection.toDeviceId,
+                    toPortId: exportableConnection.toPortId,
+                    toChannelId: exportableConnection.toChannelId,
+                    cable: CableType(rawValue: exportableConnection.cableRaw) ?? .other,
+                    label: exportableConnection.label,
+                    notes: exportableConnection.notes
+                )
+                studio.connections.append(connection)
+            }
+            
+            // Save to model context
+            modelContext.insert(studio)
+            try modelContext.save()
+            
+            // Select the imported studio
+            selectedStudioId = studio.id
+            
+            exportResultMessage = "Studio '\(studio.name)' imported successfully!"
+            isShowingExportResult = true
+            
+        } catch {
+            exportResultMessage = "Import failed: \(error.localizedDescription)"
+            isShowingExportResult = true
+        }
+    }
+    
+    private func handleExportResult(_ result: Result<URL, Error>) {
+        switch result {
+        case .success:
+            exportResultMessage = "Studio exported successfully!"
+            isShowingExportResult = true
+        case .failure(let error):
+            exportResultMessage = "Export failed: \(error.localizedDescription)"
+            isShowingExportResult = true
+        }
+    }
+    
+    private func handleImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            if let url = urls.first {
+                importStudio(from: url)
+            }
+        case .failure(let error):
+            exportResultMessage = "Import cancelled: \(error.localizedDescription)"
+            isShowingExportResult = true
+        }
     }
 
 

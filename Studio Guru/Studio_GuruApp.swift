@@ -10,11 +10,8 @@ import SwiftData
 
 @main
 struct Studio_GuruApp: App {
-    var body: some Scene {
-        WindowGroup {
-            StudioCanvasView()
-        }
-        .modelContainer(for: [
+    var sharedModelContainer: ModelContainer = {
+        let schema = Schema([
             Studio.self,
             DeviceInstance.self,
             Port.self,
@@ -22,5 +19,24 @@ struct Studio_GuruApp: App {
             Connection.self,
             DocLink.self
         ])
+        
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .automatic
+        )
+
+        do {
+            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+        } catch {
+            fatalError("Could not create ModelContainer: \(error)")
+        }
+    }()
+    
+    var body: some Scene {
+        WindowGroup {
+            StudioCanvasView()
+        }
+        .modelContainer(sharedModelContainer)
     }
 }

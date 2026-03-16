@@ -411,3 +411,138 @@ final class DocLink {
 
     var kind: DocKind { DocKind(rawValue: kindRaw) ?? .other }
 }
+
+// MARK: - Export/Import Data Structures
+
+/// Codable representation of a studio for export/import
+struct ExportableStudio: Codable {
+    let name: String
+    let devices: [ExportableDevice]
+    let connections: [ExportableConnection]
+    let exportDate: Date
+    let appVersion: String
+    
+    init(from studio: Studio) {
+        self.name = studio.name
+        self.devices = studio.devices.map { ExportableDevice(from: $0) }
+        self.connections = studio.connections.map { ExportableConnection(from: $0) }
+        self.exportDate = Date()
+        self.appVersion = "1.0"
+    }
+}
+
+struct ExportableDevice: Codable {
+    let id: UUID
+    let manufacturer: String
+    let model: String
+    let nickname: String
+    let categoryRaw: String
+    let serialNumber: String
+    let location: String
+    let supportPageURLString: String?
+    let downloadsPageURLString: String?
+    let audioInputsCount: Int
+    let audioOutputsCount: Int
+    let adatInputPortsCount: Int
+    let adatOutputPortsCount: Int
+    let madiInputPortsCount: Int
+    let madiOutputPortsCount: Int
+    let ethernetPortsCount: Int
+    let sampleRateRaw: Int
+    let digitalInputsRaw: [String]
+    let digitalOutputsRaw: [String]
+    let computerInterfacesRaw: [String]
+    let posX: Double
+    let posY: Double
+    let scale: Double
+    let zIndex: Int
+    let ports: [ExportablePort]
+    
+    init(from device: DeviceInstance) {
+        self.id = device.id
+        self.manufacturer = device.manufacturer
+        self.model = device.model
+        self.nickname = device.nickname
+        self.categoryRaw = device.categoryRaw
+        self.serialNumber = device.serialNumber
+        self.location = device.location
+        self.supportPageURLString = device.supportPageURLString
+        self.downloadsPageURLString = device.downloadsPageURLString
+        self.audioInputsCount = device.audioInputsCount
+        self.audioOutputsCount = device.audioOutputsCount
+        self.adatInputPortsCount = device.adatInputPortsCount
+        self.adatOutputPortsCount = device.adatOutputPortsCount
+        self.madiInputPortsCount = device.madiInputPortsCount
+        self.madiOutputPortsCount = device.madiOutputPortsCount
+        self.ethernetPortsCount = device.ethernetPortsCount
+        self.sampleRateRaw = device.sampleRateRaw
+        self.digitalInputsRaw = device.digitalInputsRaw
+        self.digitalOutputsRaw = device.digitalOutputsRaw
+        self.computerInterfacesRaw = device.computerInterfacesRaw
+        self.posX = device.posX
+        self.posY = device.posY
+        self.scale = device.scale
+        self.zIndex = device.zIndex
+        self.ports = device.ports.map { ExportablePort(from: $0) }
+    }
+}
+
+struct ExportablePort: Codable {
+    let id: UUID
+    let name: String
+    let typeRaw: String
+    let directionRaw: String
+    let channels: [ExportableChannel]
+    
+    init(from port: Port) {
+        self.id = port.id
+        self.name = port.name
+        self.typeRaw = port.typeRaw
+        self.directionRaw = port.directionRaw
+        self.channels = port.channels.map { ExportableChannel(from: $0) }
+    }
+}
+
+struct ExportableChannel: Codable {
+    let id: UUID
+    let index: Int
+    let nameLong: String
+    let nameShort: String
+    let signalRaw: String
+    let groupingRaw: String
+    
+    init(from channel: Channel) {
+        self.id = channel.id
+        self.index = channel.index
+        self.nameLong = channel.nameLong
+        self.nameShort = channel.nameShort
+        self.signalRaw = channel.signalRaw
+        self.groupingRaw = channel.groupingRaw
+    }
+}
+
+struct ExportableConnection: Codable {
+    let id: UUID
+    let fromDeviceId: UUID
+    let fromPortId: UUID
+    let fromChannelId: UUID
+    let toDeviceId: UUID
+    let toPortId: UUID
+    let toChannelId: UUID
+    let cableRaw: String
+    let label: String
+    let notes: String?
+    
+    init(from connection: Connection) {
+        self.id = connection.id
+        self.fromDeviceId = connection.fromDeviceId
+        self.fromPortId = connection.fromPortId
+        self.fromChannelId = connection.fromChannelId
+        self.toDeviceId = connection.toDeviceId
+        self.toPortId = connection.toPortId
+        self.toChannelId = connection.toChannelId
+        self.cableRaw = connection.cableRaw
+        self.label = connection.label
+        self.notes = connection.notes
+    }
+}

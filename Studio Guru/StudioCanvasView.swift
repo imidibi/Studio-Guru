@@ -42,6 +42,11 @@ struct StudioCanvasView: View {
     
     // Import
     @State private var isShowingImportPicker: Bool = false
+    @State private var pendingImportURL: URL? = nil
+    @State private var pendingImportStudio: ExportableStudio? = nil
+    @State private var isShowingImportNameConflict: Bool = false
+    @State private var importConflictStudioName: String = ""
+    @State private var importNewName: String = ""
     
     // Settings
     @State private var isShowingSettings: Bool = false
@@ -178,6 +183,25 @@ struct StudioCanvasView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(exportResultMessage)
+        }
+        .alert("Studio Name Conflict", isPresented: $isShowingImportNameConflict) {
+            Button("Replace Existing", role: .destructive) {
+                // Delete existing studio with same name and import with original name
+                if let existingStudio = studios.first(where: { $0.name == importConflictStudioName }) {
+                    modelContext.delete(existingStudio)
+                    try? modelContext.save()
+                }
+                performImportWithName(importConflictStudioName)
+            }
+            Button("Import as '\(importNewName)'") {
+                performImportWithName(importNewName)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingImportURL = nil
+                pendingImportStudio = nil
+            }
+        } message: {
+            Text("A studio named '\(importConflictStudioName)' already exists. Do you want to replace it or import with a different name?")
         }
         .sheet(isPresented: $isShowingGuru) {
             GuruHomeView()
@@ -1269,8 +1293,30 @@ struct StudioCanvasView: View {
             decoder.dateDecodingStrategy = .iso8601
             let exportable = try decoder.decode(ExportableStudio.self, from: jsonData)
             
+            // Check for name conflict
+            if studios.contains(where: { $0.name == exportable.name }) {
+                // Store the pending import and show conflict dialog
+                pendingImportURL = url
+                pendingImportStudio = exportable
+                importConflictStudioName = exportable.name
+                importNewName = exportable.name + " (imported)"
+                isShowingImportNameConflict = true
+                return
+            }
+            
+            // No conflict, proceed with import
+            completeImport(exportable: exportable)
+            
+        } catch {
+            exportResultMessage = "Import failed: \(error.localizedDescription)"
+            isShowingExportResult = true
+        }
+    }
+    
+    private func completeImport(exportable: ExportableStudio, customName: String? = nil) {
+        do {
             // Create new studio
-            let studio = Studio(name: exportable.name)
+            let studio = Studio(name: customName ?? exportable.name)
             
             // Import devices
             var deviceMap: [UUID: DeviceInstance] = [:]
@@ -1361,6 +1407,18 @@ struct StudioCanvasView: View {
             exportResultMessage = "Import failed: \(error.localizedDescription)"
             isShowingExportResult = true
         }
+    }
+    
+    private func performImportWithName(_ name: String) {
+        guard let exportable = pendingImportStudio else { return }
+        
+        // Clear pending state
+        pendingImportURL = nil
+        pendingImportStudio = nil
+        isShowingImportNameConflict = false
+        
+        // Complete the import with the chosen name
+        completeImport(exportable: exportable, customName: name)
     }
     
     private func handleExportResult(_ result: Result<URL, Error>) {

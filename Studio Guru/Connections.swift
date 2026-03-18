@@ -337,6 +337,61 @@ final class ConnectionsStore: ObservableObject {
             }
         }
     }
+    
+    /// Rebuild ConnectionsStore from SwiftData Connection objects (used after import)
+    func rebuildFromConnections(studio: Studio) {
+        let studioId = studio.id
+        var bundles: [String: ConnectionBundle] = [:]
+        
+        // Group connections by device pair
+        var connectionsByPair: [String: [Connection]] = [:]
+        for connection in studio.connections {
+            let key = normalizedPairKey(connection.fromDeviceId, connection.toDeviceId)
+            connectionsByPair[key, default: []].append(connection)
+        }
+        
+        // Build ConnectionBundle for each device pair
+        for (pairKey, connections) in connectionsByPair {
+            guard let firstConn = connections.first else { continue }
+            
+            var bundle = ConnectionBundle(
+                fromDeviceId: firstConn.fromDeviceId,
+                toDeviceId: firstConn.toDeviceId
+            )
+            
+            // Convert each Connection to a ConnectionEdge
+            for connection in connections {
+                let fromEndpoint = IOEndpointRef(
+                    deviceId: connection.fromDeviceId,
+                    portId: connection.fromPortId,
+                    channelId: connection.fromChannelId,
+                    direction: .output
+                )
+                
+                let toEndpoint = IOEndpointRef(
+                    deviceId: connection.toDeviceId,
+                    portId: connection.toPortId,
+                    channelId: connection.toChannelId,
+                    direction: .input
+                )
+                
+                let edge = ConnectionEdge(
+                    id: connection.id,
+                    from: fromEndpoint,
+                    to: toEndpoint,
+                    fromName: connection.label,
+                    toName: connection.label
+                )
+                
+                bundle.edges.append(edge)
+            }
+            
+            bundles[pairKey] = bundle
+        }
+        
+        bundlesByStudio[studioId] = bundles
+        persist(studioId: studioId)
+    }
 
     private func normalizedPairKey(_ a: UUID, _ b: UUID) -> String {
         let aa = a.uuidString

@@ -9,14 +9,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
-    static var studioGuru: UTType {
+    nonisolated static var studioGuru: UTType {
         UTType(exportedAs: "com.studioguru.studio")
     }
 }
 
 struct StudioDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.studioGuru, .json] }
-    static var writableContentTypes: [UTType] { [.studioGuru] }
+    nonisolated static var readableContentTypes: [UTType] { [.studioGuru, .json] }
+    nonisolated static var writableContentTypes: [UTType] { [.studioGuru] }
     
     var exportableStudio: ExportableStudio
     
@@ -24,7 +24,7 @@ struct StudioDocument: FileDocument {
         self.exportableStudio = exportableStudio
     }
     
-    init(configuration: ReadConfiguration) throws {
+    nonisolated init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
@@ -34,7 +34,7 @@ struct StudioDocument: FileDocument {
         exportableStudio = try decoder.decode(ExportableStudio.self, from: data)
     }
     
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    nonisolated func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

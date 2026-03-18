@@ -5,20 +5,17 @@
 //  Created by Ian Miller on 2/7/26.
 //
 
-import SwiftUI
 import Combine
-
-import SwiftData
-import UniformTypeIdentifiers
 import CryptoKit
-
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(iOS)
-import UIKit
+    import UIKit
 #elseif os(macOS)
-import AppKit
+    import AppKit
 #endif
-
 
 struct StudioCanvasView: View {
     @Environment(\.modelContext) private var modelContext
@@ -39,7 +36,7 @@ struct StudioCanvasView: View {
     @State private var exportResultMessage: String = ""
     @State private var isShowingExportPicker: Bool = false
     @State private var exportDocument: StudioDocument? = nil
-    
+
     // Import
     @State private var isShowingImportPicker: Bool = false
     @State private var pendingImportURL: URL? = nil
@@ -47,9 +44,12 @@ struct StudioCanvasView: View {
     @State private var isShowingImportNameConflict: Bool = false
     @State private var importConflictStudioName: String = ""
     @State private var importNewName: String = ""
-    
+
     // Settings
     @State private var isShowingSettings: Bool = false
+
+    // Connection Legend
+    @State private var isShowingConnectionLegend: Bool = false
 
     // Selection (devices/connections)
     @StateObject private var selectionState = SelectionState()
@@ -61,7 +61,6 @@ struct StudioCanvasView: View {
 
     // Canvas sizing (used to place new devices without overlap)
     @State private var canvasSize: CGSize = CGSize(width: 1200, height: 800)
-
 
     // Device CRUD
     @State private var isShowingDeviceEditor: Bool = false
@@ -87,18 +86,20 @@ struct StudioCanvasView: View {
     @State private var draftAdatOutputPorts: Int = 0
     @State private var draftMadiInputPorts: Int = 0
     @State private var draftMadiOutputPorts: Int = 0
-    @State private var draftSampleRate: SampleRate = SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
+    @State private var draftSampleRate: SampleRate =
+        SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
 
     @State private var draftDigitalInputs: Set<DigitalFormat> = []
     @State private var draftDigitalOutputs: Set<DigitalFormat> = []
     /// Quantities for host interfaces (USB/Thunderbolt/Ethernet etc.).
-    @State private var draftComputerInterfaceCounts: [ComputerInterface: Int] = [:]
+    @State private var draftComputerInterfaceCounts: [ComputerInterface: Int] =
+        [:]
     @State private var deviceEditorError: String? = nil
 
     // Delete device confirm
     @State private var isShowingDeleteDeviceConfirm: Bool = false
     @State private var deviceIdPendingDelete: UUID? = nil
-    
+
     // Clone / Move device
     @State private var isShowingMoveDeviceDialog: Bool = false
     @State private var deviceIdPendingMove: UUID? = nil
@@ -142,14 +143,16 @@ struct StudioCanvasView: View {
         .alert("New Studio", isPresented: $isShowingNewStudioPrompt) {
             TextField("Studio Name", text: $newStudioNameDraft)
             Button("Create") {
-                let trimmed = newStudioNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmed = newStudioNameDraft.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
                 let name = trimmed.isEmpty ? "My Studio" : trimmed
 
                 let s = Studio(name: name)
                 // If the model has createdAt, ensure it’s set so @Query sorting works.
                 // (This is safe even if Studio doesn’t use createdAt; the compiler will tell us and we can remove it.)
                 // swiftlint:disable:next unused_optional_binding
-                if let _ = Optional.some(s) as Studio? {
+                if Optional.some(s) as Studio? != nil {
                     // Best-effort: set createdAt if the property exists.
                     // s.createdAt = Date()
                 }
@@ -165,7 +168,7 @@ struct StudioCanvasView: View {
                 selectedStudioId = s.id
                 isShowingNewStudioPrompt = false
             }
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
         } message: {
             Text("Name your studio.")
         }
@@ -174,20 +177,27 @@ struct StudioCanvasView: View {
             Button("Cancel", role: .cancel) { studioIdPendingDelete = nil }
         } message: {
             if let studio = studioPendingDelete, !studio.devices.isEmpty {
-                Text("This studio has \(studio.devices.count) device(s). Deleting it will permanently delete the studio and all its devices and connections.")
+                Text(
+                    "This studio has \(studio.devices.count) device(s). Deleting it will permanently delete the studio and all its devices and connections."
+                )
             } else {
                 Text("This studio will be permanently deleted.")
             }
         }
         .alert("Export", isPresented: $isShowingExportResult) {
-            Button("OK", role: .cancel) { }
+            Button("OK", role: .cancel) {}
         } message: {
             Text(exportResultMessage)
         }
-        .alert("Studio Name Conflict", isPresented: $isShowingImportNameConflict) {
+        .alert(
+            "Studio Name Conflict",
+            isPresented: $isShowingImportNameConflict
+        ) {
             Button("Replace Existing", role: .destructive) {
                 // Delete existing studio with same name and import with original name
-                if let existingStudio = studios.first(where: { $0.name == importConflictStudioName }) {
+                if let existingStudio = studios.first(where: {
+                    $0.name == importConflictStudioName
+                }) {
                     modelContext.delete(existingStudio)
                     try? modelContext.save()
                 }
@@ -201,13 +211,18 @@ struct StudioCanvasView: View {
                 pendingImportStudio = nil
             }
         } message: {
-            Text("A studio named '\(importConflictStudioName)' already exists. Do you want to replace it or import with a different name?")
+            Text(
+                "A studio named '\(importConflictStudioName)' already exists. Do you want to replace it or import with a different name?"
+            )
         }
         .sheet(isPresented: $isShowingGuru) {
             GuruHomeView()
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
+        }
+        .sheet(isPresented: $isShowingConnectionLegend) {
+            ConnectionLegendView()
         }
         .fileExporter(
             isPresented: $isShowingExportPicker,
@@ -228,13 +243,21 @@ struct StudioCanvasView: View {
             if selectedStudioId == nil {
                 selectedStudioId = studios.first?.id
             }
-            if let sid = selectedStudioId {
+            if let sid = selectedStudioId,
+                let studio = studios.first(where: { $0.id == sid })
+            {
+                // One-time migration: fix computer interface port types without breaking connections
+                fixComputerInterfacePortTypes(in: studio)
                 connectionsStore.load(studioId: sid)
             }
         }
         .onChange(of: selectedStudioId) { _, newValue in
             selectionState.selection = nil
-            if let sid = newValue {
+            if let sid = newValue,
+                let studio = studios.first(where: { $0.id == sid })
+            {
+                // Fix computer interface port types when switching studios
+                fixComputerInterfacePortTypes(in: studio)
                 connectionsStore.load(studioId: sid)
             }
         }
@@ -254,7 +277,8 @@ struct StudioCanvasView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .automatic) {
+            // Left side: New Studio + Duplicate
+            ToolbarItem(placement: .navigation) {
                 Button {
                     newStudioNameDraft = "My Studio"
                     isShowingNewStudioPrompt = true
@@ -264,15 +288,27 @@ struct StudioCanvasView: View {
                 .help("Create a new studio")
             }
 
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    isShowingGuru = true
-                } label: {
-                    Label("Guru", systemImage: "sparkles")
+            if let studio = currentStudio {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        duplicateStudio(from: studio)
+                    } label: {
+                        Label("Duplicate", systemImage: "plus.square.on.square")
+                    }
+                    .help("Duplicate this studio")
                 }
-                .help("Open Guru assistant for device recommendations")
+
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        autoArrangeDevices(in: studio)
+                    } label: {
+                        Label("Auto-Arrange", systemImage: "square.grid.3x2")
+                    }
+                    .help("Automatically arrange devices by signal flow")
+                }
             }
-            
+
+            // Right side: Import, Export, Delete, Settings
             ToolbarItem(placement: .automatic) {
                 Button {
                     isShowingImportPicker = true
@@ -281,26 +317,12 @@ struct StudioCanvasView: View {
                 }
                 .help("Import a studio from file")
             }
-            
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    isShowingSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gear")
-                }
-                .help("App settings and sync information")
-            }
 
             if let studio = currentStudio {
                 ToolbarItem(placement: .automatic) {
-                    Button { duplicateStudio(from: studio) } label: {
-                        Label("Duplicate", systemImage: "plus.square.on.square")
-                    }
-                    .help("Duplicate this studio")
-                }
-
-                ToolbarItem(placement: .automatic) {
-                    Button { exportStudio(studio) } label: {
+                    Button {
+                        exportStudio(studio)
+                    } label: {
                         Label("Export", systemImage: "square.and.arrow.up")
                     }
                     .help("Export this studio to share with others")
@@ -314,10 +336,19 @@ struct StudioCanvasView: View {
                         Label("Delete", systemImage: "trash")
                     }
                     .help("Delete this studio")
-#if os(macOS)
-                    .keyboardShortcut(.delete, modifiers: [])
-#endif
+                    #if os(macOS)
+                        .keyboardShortcut(.delete, modifiers: [])
+                    #endif
                 }
+            }
+
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gear")
+                }
+                .help("App settings and sync information")
             }
         }
     }
@@ -331,19 +362,22 @@ struct StudioCanvasView: View {
             .sheet(isPresented: $isShowingConnectionsEditor) {
                 connectionEditorContent
             }
-            .sheet(isPresented: $isShowingConnectionExplosion, onDismiss: {
-                suppressExplosionReopen = true
-                explosionCooldownUntil = Date().addingTimeInterval(0.9)
-                explosionDeviceId = nil
-                explosionDeviceSnapshot = nil
-                suppressNextInspectorPresentation = true
-                selectionState.selection = nil
-                suppressInspectorUntil = Date().addingTimeInterval(0.9)
-                presentedInspectorDeviceId = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    suppressExplosionReopen = false
+            .sheet(
+                isPresented: $isShowingConnectionExplosion,
+                onDismiss: {
+                    suppressExplosionReopen = true
+                    explosionCooldownUntil = Date().addingTimeInterval(0.9)
+                    explosionDeviceId = nil
+                    explosionDeviceSnapshot = nil
+                    suppressNextInspectorPresentation = true
+                    selectionState.selection = nil
+                    suppressInspectorUntil = Date().addingTimeInterval(0.9)
+                    presentedInspectorDeviceId = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        suppressExplosionReopen = false
+                    }
                 }
-            }) {
+            ) {
                 explosionSheetContent
             }
             .sheet(isPresented: $isShowingMoveDeviceDialog) {
@@ -372,7 +406,9 @@ struct StudioCanvasView: View {
             .sheet(
                 item: Binding<IdentifiableUUID?>(
                     get: {
-                        guard let id = presentedInspectorDeviceId else { return nil }
+                        guard let id = presentedInspectorDeviceId else {
+                            return nil
+                        }
                         return IdentifiableUUID(id: id)
                     },
                     set: { newValue in
@@ -385,20 +421,29 @@ struct StudioCanvasView: View {
             ) { item in
                 inspectorSheetContent(item: item)
             }
-            .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
-                Button("Delete", role: .destructive) { deletePendingDevice() }
-                Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
-            } message: {
-                Text("This will permanently delete the device from the studio.")
-            }
-            .alert("Delete Connection?", isPresented: $isShowingDeleteConnectionConfirm) {
+            .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm)
+        {
+            Button("Delete", role: .destructive) { deletePendingDevice() }
+            Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
+        } message: {
+            Text("This will permanently delete the device from the studio.")
+        }
+            .alert(
+                "Delete Connection?",
+                isPresented: $isShowingDeleteConnectionConfirm
+            ) {
                 Button("Delete", role: .destructive) {
                     guard let studio = currentStudio else { return }
                     guard let linkId = connectionEditorLinkId else { return }
 
-                    _ = connectionsStore.deleteBundle(studioId: studio.id, linkId: linkId)
+                    _ = connectionsStore.deleteBundle(
+                        studioId: studio.id,
+                        linkId: linkId
+                    )
 
-                    if case .connection(let selectedId) = selectionState.selection, selectedId == linkId {
+                    if case .connection(let selectedId) = selectionState
+                        .selection, selectedId == linkId
+                    {
                         selectionState.selection = nil
                     }
 
@@ -417,7 +462,7 @@ struct StudioCanvasView: View {
             DetailHeader(
                 studio: studio,
                 onCreateDevice: { beginCreateDevice() },
-                onAddExample: { addExampleRig(to: studio) }
+                onShowLegend: { isShowingConnectionLegend = true }
             )
             .padding(.horizontal)
             .padding(.vertical, 10)
@@ -440,7 +485,9 @@ struct StudioCanvasView: View {
                 },
                 onExplodeDevice: { device in
                     if suppressExplosionReopen { return }
-                    if let until = explosionCooldownUntil, Date() < until { return }
+                    if let until = explosionCooldownUntil, Date() < until {
+                        return
+                    }
                     if isShowingConnectionExplosion { return }
                     explosionDeviceId = device.id
                     explosionDeviceSnapshot = device
@@ -453,7 +500,9 @@ struct StudioCanvasView: View {
     }
 
     private var isExplosionReady: Bool {
-        if isShowingConnectionExplosion || suppressExplosionReopen { return false }
+        if isShowingConnectionExplosion || suppressExplosionReopen {
+            return false
+        }
         if let until = explosionCooldownUntil, Date() < until { return false }
         return true
     }
@@ -461,7 +510,9 @@ struct StudioCanvasView: View {
     @ViewBuilder
     private var explosionSheetContent: some View {
         if let studio = currentStudio,
-           let center = explosionDeviceSnapshot ?? studio.devices.first(where: { $0.id == explosionDeviceId }) {
+            let center = explosionDeviceSnapshot
+                ?? studio.devices.first(where: { $0.id == explosionDeviceId })
+        {
             ExplosionOverviewView(
                 studio: studio,
                 centerDevice: center,
@@ -507,16 +558,28 @@ struct StudioCanvasView: View {
     @ViewBuilder
     private var moveDeviceSheetContent: some View {
         if let deviceId = deviceIdPendingMove,
-           let sourceStudio = currentStudio,
-           let device = sourceStudio.devices.first(where: { $0.id == deviceId }) {
+            let sourceStudio = currentStudio,
+            let device = sourceStudio.devices.first(where: { $0.id == deviceId }
+            )
+        {
             NavigationStack {
                 Form {
                     Section("Move To Studio") {
-                        Picker("Destination", selection: Binding(
-                            get: { moveTargetStudioId ?? studios.first?.id },
-                            set: { moveTargetStudioId = $0 }
-                        )) {
-                            ForEach(studiosSortedByName.filter { $0.id != sourceStudio.id }, id: \.id) { s in
+                        Picker(
+                            "Destination",
+                            selection: Binding(
+                                get: {
+                                    moveTargetStudioId ?? studios.first?.id
+                                },
+                                set: { moveTargetStudioId = $0 }
+                            )
+                        ) {
+                            ForEach(
+                                studiosSortedByName.filter {
+                                    $0.id != sourceStudio.id
+                                },
+                                id: \.id
+                            ) { s in
                                 Text(s.name).tag(s.id as UUID?)
                             }
                         }
@@ -539,13 +602,23 @@ struct StudioCanvasView: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Move") {
-                            guard let destId = moveTargetStudioId ?? studios.first?.id,
-                                  let destStudio = studios.first(where: { $0.id == destId }),
-                                  destStudio.id != sourceStudio.id else {
-                                moveErrorMessage = "Please choose a different destination studio."
+                            guard
+                                let destId = moveTargetStudioId
+                                    ?? studios.first?.id,
+                                let destStudio = studios.first(where: {
+                                    $0.id == destId
+                                }),
+                                destStudio.id != sourceStudio.id
+                            else {
+                                moveErrorMessage =
+                                    "Please choose a different destination studio."
                                 return
                             }
-                            moveDevice(device, from: sourceStudio, to: destStudio)
+                            moveDevice(
+                                device,
+                                from: sourceStudio,
+                                to: destStudio
+                            )
                             moveTargetStudioId = nil
                             moveErrorMessage = nil
                             deviceIdPendingMove = nil
@@ -602,14 +675,14 @@ struct StudioCanvasView: View {
         .padding()
     }
 
-
     // MARK: - View Helpers for Sheet Content
-    
+
     @ViewBuilder
     private var connectionEditorContent: some View {
         if let studio = currentStudio,
-           let linkId = connectionEditorLinkId,
-           let bundle = connectionsStore.bundle(for: studio.id, linkId: linkId) {
+            let linkId = connectionEditorLinkId,
+            let bundle = connectionsStore.bundle(for: studio.id, linkId: linkId)
+        {
             ConnectionsDialogView(
                 studio: studio,
                 fromDeviceId: bundle.fromDeviceId,
@@ -621,7 +694,7 @@ struct StudioCanvasView: View {
             Text("No connection selected").padding()
         }
     }
-    
+
     @ViewBuilder
     private var deviceEditorSheetContent: some View {
         if let studio = currentStudio {
@@ -706,7 +779,9 @@ struct StudioCanvasView: View {
         draftAdatOutputPorts = max(0, d.adatOutputPortsCount)
         draftMadiInputPorts = max(0, d.madiInputPortsCount)
         draftMadiOutputPorts = max(0, d.madiOutputPortsCount)
-        if let sr = SampleRate(rawValue: d.sampleRateRaw) { draftSampleRate = sr }
+        if let sr = SampleRate(rawValue: d.sampleRateRaw) {
+            draftSampleRate = sr
+        }
 
         draftDigitalInputs = Set(d.digitalInputs)
         draftDigitalOutputs = Set(d.digitalOutputs)
@@ -719,9 +794,11 @@ struct StudioCanvasView: View {
 
         suppressNextInspectorPresentation = true
         isShowingDeviceEditor = true
-        }
+    }
 
-    private func expandComputerInterfaces(from counts: [ComputerInterface: Int]) -> [ComputerInterface] {
+    private func expandComputerInterfaces(from counts: [ComputerInterface: Int])
+        -> [ComputerInterface]
+    {
         var result: [ComputerInterface] = []
         for key in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
             let n = max(0, counts[key] ?? 0)
@@ -733,14 +810,28 @@ struct StudioCanvasView: View {
     }
     @MainActor
     private func saveDeviceEdits(into studio: Studio) {
-        let nickname = draftNickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        let manufacturer = draftManufacturer.trimmingCharacters(in: .whitespacesAndNewlines)
-        let productId = draftProductId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let serialNumber = draftSerialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        let location = draftLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nickname = draftNickname.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let manufacturer = draftManufacturer.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let productId = draftProductId.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let serialNumber = draftSerialNumber.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let location = draftLocation.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
 
-        let supportURL = draftSupportPageURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let downloadsURL = draftDownloadsPageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let supportURL = draftSupportPageURL.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let downloadsURL = draftDownloadsPageURL.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         guard !nickname.isEmpty else {
             deviceEditorError = "Nickname is required."
             return
@@ -749,22 +840,30 @@ struct StudioCanvasView: View {
         // Warn if another device in this studio already uses the same serial number
         if !serialNumber.isEmpty {
             let duplicate = studio.devices.first { other in
-                other.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .localizedCaseInsensitiveCompare(serialNumber) == .orderedSame
-                && other.id != editingDeviceId
+                other.serialNumber.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+                .localizedCaseInsensitiveCompare(serialNumber) == .orderedSame
+                    && other.id != editingDeviceId
             }
 
             if duplicate != nil {
-                deviceEditorError = "Another device in this studio already uses this serial number."
+                deviceEditorError =
+                    "Another device in this studio already uses this serial number."
                 return
             }
         }
 
         let device: DeviceInstance
-        if let id = editingDeviceId, let existing = studio.devices.first(where: { $0.id == id }) {
+        if let id = editingDeviceId,
+            let existing = studio.devices.first(where: { $0.id == id })
+        {
             device = existing
         } else {
-            let pos = findAvailableDevicePosition(in: studio, canvas: canvasSize)
+            let pos = findAvailableDevicePosition(
+                in: studio,
+                canvas: canvasSize
+            )
             device = DeviceInstance(
                 manufacturer: manufacturer.isEmpty ? "Unknown" : manufacturer,
                 model: productId,
@@ -778,10 +877,13 @@ struct StudioCanvasView: View {
                 adatOutputPortsCount: max(0, draftAdatOutputPorts),
                 madiInputPortsCount: max(0, draftMadiInputPorts),
                 madiOutputPortsCount: max(0, draftMadiOutputPorts),
-                ethernetPortsCount: 0,                sampleRate: draftSampleRate,
+                ethernetPortsCount: 0,
+                sampleRate: draftSampleRate,
                 digitalInputs: Array(draftDigitalInputs),
                 digitalOutputs: Array(draftDigitalOutputs),
-                computerInterfaces: expandComputerInterfaces(from: draftComputerInterfaceCounts),
+                computerInterfaces: expandComputerInterfaces(
+                    from: draftComputerInterfaceCounts
+                ),
                 posX: pos.x,
                 posY: pos.y,
                 scale: 1.0,
@@ -798,7 +900,8 @@ struct StudioCanvasView: View {
         device.location = location
 
         device.supportPageURLString = supportURL.isEmpty ? nil : supportURL
-        device.downloadsPageURLString = downloadsURL.isEmpty ? nil : downloadsURL
+        device.downloadsPageURLString =
+            downloadsURL.isEmpty ? nil : downloadsURL
         device.audioInputsCount = max(0, draftAudioInputs)
         device.audioOutputsCount = max(0, draftAudioOutputs)
         device.adatInputPortsCount = max(0, draftAdatInputPorts)
@@ -808,7 +911,9 @@ struct StudioCanvasView: View {
         device.sampleRateRaw = draftSampleRate.rawValue
         device.digitalInputs = Array(draftDigitalInputs)
         device.digitalOutputs = Array(draftDigitalOutputs)
-        device.computerInterfaces = expandComputerInterfaces(from: draftComputerInterfaceCounts)
+        device.computerInterfaces = expandComputerInterfaces(
+            from: draftComputerInterfaceCounts
+        )
 
         // Build ports from counts/formats for visualization and later connection tooling.
         device.ports = buildPorts(
@@ -833,7 +938,9 @@ struct StudioCanvasView: View {
     private func deletePendingDevice() {
         guard let studio = currentStudio else { return }
         guard let id = deviceIdPendingDelete else { return }
-        guard let idx = studio.devices.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = studio.devices.firstIndex(where: { $0.id == id }) else {
+            return
+        }
 
         studio.devices.remove(at: idx)
         deviceIdPendingDelete = nil
@@ -855,7 +962,8 @@ struct StudioCanvasView: View {
             adatOutputPortsCount: device.adatOutputPortsCount,
             madiInputPortsCount: device.madiInputPortsCount,
             madiOutputPortsCount: device.madiOutputPortsCount,
-            sampleRate: SampleRate(rawValue: device.sampleRateRaw) ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
+            sampleRate: SampleRate(rawValue: device.sampleRateRaw)
+                ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
             digitalInputs: device.digitalInputs,
             digitalOutputs: device.digitalOutputs,
             computerInterfaces: device.computerInterfaces,
@@ -867,7 +975,13 @@ struct StudioCanvasView: View {
         newDevice.ports = device.ports.map { p in
             let np = Port(name: p.name, type: p.type, direction: p.direction)
             np.channels = p.channels.map { ch in
-                Channel(index: ch.index, nameLong: ch.nameLong, nameShort: ch.nameShort, signal: ch.signal, grouping: ch.grouping)
+                Channel(
+                    index: ch.index,
+                    nameLong: ch.nameLong,
+                    nameShort: ch.nameShort,
+                    signal: ch.signal,
+                    grouping: ch.grouping
+                )
             }
             return np
         }
@@ -875,15 +989,22 @@ struct StudioCanvasView: View {
         selectionState.selection = .device(newDevice.id)
     }
 
-    private func moveDevice(_ device: DeviceInstance, from source: Studio, to destination: Studio) {
+    private func moveDevice(
+        _ device: DeviceInstance,
+        from source: Studio,
+        to destination: Studio
+    ) {
         // Remove from source studio
         if let idx = source.devices.firstIndex(where: { $0.id == device.id }) {
             // Dismiss any presented inspector overlay during move
             presentedInspectorDeviceId = nil
-            
+
             let removed = source.devices.remove(at: idx)
             // Append to destination studio
-            let newPos = findAvailableDevicePosition(in: destination, canvas: canvasSize)
+            let newPos = findAvailableDevicePosition(
+                in: destination,
+                canvas: canvasSize
+            )
             let moved = DeviceInstance(
                 manufacturer: removed.manufacturer,
                 model: removed.model,
@@ -897,7 +1018,8 @@ struct StudioCanvasView: View {
                 adatOutputPortsCount: removed.adatOutputPortsCount,
                 madiInputPortsCount: removed.madiInputPortsCount,
                 madiOutputPortsCount: removed.madiOutputPortsCount,
-                sampleRate: SampleRate(rawValue: removed.sampleRateRaw) ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
+                sampleRate: SampleRate(rawValue: removed.sampleRateRaw)
+                    ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
                 digitalInputs: removed.digitalInputs,
                 digitalOutputs: removed.digitalOutputs,
                 computerInterfaces: removed.computerInterfaces,
@@ -909,72 +1031,49 @@ struct StudioCanvasView: View {
             moved.frontImagePath = removed.frontImagePath
             moved.rearImagePath = removed.rearImagePath
             moved.ports = removed.ports.map { p in
-                let np = Port(name: p.name, type: p.type, direction: p.direction)
+                let np = Port(
+                    name: p.name,
+                    type: p.type,
+                    direction: p.direction
+                )
                 np.channels = p.channels.map { ch in
-                    Channel(index: ch.index, nameLong: ch.nameLong, nameShort: ch.nameShort, signal: ch.signal, grouping: ch.grouping)
+                    Channel(
+                        index: ch.index,
+                        nameLong: ch.nameLong,
+                        nameShort: ch.nameShort,
+                        signal: ch.signal,
+                        grouping: ch.grouping
+                    )
                 }
                 return np
             }
             destination.devices.append(moved)
-            
+
             // Remove any connections involving the old device in the source studio
             let sourceLinks = connectionsStore.links(for: source.id)
-            for link in sourceLinks where (link.fromDeviceId == device.id || link.toDeviceId == device.id) {
-                _ = connectionsStore.deleteBundle(studioId: source.id, linkId: link.id)
+            for link in sourceLinks
+            where
+                (link.fromDeviceId == device.id || link.toDeviceId == device.id)
+            {
+                _ = connectionsStore.deleteBundle(
+                    studioId: source.id,
+                    linkId: link.id
+                )
             }
             // Ensure there are no connections in destination that reference the new device (should be none yet)
             let destLinks = connectionsStore.links(for: destination.id)
-            for link in destLinks where (link.fromDeviceId == moved.id || link.toDeviceId == moved.id) {
-                _ = connectionsStore.deleteBundle(studioId: destination.id, linkId: link.id)
+            for link in destLinks
+            where (link.fromDeviceId == moved.id || link.toDeviceId == moved.id)
+            {
+                _ = connectionsStore.deleteBundle(
+                    studioId: destination.id,
+                    linkId: link.id
+                )
             }
-            
+
             // Update selection to moved device and switch selected studio
             selectedStudioId = destination.id
             selectionState.selection = .device(moved.id)
-        }
-    }
-
-    private func addExampleRig(to studio: Studio) {
-        // Keep this as a convenient demo rig, but fully manual-editable.
-        if studio.devices.isEmpty {
-            let defaultSR = SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
-            let d = DeviceInstance(
-                manufacturer: "Solid State Logic",
-                model: "SSL 18",
-                nickname: "SSL 18",
-                category: .audioInterface,
-                serialNumber: "",
-                location: "Rack",
-                audioInputsCount: 8,
-                audioOutputsCount: 10,
-                adatInputPortsCount: 1,
-                adatOutputPortsCount: 1,
-                madiInputPortsCount: 0,
-                madiOutputPortsCount: 0,
-                ethernetPortsCount: 0,
-                sampleRate: defaultSR,
-                digitalInputs: [.adat, .spdif],
-                digitalOutputs: [.adat, .spdif],
-                computerInterfaces: [],
-                posX: 320,
-                posY: 240,
-                scale: 1.0,
-                zIndex: 0
-            )
-            d.ports = buildPorts(
-                audioInputs: d.audioInputsCount,
-                audioOutputs: d.audioOutputsCount,
-                digitalInputs: d.digitalInputs,
-                digitalOutputs: d.digitalOutputs,
-                adatInputPorts: d.adatInputPortsCount,
-                adatOutputPorts: d.adatOutputPortsCount,
-                madiInputPorts: d.madiInputPortsCount,
-                madiOutputPorts: d.madiOutputPortsCount,
-                computerInterfaceCounts: d.computerInterfaceCounts,
-                sampleRate: defaultSR
-            )
-            studio.devices.append(d)
-            selectionState.selection = .device(d.id)
         }
     }
 
@@ -994,29 +1093,57 @@ struct StudioCanvasView: View {
 
         let srHz = sampleRateRawHz(sampleRate)
         let adatChannelsPerPort: Int = srHz >= 88_200 ? 4 : 8
-        let madiChannelsPerPort: Int = srHz >= 176_400 ? 16 : (srHz >= 88_200 ? 32 : 64)
+        let madiChannelsPerPort: Int =
+            srHz >= 176_400 ? 16 : (srHz >= 88_200 ? 32 : 64)
         let danteChannelsPerLink: Int = 64
 
         func portLetter(_ i: Int) -> String {
             let scalar = UnicodeScalar(65 + max(0, i))!
-            return String(Character(scalar)) // A, B, C...
+            return String(Character(scalar))  // A, B, C...
         }
 
         if audioInputs > 0 {
             let p = Port(name: "Analog In", type: .analogIn, direction: .input)
-            p.channels = (1...audioInputs).map { Channel(index: $0, nameLong: "Analog In \($0)", nameShort: "In\($0)") }
+            p.channels = (1...audioInputs).map {
+                Channel(
+                    index: $0,
+                    nameLong: "Analog In \($0)",
+                    nameShort: "In\($0)"
+                )
+            }
             ports.append(p)
         }
 
         if audioOutputs > 0 {
-            let p = Port(name: "Analog Out", type: .analogOut, direction: .output)
-            p.channels = (1...audioOutputs).map { Channel(index: $0, nameLong: "Analog Out \($0)", nameShort: "Out\($0)") }
+            let p = Port(
+                name: "Analog Out",
+                type: .analogOut,
+                direction: .output
+            )
+            p.channels = (1...audioOutputs).map {
+                Channel(
+                    index: $0,
+                    nameLong: "Analog Out \($0)",
+                    nameShort: "Out\($0)"
+                )
+            }
             ports.append(p)
         }
 
-        func digitalPort(type: PortType, name: String, direction: PortDirection, channels: Int) -> Port {
+        func digitalPort(
+            type: PortType,
+            name: String,
+            direction: PortDirection,
+            channels: Int
+        ) -> Port {
             let p = Port(name: name, type: type, direction: direction)
-            p.channels = (1...channels).map { Channel(index: $0, nameLong: "\(name) \($0)", nameShort: "\($0)") }
+            p.channels = (1...channels).map {
+                Channel(
+                    index: $0,
+                    nameLong: "\(name) \($0)",
+                    nameShort: "\($0)"
+                )
+            }
             return p
         }
 
@@ -1026,22 +1153,66 @@ struct StudioCanvasView: View {
                 let count = max(1, max(0, adatInputPorts))
                 for i in 0..<count {
                     let name = "ADAT In \(portLetter(i))"
-                    ports.append(digitalPort(type: .adatIn, name: name, direction: .input, channels: adatChannelsPerPort))
+                    ports.append(
+                        digitalPort(
+                            type: .adatIn,
+                            name: name,
+                            direction: .input,
+                            channels: adatChannelsPerPort
+                        )
+                    )
                 }
             case .madi:
                 let count = max(1, max(0, madiInputPorts))
                 for i in 0..<count {
                     let name = "MADI In \(portLetter(i))"
-                    ports.append(digitalPort(type: .madiIn, name: name, direction: .input, channels: madiChannelsPerPort))
+                    ports.append(
+                        digitalPort(
+                            type: .madiIn,
+                            name: name,
+                            direction: .input,
+                            channels: madiChannelsPerPort
+                        )
+                    )
                 }
             case .dante:
                 // Represent Dante as an Ethernet-based digital input (one logical link = 64ch).
-                ports.append(digitalPort(type: .ethernet, name: "Dante In (Ethernet)", direction: .input, channels: danteChannelsPerLink))
+                ports.append(
+                    digitalPort(
+                        type: .ethernet,
+                        name: "Dante In (Ethernet)",
+                        direction: .input,
+                        channels: danteChannelsPerLink
+                    )
+                )
             case .spdif:
-                ports.append(digitalPort(type: .spdifIn, name: "Digital In (S/PDIF)", direction: .input, channels: 2))
+                ports.append(
+                    digitalPort(
+                        type: .spdifIn,
+                        name: "Digital In (S/PDIF)",
+                        direction: .input,
+                        channels: 2
+                    )
+                )
+            case .midi:
+                ports.append(
+                    digitalPort(
+                        type: .midiIn,
+                        name: "MIDI In",
+                        direction: .input,
+                        channels: 1
+                    )
+                )
             default:
                 // Fallback to analog types but preserve name
-                ports.append(digitalPort(type: .analogIn, name: "Digital In (\(f.rawValue))", direction: .input, channels: 2))
+                ports.append(
+                    digitalPort(
+                        type: .analogIn,
+                        name: "Digital In (\(f.rawValue))",
+                        direction: .input,
+                        channels: 2
+                    )
+                )
             }
         }
 
@@ -1051,20 +1222,64 @@ struct StudioCanvasView: View {
                 let count = max(1, max(0, adatOutputPorts))
                 for i in 0..<count {
                     let name = "ADAT Out \(portLetter(i))"
-                    ports.append(digitalPort(type: .adatOut, name: name, direction: .output, channels: adatChannelsPerPort))
+                    ports.append(
+                        digitalPort(
+                            type: .adatOut,
+                            name: name,
+                            direction: .output,
+                            channels: adatChannelsPerPort
+                        )
+                    )
                 }
             case .madi:
                 let count = max(1, max(0, madiOutputPorts))
                 for i in 0..<count {
                     let name = "MADI Out \(portLetter(i))"
-                    ports.append(digitalPort(type: .madiOut, name: name, direction: .output, channels: madiChannelsPerPort))
+                    ports.append(
+                        digitalPort(
+                            type: .madiOut,
+                            name: name,
+                            direction: .output,
+                            channels: madiChannelsPerPort
+                        )
+                    )
                 }
             case .dante:
-                ports.append(digitalPort(type: .ethernet, name: "Dante Out (Ethernet)", direction: .output, channels: danteChannelsPerLink))
+                ports.append(
+                    digitalPort(
+                        type: .ethernet,
+                        name: "Dante Out (Ethernet)",
+                        direction: .output,
+                        channels: danteChannelsPerLink
+                    )
+                )
             case .spdif:
-                ports.append(digitalPort(type: .spdifOut, name: "Digital Out (S/PDIF)", direction: .output, channels: 2))
+                ports.append(
+                    digitalPort(
+                        type: .spdifOut,
+                        name: "Digital Out (S/PDIF)",
+                        direction: .output,
+                        channels: 2
+                    )
+                )
+            case .midi:
+                ports.append(
+                    digitalPort(
+                        type: .midiOut,
+                        name: "MIDI Out",
+                        direction: .output,
+                        channels: 1
+                    )
+                )
             default:
-                ports.append(digitalPort(type: .analogOut, name: "Digital Out (\(f.rawValue))", direction: .output, channels: 2))
+                ports.append(
+                    digitalPort(
+                        type: .analogOut,
+                        name: "Digital Out (\(f.rawValue))",
+                        direction: .output,
+                        channels: 2
+                    )
+                )
             }
         }
 
@@ -1073,7 +1288,9 @@ struct StudioCanvasView: View {
         // 1-channel logical port so they can show up in I/O lists and participate in occupancy.
         // IMPORTANT: Do NOT model these as separate "In" and "Out" ports.
         if !computerInterfaceCounts.isEmpty {
-            let sortedIfaces = computerInterfaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue })
+            let sortedIfaces = computerInterfaceCounts.keys.sorted(by: {
+                $0.rawValue < $1.rawValue
+            })
             for iface in sortedIfaces {
                 let count = max(0, computerInterfaceCounts[iface] ?? 0)
                 if count == 0 { continue }
@@ -1082,11 +1299,26 @@ struct StudioCanvasView: View {
                     let suffix = count > 1 ? " \(i + 1)" : ""
                     let name = "\(iface.rawValue)\(suffix)"
 
+                    // Map computer interface type to appropriate PortType
+                    let portType: PortType
+                    switch iface {
+                    case .usb, .usbc:
+                        portType = .usbAudio
+                    case .thunderbolt:
+                        portType = .thunderboltAudio
+                    case .ethernet:
+                        portType = .ethernet
+                    case .firewire:
+                        portType = .computerHost  // Fallback for older interface
+                    }
+
                     // NOTE: PortDirection only supports input/output in the current model.
                     // We choose `.input` as a neutral placeholder; UI labels should rely on `name`
                     // (and not append "In"/"Out" for computer interfaces).
-                    let p = Port(name: name, type: .ethernet, direction: .input)
-                    p.channels = [Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")]
+                    let p = Port(name: name, type: portType, direction: .input)
+                    p.channels = [
+                        Channel(index: 1, nameLong: "\(name) 1", nameShort: "1")
+                    ]
                     ports.append(p)
                 }
             }
@@ -1095,7 +1327,9 @@ struct StudioCanvasView: View {
         return ports
     }
 
-    private func findAvailableDevicePosition(in studio: Studio, canvas: CGSize) -> (x: Double, y: Double) {
+    private func findAvailableDevicePosition(in studio: Studio, canvas: CGSize)
+        -> (x: Double, y: Double)
+    {
         // Match the card size used in CanvasSurfaceView clamping.
         let cardSize = CGSize(width: 260, height: 96)
         let halfW = Double(cardSize.width / 2)
@@ -1130,7 +1364,9 @@ struct StudioCanvasView: View {
                 let topB = dy - halfH
                 let bottomB = dy + halfH
 
-                let overlap = !(rightA < leftB || rightB < leftA || bottomA < topB || bottomB < topA)
+                let overlap =
+                    !(rightA < leftB || rightB < leftA || bottomA < topB
+                    || bottomB < topA)
                 if overlap { return true }
             }
             return false
@@ -1155,7 +1391,7 @@ struct StudioCanvasView: View {
                 (centerX + r, centerY + r),
                 (centerX - r, centerY + r),
                 (centerX + r, centerY - r),
-                (centerX - r, centerY - r)
+                (centerX - r, centerY - r),
             ]
 
             for (x0, y0) in points {
@@ -1180,24 +1416,49 @@ struct StudioCanvasView: View {
 
         // Fallback: staggered placement based on count
         let idx = Double(studio.devices.count)
-        let (fx, fy) = clamped(centerX + (idx * 20).truncatingRemainder(dividingBy: 240) - 120,
-                               centerY + (idx * 16).truncatingRemainder(dividingBy: 200) - 100)
+        let (fx, fy) = clamped(
+            centerX + (idx * 20).truncatingRemainder(dividingBy: 240) - 120,
+            centerY + (idx * 16).truncatingRemainder(dividingBy: 200) - 100
+        )
         return (fx, fy)
     }
 
-    private func defaultPortsGuess(forManufacturer manufacturer: String, model: String) -> [Port] {
+    private func defaultPortsGuess(
+        forManufacturer manufacturer: String,
+        model: String
+    ) -> [Port] {
         // Backward compatibility: used only by duplicateStudio if older devices exist.
-        let analogIn = Port(name: "Analog In", type: .analogIn, direction: .input)
-        analogIn.channels = (1...2).map { Channel(index: $0, nameLong: "Analog In \($0)", nameShort: "In\($0)") }
+        let analogIn = Port(
+            name: "Analog In",
+            type: .analogIn,
+            direction: .input
+        )
+        analogIn.channels = (1...2).map {
+            Channel(
+                index: $0,
+                nameLong: "Analog In \($0)",
+                nameShort: "In\($0)"
+            )
+        }
 
-        let analogOut = Port(name: "Analog Out", type: .analogOut, direction: .output)
-        analogOut.channels = (1...2).map { Channel(index: $0, nameLong: "Analog Out \($0)", nameShort: "Out\($0)") }
+        let analogOut = Port(
+            name: "Analog Out",
+            type: .analogOut,
+            direction: .output
+        )
+        analogOut.channels = (1...2).map {
+            Channel(
+                index: $0,
+                nameLong: "Analog Out \($0)",
+                nameShort: "Out\($0)"
+            )
+        }
 
         return [analogIn, analogOut]
     }
 
-// MARK: - View Helpers
-    
+    // MARK: - View Helpers
+
     private var studiosSortedByName: [Studio] {
         studios.sorted { a, b in
             a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
@@ -1205,11 +1466,11 @@ struct StudioCanvasView: View {
     }
 
     private var canvasBackground: Color {
-#if os(iOS)
-        Color(UIColor.systemBackground)
-#else
-        Color(NSColor.windowBackgroundColor)
-#endif
+        #if os(iOS)
+            Color(UIColor.systemBackground)
+        #else
+            Color(NSColor.windowBackgroundColor)
+        #endif
     }
 
     private var currentStudio: Studio? {
@@ -1253,10 +1514,20 @@ struct StudioCanvasView: View {
             newDevice.rearImagePath = d.rearImagePath
 
             for p in d.ports {
-                let newPort = Port(name: p.name, type: p.type, direction: p.direction)
+                let newPort = Port(
+                    name: p.name,
+                    type: p.type,
+                    direction: p.direction
+                )
                 for ch in p.channels {
                     newPort.channels.append(
-                        Channel(index: ch.index, nameLong: ch.nameLong, nameShort: ch.nameShort, signal: ch.signal, grouping: ch.grouping)
+                        Channel(
+                            index: ch.index,
+                            nameLong: ch.nameLong,
+                            nameShort: ch.nameShort,
+                            signal: ch.signal,
+                            grouping: ch.grouping
+                        )
                     )
                 }
                 newDevice.ports.append(newPort)
@@ -1270,14 +1541,279 @@ struct StudioCanvasView: View {
     }
 
     private func exportStudio(_ studio: Studio) {
+        // First, sync connections from ConnectionsStore to SwiftData
+        syncConnectionsToSwiftData(studio: studio)
+
         // Create exportable representation
         let exportable = ExportableStudio(from: studio)
-        
+
         // Create document
         exportDocument = StudioDocument(exportableStudio: exportable)
         isShowingExportPicker = true
     }
-    
+
+    // MARK: - Port Migration
+
+    /// Fixes port types for computer interface and MIDI ports without changing port IDs (preserves connections)
+    private func fixComputerInterfacePortTypes(in studio: Studio) {
+        print(
+            "🔧 Running port type migration for \(studio.devices.count) devices..."
+        )
+        for device in studio.devices {
+            // Fix computer interface ports
+            let counts = device.computerInterfaceCounts
+            if !counts.isEmpty {
+                print(
+                    "  Device: \(device.nickname), computer interfaces: \(counts)"
+                )
+
+                for (iface, count) in counts {
+                    guard count > 0 else { continue }
+
+                    // Determine the correct port type for this interface
+                    let correctPortType: PortType
+                    switch iface {
+                    case .usb, .usbc:
+                        correctPortType = .usbAudio
+                    case .thunderbolt:
+                        correctPortType = .thunderboltAudio
+                    case .ethernet:
+                        correctPortType = .ethernet
+                    case .firewire:
+                        correctPortType = .computerHost
+                    }
+
+                    // Find and fix ports with matching names but wrong types
+                    for i in 0..<count {
+                        let suffix = count > 1 ? " \(i + 1)" : ""
+                        let expectedName = "\(iface.rawValue)\(suffix)"
+
+                        if let port = device.ports.first(where: {
+                            $0.name == expectedName
+                        }) {
+                            if port.type != correctPortType {
+                                print(
+                                    "    ✅ FIXING port '\(expectedName)' from \(port.type.rawValue) to \(correctPortType.rawValue)"
+                                )
+                                port.typeRaw = correctPortType.rawValue
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fix MIDI ports (legacy devices may have "Digital In/Out (MIDI)" with wrong type)
+            for port in device.ports {
+                if port.name.contains("MIDI") {
+                    let expectedType: PortType =
+                        port.direction == .input ? .midiIn : .midiOut
+                    if port.type != expectedType {
+                        print(
+                            "  ✅ FIXING MIDI port '\(port.name)' from \(port.type.rawValue) to \(expectedType.rawValue)"
+                        )
+                        port.typeRaw = expectedType.rawValue
+                    }
+                }
+            }
+        }
+    }
+
+    private func autoArrangeDevices(in studio: Studio) {
+        guard !studio.devices.isEmpty else { return }
+
+        // Build adjacency map: device -> devices it connects to
+        var outgoing: [UUID: Set<UUID>] = [:]
+        var incoming: [UUID: Set<UUID>] = [:]
+
+        // Initialize with all devices
+        for device in studio.devices {
+            outgoing[device.id] = []
+            incoming[device.id] = []
+        }
+
+        // Populate from connections
+        for conn in studio.connections {
+            outgoing[conn.fromDeviceId, default: []].insert(conn.toDeviceId)
+            incoming[conn.toDeviceId, default: []].insert(conn.fromDeviceId)
+        }
+
+        // SIMPLIFIED 3-TIER HIERARCHY
+        // Tier 0: Computers
+        // Tier 1: Interfaces and ADAT expanders
+        // Tier 2: Everything else
+
+        var deviceTiers: [UUID: Int] = [:]
+
+        for device in studio.devices {
+            if device.category == .computer {
+                deviceTiers[device.id] = 0
+            } else if device.category == .audioInterface
+                || device.category == .adatExpander
+            {
+                deviceTiers[device.id] = 1
+            } else {
+                deviceTiers[device.id] = 2
+            }
+        }
+
+        // Group devices by tier
+        var layerGroups: [[DeviceInstance]] = [[], [], []]
+
+        for device in studio.devices {
+            let tier = deviceTiers[device.id] ?? 2
+            layerGroups[tier].append(device)
+        }
+
+        // Sort within each tier by category then nickname
+        func categoryPriority(_ category: DeviceCategory) -> Int {
+            switch category {
+            case .computer: return 0
+            case .audioInterface: return 1
+            case .adatExpander: return 2
+            case .digitalMixer, .mixer: return 3
+            case .patchbay: return 4
+            default: return 5
+            }
+        }
+
+        for i in 0..<layerGroups.count {
+            layerGroups[i].sort { d1, d2 in
+                let p1 = categoryPriority(d1.category)
+                let p2 = categoryPriority(d2.category)
+                if p1 != p2 { return p1 < p2 }
+                return d1.nickname < d2.nickname
+            }
+        }
+
+        // Remove empty tiers
+        layerGroups = layerGroups.filter { !$0.isEmpty }
+
+        // Calculate layout to fit viewport - ensure everything is visible
+        let deviceCardHeight: Double = 96
+        let deviceCardWidth: Double = 260
+        let padding: Double = 50  // Padding from edges
+
+        // Target viewport (conservative to ensure visibility on all screens)
+        let targetWidth: Double = 1200
+        let targetHeight: Double = 700
+
+        // Find max devices in any tier
+        let maxDevicesInTier = layerGroups.map { $0.count }.max() ?? 1
+
+        // Calculate required space
+        let numTiers = layerGroups.count
+        let totalRequiredWidth = Double(numTiers) * deviceCardWidth
+        let totalRequiredHeight = Double(maxDevicesInTier) * deviceCardHeight
+
+        // Calculate spacing - ensure it fits
+        let availableWidthForSpacing =
+            targetWidth - totalRequiredWidth - (2 * padding)
+        let horizontalSpacing =
+            numTiers > 1
+            ? max(60, availableWidthForSpacing / Double(numTiers - 1)) : 0
+
+        let availableHeightForSpacing =
+            targetHeight - totalRequiredHeight - (2 * padding)
+        let verticalSpacing =
+            maxDevicesInTier > 1
+            ? max(30, availableHeightForSpacing / Double(maxDevicesInTier - 1))
+            : 0
+
+        // Position devices
+        // Note: Device positions are the CENTER of the card, so we need to account for half the card size
+        let halfCardWidth = deviceCardWidth / 2
+        let halfCardHeight = deviceCardHeight / 2
+
+        for (tierIndex, devicesInTier) in layerGroups.enumerated() {
+            // Calculate x position for this tier's center (accounting for card width)
+            let x =
+                padding + halfCardWidth + Double(tierIndex)
+                * (deviceCardWidth + horizontalSpacing)
+
+            // Center this tier vertically
+            let tierHeight =
+                Double(devicesInTier.count) * deviceCardHeight + Double(
+                    max(0, devicesInTier.count - 1)
+                ) * verticalSpacing
+            let tierStartY =
+                padding + halfCardHeight + (targetHeight - tierHeight) / 2
+
+            for (index, device) in devicesInTier.enumerated() {
+                let y =
+                    tierStartY + Double(index)
+                    * (deviceCardHeight + verticalSpacing)
+                device.posX = x
+                device.posY = y
+            }
+        }
+
+        // Save changes
+        try? modelContext.save()
+    }
+
+    private func syncConnectionsToSwiftData(studio: Studio) {
+        // Clear existing SwiftData connections
+        studio.connections.removeAll()
+
+        // Get all bundles for this studio from ConnectionsStore
+        let bundles = connectionsStore.links(for: studio.id)
+            .compactMap {
+                connectionsStore.bundle(for: studio.id, linkId: $0.id)
+            }
+
+        // Build lookup maps to validate UUIDs
+        var deviceIds = Set<UUID>()
+        var portIds = Set<UUID>()
+        var channelIds = Set<UUID>()
+
+        for device in studio.devices {
+            deviceIds.insert(device.id)
+            for port in device.ports {
+                portIds.insert(port.id)
+                for channel in port.channels {
+                    channelIds.insert(channel.id)
+                }
+            }
+        }
+
+        // Convert each ConnectionEdge to a SwiftData Connection
+        var validCount = 0
+        var invalidCount = 0
+
+        for bundle in bundles {
+            for edge in bundle.edges {
+                // Validate all UUIDs exist in the studio
+                guard deviceIds.contains(edge.from.deviceId),
+                    deviceIds.contains(edge.to.deviceId),
+                    portIds.contains(edge.from.portId),
+                    portIds.contains(edge.to.portId),
+                    channelIds.contains(edge.from.channelId),
+                    channelIds.contains(edge.to.channelId)
+                else {
+                    invalidCount += 1
+                    continue
+                }
+
+                let connection = Connection(
+                    fromDeviceId: edge.from.deviceId,
+                    fromPortId: edge.from.portId,
+                    fromChannelId: edge.from.channelId,
+                    toDeviceId: edge.to.deviceId,
+                    toPortId: edge.to.portId,
+                    toChannelId: edge.to.channelId,
+                    cable: .other,  // ConnectionEdge doesn't store cable type
+                    label: edge.fromName,  // Use the edge name as label
+                    notes: nil
+                )
+                studio.connections.append(connection)
+                validCount += 1
+            }
+        }
+
+        // Save to persist the connections
+        try? modelContext.save()
+    }
+
     private func importStudio(from url: URL) {
         do {
             // Read file
@@ -1285,14 +1821,17 @@ struct StudioCanvasView: View {
             defer {
                 if needsScoped { url.stopAccessingSecurityScopedResource() }
             }
-            
+
             let jsonData = try Data(contentsOf: url)
-            
+
             // Decode
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let exportable = try decoder.decode(ExportableStudio.self, from: jsonData)
-            
+            let exportable = try decoder.decode(
+                ExportableStudio.self,
+                from: jsonData
+            )
+
             // Check for name conflict
             if studios.contains(where: { $0.name == exportable.name }) {
                 // Store the pending import and show conflict dialog
@@ -1303,29 +1842,37 @@ struct StudioCanvasView: View {
                 isShowingImportNameConflict = true
                 return
             }
-            
+
             // No conflict, proceed with import
             completeImport(exportable: exportable)
-            
+
         } catch {
             exportResultMessage = "Import failed: \(error.localizedDescription)"
             isShowingExportResult = true
         }
     }
-    
-    private func completeImport(exportable: ExportableStudio, customName: String? = nil) {
+
+    private func completeImport(
+        exportable: ExportableStudio,
+        customName: String? = nil
+    ) {
         do {
             // Create new studio
             let studio = Studio(name: customName ?? exportable.name)
-            
+
             // Import devices
             var deviceMap: [UUID: DeviceInstance] = [:]
+            var portMap: [UUID: Port] = [:]
+            var channelMap: [UUID: Channel] = [:]
+
             for exportableDevice in exportable.devices {
                 let device = DeviceInstance(
                     manufacturer: exportableDevice.manufacturer,
                     model: exportableDevice.model,
                     nickname: exportableDevice.nickname,
-                    category: DeviceCategory(rawValue: exportableDevice.categoryRaw) ?? .other,
+                    category: DeviceCategory(
+                        rawValue: exportableDevice.categoryRaw
+                    ) ?? .other,
                     serialNumber: exportableDevice.serialNumber,
                     location: exportableDevice.location,
                     audioInputsCount: exportableDevice.audioInputsCount,
@@ -1335,92 +1882,154 @@ struct StudioCanvasView: View {
                     madiInputPortsCount: exportableDevice.madiInputPortsCount,
                     madiOutputPortsCount: exportableDevice.madiOutputPortsCount,
                     ethernetPortsCount: exportableDevice.ethernetPortsCount,
-                    sampleRate: SampleRate(rawValue: exportableDevice.sampleRateRaw) ?? .hz48000,
-                    digitalInputs: exportableDevice.digitalInputsRaw.compactMap { DigitalFormat(rawValue: $0) },
-                    digitalOutputs: exportableDevice.digitalOutputsRaw.compactMap { DigitalFormat(rawValue: $0) },
-                    computerInterfaces: exportableDevice.computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) },
+                    sampleRate: SampleRate(
+                        rawValue: exportableDevice.sampleRateRaw
+                    ) ?? .hz48000,
+                    digitalInputs: exportableDevice.digitalInputsRaw.compactMap
+                    { DigitalFormat(rawValue: $0) },
+                    digitalOutputs: exportableDevice.digitalOutputsRaw
+                        .compactMap { DigitalFormat(rawValue: $0) },
+                    computerInterfaces: exportableDevice.computerInterfacesRaw
+                        .compactMap { ComputerInterface(rawValue: $0) },
                     posX: exportableDevice.posX,
                     posY: exportableDevice.posY,
                     scale: exportableDevice.scale,
                     zIndex: exportableDevice.zIndex
                 )
-                
-                device.supportPageURLString = exportableDevice.supportPageURLString
-                device.downloadsPageURLString = exportableDevice.downloadsPageURLString
-                
+
+                device.supportPageURLString =
+                    exportableDevice.supportPageURLString
+                device.downloadsPageURLString =
+                    exportableDevice.downloadsPageURLString
+
                 // Import ports
-                var portMap: [UUID: Port] = [:]
                 for exportablePort in exportableDevice.ports {
                     let port = Port(
                         name: exportablePort.name,
-                        type: PortType(rawValue: exportablePort.typeRaw) ?? .usbAudio,
-                        direction: PortDirection(rawValue: exportablePort.directionRaw) ?? .bidirectional
+                        type: PortType(rawValue: exportablePort.typeRaw)
+                            ?? .usbAudio,
+                        direction: PortDirection(
+                            rawValue: exportablePort.directionRaw
+                        ) ?? .bidirectional
                     )
-                    
+
                     // Import channels
                     for exportableChannel in exportablePort.channels {
                         let channel = Channel(
                             index: exportableChannel.index,
                             nameLong: exportableChannel.nameLong,
                             nameShort: exportableChannel.nameShort,
-                            signal: SignalType(rawValue: exportableChannel.signalRaw) ?? .audio,
-                            grouping: ChannelGrouping(rawValue: exportableChannel.groupingRaw) ?? .mono
+                            signal: SignalType(
+                                rawValue: exportableChannel.signalRaw
+                            ) ?? .audio,
+                            grouping: ChannelGrouping(
+                                rawValue: exportableChannel.groupingRaw
+                            ) ?? .mono
                         )
                         port.channels.append(channel)
+                        // Map old channel UUID to new channel
+                        channelMap[exportableChannel.id] = channel
                     }
-                    
+
                     device.ports.append(port)
+                    // Map old port UUID to new port
                     portMap[exportablePort.id] = port
                 }
-                
+
+                // Import docs (manuals, etc.)
+                for exportableDoc in exportableDevice.docs {
+                    let docLink: DocLink
+                    if let bookmarkData = exportableDoc.localBookmarkData {
+                        docLink = DocLink(
+                            title: exportableDoc.title,
+                            kind: DocKind(rawValue: exportableDoc.kindRaw)
+                                ?? .other,
+                            bookmarkData: bookmarkData
+                        )
+                    } else if let urlString = exportableDoc.urlString,
+                        let url = URL(string: urlString)
+                    {
+                        docLink = DocLink(
+                            title: exportableDoc.title,
+                            kind: DocKind(rawValue: exportableDoc.kindRaw)
+                                ?? .other,
+                            url: url
+                        )
+                    } else {
+                        // Skip docs without valid URL or bookmark
+                        continue
+                    }
+                    device.docs.append(docLink)
+                }
+
                 studio.devices.append(device)
+                // Map old device UUID to new device
                 deviceMap[exportableDevice.id] = device
             }
-            
-            // Import connections
+
+            // Import connections with UUID remapping
             for exportableConnection in exportable.connections {
+                // Look up the new device, port, and channel UUIDs
+                let fromDevice = deviceMap[exportableConnection.fromDeviceId]
+                let toDevice = deviceMap[exportableConnection.toDeviceId]
+                let fromPort = portMap[exportableConnection.fromPortId]
+                let toPort = portMap[exportableConnection.toPortId]
+                let fromChannel = channelMap[exportableConnection.fromChannelId]
+                let toChannel = channelMap[exportableConnection.toChannelId]
+
+                guard let fromDevice, let toDevice, let fromPort, let toPort,
+                    let fromChannel, let toChannel
+                else {
+                    continue
+                }
+
                 let connection = Connection(
-                    fromDeviceId: exportableConnection.fromDeviceId,
-                    fromPortId: exportableConnection.fromPortId,
-                    fromChannelId: exportableConnection.fromChannelId,
-                    toDeviceId: exportableConnection.toDeviceId,
-                    toPortId: exportableConnection.toPortId,
-                    toChannelId: exportableConnection.toChannelId,
-                    cable: CableType(rawValue: exportableConnection.cableRaw) ?? .other,
+                    fromDeviceId: fromDevice.id,
+                    fromPortId: fromPort.id,
+                    fromChannelId: fromChannel.id,
+                    toDeviceId: toDevice.id,
+                    toPortId: toPort.id,
+                    toChannelId: toChannel.id,
+                    cable: CableType(rawValue: exportableConnection.cableRaw)
+                        ?? .other,
                     label: exportableConnection.label,
                     notes: exportableConnection.notes
                 )
                 studio.connections.append(connection)
             }
-            
+
             // Save to model context
             modelContext.insert(studio)
             try modelContext.save()
-            
+
+            // Rebuild ConnectionsStore from the imported connections
+            connectionsStore.rebuildFromConnections(studio: studio)
+
             // Select the imported studio
             selectedStudioId = studio.id
-            
-            exportResultMessage = "Studio '\(studio.name)' imported successfully!"
+
+            exportResultMessage =
+                "Studio '\(studio.name)' imported successfully!"
             isShowingExportResult = true
-            
+
         } catch {
             exportResultMessage = "Import failed: \(error.localizedDescription)"
             isShowingExportResult = true
         }
     }
-    
+
     private func performImportWithName(_ name: String) {
         guard let exportable = pendingImportStudio else { return }
-        
+
         // Clear pending state
         pendingImportURL = nil
         pendingImportStudio = nil
         isShowingImportNameConflict = false
-        
+
         // Complete the import with the chosen name
         completeImport(exportable: exportable, customName: name)
     }
-    
+
     private func handleExportResult(_ result: Result<URL, Error>) {
         switch result {
         case .success:
@@ -1431,7 +2040,7 @@ struct StudioCanvasView: View {
             isShowingExportResult = true
         }
     }
-    
+
     private func handleImportResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -1439,12 +2048,11 @@ struct StudioCanvasView: View {
                 importStudio(from: url)
             }
         case .failure(let error):
-            exportResultMessage = "Import cancelled: \(error.localizedDescription)"
+            exportResultMessage =
+                "Import cancelled: \(error.localizedDescription)"
             isShowingExportResult = true
         }
     }
-
-
 
 }
 
@@ -1470,7 +2078,9 @@ private func ioSummary(from ports: [Port]) -> String {
     if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
     if adatin > 0 || adatout > 0 { parts.append("ADAT \(adatin)/\(adatout)") }
     if madiin > 0 || madiout > 0 { parts.append("MADI \(madiin)/\(madiout)") }
-    if spdifin > 0 || spdifout > 0 { parts.append("S/PDIF \(spdifin)/\(spdifout)") }
+    if spdifin > 0 || spdifout > 0 {
+        parts.append("S/PDIF \(spdifin)/\(spdifout)")
+    }
 
     return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
 }
@@ -1480,14 +2090,17 @@ private func ioSummary(from ports: [Port]) -> String {
 private struct DetailHeader: View {
     @Bindable var studio: Studio
     let onCreateDevice: () -> Void
-    let onAddExample: () -> Void
+    let onShowLegend: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            TextField("Studio Name", text: .init(get: { studio.name }, set: { studio.name = $0 }))
-                .textFieldStyle(.roundedBorder)
-                .font(.title3)
-                .frame(minWidth: 240)
+            TextField(
+                "Studio Name",
+                text: .init(get: { studio.name }, set: { studio.name = $0 })
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.title3)
+            .frame(minWidth: 240)
 
             Spacer()
 
@@ -1495,8 +2108,8 @@ private struct DetailHeader: View {
                 Label("Add Device", systemImage: "plus.rectangle.on.rectangle")
             }
 
-            Button(action: onAddExample) {
-                Label("Example Rig", systemImage: "wand.and.stars")
+            Button(action: onShowLegend) {
+                Label("Connection Legend", systemImage: "key.fill")
             }
         }
     }
@@ -1519,8 +2132,12 @@ private struct DetailCanvas: View {
         CanvasSurfaceView(
             studio: studio,
             background: background,
-            iconForDevice: { (d: DeviceInstance) -> String in d.categorySymbolName },
-            subtitleForDevice: { (d: DeviceInstance) -> String in ioSummary(from: d.ports) },
+            iconForDevice: { (d: DeviceInstance) -> String in
+                d.categorySymbolName
+            },
+            subtitleForDevice: { (d: DeviceInstance) -> String in
+                ioSummary(from: d.ports)
+            },
             connectionsStore: connectionsStore,
             onSelectLink: onSelectLink,
             onRequestDeleteLink: onRequestDeleteLink,
@@ -1550,39 +2167,71 @@ private struct StudiosList: View {
                     Text(studio.name)
                         .tag(studio.id)
                         .contextMenu {
-                            Button { onDuplicate(studio) } label: {
-                                Label("Duplicate Studio", systemImage: "plus.square.on.square")
+                            Button {
+                                onDuplicate(studio)
+                            } label: {
+                                Label(
+                                    "Duplicate Studio",
+                                    systemImage: "plus.square.on.square"
+                                )
                             }
-                            Button { onExport(studio) } label: {
-                                Label("Export Studio", systemImage: "square.and.arrow.up")
+                            Button {
+                                onExport(studio)
+                            } label: {
+                                Label(
+                                    "Export Studio",
+                                    systemImage: "square.and.arrow.up"
+                                )
                             }
                             Divider()
-                            Button(role: .destructive) { onRequestDelete(studio) } label: {
+                            Button(role: .destructive) {
+                                onRequestDelete(studio)
+                            } label: {
                                 Label("Delete Studio", systemImage: "trash")
                             }
                         }
-#if os(iOS)
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button { onDuplicate(studio) } label: {
-                                Label("Duplicate", systemImage: "plus.square.on.square")
+                        #if os(iOS)
+                            .swipeActions(
+                                edge: .leading,
+                                allowsFullSwipe: false
+                            ) {
+                                Button {
+                                    onDuplicate(studio)
+                                } label: {
+                                    Label(
+                                        "Duplicate",
+                                        systemImage: "plus.square.on.square"
+                                    )
+                                }
+                                .tint(.blue)
+
+                                Button {
+                                    onExport(studio)
+                                } label: {
+                                    Label(
+                                        "Export",
+                                        systemImage: "square.and.arrow.up"
+                                    )
+                                }
+                                .tint(.green)
                             }
-                            .tint(.blue)
-                            
-                            Button { onExport(studio) } label: {
-                                Label("Export", systemImage: "square.and.arrow.up")
+                            .swipeActions(
+                                edge: .trailing,
+                                allowsFullSwipe: true
+                            ) {
+                                Button(role: .destructive) {
+                                    onRequestDelete(studio)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .tint(.red)
                             }
-                            .tint(.green)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) { onRequestDelete(studio) } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .tint(.red)
-                        }
-#endif
+                        #endif
                 }
                 .onDelete { indexSet in
-                    if let first = indexSet.first, studios.indices.contains(first) {
+                    if let first = indexSet.first,
+                        studios.indices.contains(first)
+                    {
                         onRequestDelete(studios[first])
                     }
                 }
@@ -1605,7 +2254,10 @@ private struct CanvasSizePreferenceKey: PreferenceKey {
 
 private struct ConnectionHandleTipPreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGPoint] = [:]
-    static func reduce(value: inout [UUID: CGPoint], nextValue: () -> [UUID: CGPoint]) {
+    static func reduce(
+        value: inout [UUID: CGPoint],
+        nextValue: () -> [UUID: CGPoint]
+    ) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
@@ -1623,11 +2275,15 @@ private struct CanvasSurfaceView: View {
     let onExplodeDevice: (DeviceInstance) -> Void
     let isExplosionEnabled: Bool
     @EnvironmentObject var selection: SelectionState
-    
+
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
-    @State private var activeConnectionDrag: (fromId: UUID, start: CGPoint, location: CGPoint)? = nil
+    @State private var activeConnectionDrag:
+        (fromId: UUID, start: CGPoint, location: CGPoint)? = nil
     @State private var hoveredConnectionTargetId: UUID? = nil
     @State private var connectionHandleTips: [UUID: CGPoint] = [:]
+    @State private var canvasScale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var isPanEnabled: Bool = false
 
     private var links: [ConnectionLinkSummary] {
         connectionsStore.links(for: studio.id)
@@ -1636,31 +2292,109 @@ private struct CanvasSurfaceView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                Rectangle().fill(background)
+                ScrollView([.horizontal, .vertical]) {
+                    ZStack {
+                        Rectangle().fill(background)
 
-                ForEach(links, id: \.id) { link in
-                    linkRow(link)
-                }
+                        ForEach(links, id: \.id) { link in
+                            linkRow(link)
+                        }
 
-                ForEach(studio.devices, id: \.id) { d in
-                    deviceCard(d, canvasSize: geo.size)
-                }
+                        ForEach(studio.devices, id: \.id) { d in
+                            deviceCard(d, canvasSize: geo.size)
+                        }
 
-                if let temp = activeConnectionDrag {
-                    ConnectionLineView(
-                        from: temp.start,
-                        to: temp.location,
-                        isSelected: true
+                        if let temp = activeConnectionDrag {
+                            ConnectionLineView(
+                                from: temp.start,
+                                to: temp.location,
+                                isSelected: true
+                            )
+                            .allowsHitTesting(false)
+                            .zIndex(10)
+                        }
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaleEffect(canvasScale, anchor: .center)
+                    .frame(
+                        width: geo.size.width * max(1.0, canvasScale),
+                        height: geo.size.height * max(1.0, canvasScale)
                     )
-                    .allowsHitTesting(false)
-                    .zIndex(10)
+                    .onChange(of: canvasScale) { _, newValue in
+                        print("🔍 Canvas scale changed to: \(newValue)")
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if !isPanEnabled {
+                            selection.selection = nil
+                        }
+                    }
+                    .preference(
+                        key: CanvasSizePreferenceKey.self,
+                        value: geo.size
+                    )
+                    .coordinateSpace(name: "canvas")
+                    .onPreferenceChange(ConnectionHandleTipPreferenceKey.self) {
+                        connectionHandleTips = $0
+                    }
+                }
+                .scrollDisabled(!isPanEnabled)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            if !isPanEnabled {
+                                canvasScale = lastScale * value
+                            }
+                        }
+                        .onEnded { value in
+                            if !isPanEnabled {
+                                // Clamp scale between 0.5x and 3x
+                                canvasScale = min(
+                                    max(lastScale * value, 0.5),
+                                    3.0
+                                )
+                                lastScale = canvasScale
+
+                                // Auto-enable pan mode when zoomed in
+                                if canvasScale > 1.0 {
+                                    isPanEnabled = true
+                                }
+                            }
+                        }
+                )
+
+                // Pan mode toggle button - shown when zoomed
+                if canvasScale > 1.0 {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                isPanEnabled.toggle()
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(
+                                        systemName: isPanEnabled
+                                            ? "hand.draw.fill"
+                                            : "magnifyingglass"
+                                    )
+                                    Text(
+                                        isPanEnabled ? "Pan Mode" : "Zoom Mode"
+                                    )
+                                }
+                                .font(.caption)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    .ultraThickMaterial,
+                                    in: RoundedRectangle(cornerRadius: 8)
+                                )
+                            }
+                            .padding()
+                        }
+                        Spacer()
+                    }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { selection.selection = nil }
-            .preference(key: CanvasSizePreferenceKey.self, value: geo.size)
-            .coordinateSpace(name: "canvas")
-            .onPreferenceChange(ConnectionHandleTipPreferenceKey.self) { connectionHandleTips = $0 }
         }
     }
 
@@ -1669,6 +2403,7 @@ private struct CanvasSurfaceView: View {
         ConnectionLineRow(
             link: link,
             studio: studio,
+            connectionsStore: connectionsStore,
             handleTips: connectionHandleTips,
             isSelected: isSelectedConnection(linkId: link.id),
             onSelect: { onSelectLink(link) },
@@ -1677,9 +2412,13 @@ private struct CanvasSurfaceView: View {
     }
 
     @ViewBuilder
-    private func deviceCard(_ d: DeviceInstance, canvasSize: CGSize) -> some View {
+    private func deviceCard(_ d: DeviceInstance, canvasSize: CGSize)
+        -> some View
+    {
         let tip = connectionHandleTips[d.id]
-        let isTarget = (hoveredConnectionTargetId == d.id) && (activeConnectionDrag?.fromId != d.id)
+        let isTarget =
+            (hoveredConnectionTargetId == d.id)
+            && (activeConnectionDrag?.fromId != d.id)
         let icon = iconForDevice(d)
         let subtitle = subtitleForDevice(d)
 
@@ -1702,7 +2441,9 @@ private struct CanvasSurfaceView: View {
                 }
             },
             onBeginConnectionDrag: { device, startPoint in
-                activeConnectionDrag = (fromId: device.id, start: startPoint, location: startPoint)
+                activeConnectionDrag = (
+                    fromId: device.id, start: startPoint, location: startPoint
+                )
                 hoveredConnectionTargetId = nil
             },
             onUpdateConnectionDrag: { fromDevice, point in
@@ -1715,8 +2456,13 @@ private struct CanvasSurfaceView: View {
             },
             onEndConnectionDrag: {
                 if let drag = activeConnectionDrag,
-                   let targetId = hoveredConnectionTargetId {
-                    connectionsStore.ensureLinkSummary(studioId: studio.id, fromId: drag.fromId, toId: targetId)
+                    let targetId = hoveredConnectionTargetId
+                {
+                    connectionsStore.ensureLinkSummary(
+                        studioId: studio.id,
+                        fromId: drag.fromId,
+                        toId: targetId
+                    )
                 }
                 hoveredConnectionTargetId = nil
                 activeConnectionDrag = nil
@@ -1736,11 +2482,11 @@ private struct CanvasSurfaceView: View {
         }
         return false
     }
-    
-    
 
     // Helper to find which device (if any) is under the given point, excluding a device.
-    private func deviceId(at point: CGPoint, excluding excludedId: UUID) -> UUID? {
+    private func deviceId(at point: CGPoint, excluding excludedId: UUID)
+        -> UUID?
+    {
         // Must match the card frame used by DeviceCardView.
         let cardSize = CGSize(width: 260, height: 96)
         let halfW = Double(cardSize.width / 2)
@@ -1782,6 +2528,17 @@ private struct DeviceCardView: View {
 
     @EnvironmentObject var selection: SelectionState
     @State private var isDraggingConnection: Bool = false
+    
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color(white: 0.85))
+    }
+    
+    private var cardBorder: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.25),
+                    lineWidth: isSelected ? 3 : 1)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1799,12 +2556,8 @@ private struct DeviceCardView: View {
         }
         .padding(10)
         .frame(width: 260, alignment: .leading)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.25),
-                        lineWidth: isSelected ? 3 : 1)
-        )
+        .background(cardBackground)
+        .overlay(cardBorder)
         .overlay(alignment: .topTrailing) {
             // Handle is visually anchored to the card corner.
             // We compute the drag line start point in the CANVAS coordinate space from the device position.
@@ -1816,26 +2569,37 @@ private struct DeviceCardView: View {
 
                         // DeviceConnectionHandle is Triangle(16x14) + padding(8).
                         // Rotated to point right, the tip is at right edge, midY of the 16x14.
-                        let tip = CGPoint(x: frame.minX + 24, y: frame.minY + 15)
+                        let tip = CGPoint(
+                            x: frame.minX + 24,
+                            y: frame.minY + 15
+                        )
 
                         Color.clear
-                            .preference(key: ConnectionHandleTipPreferenceKey.self, value: [device.id: tip])
+                            .preference(
+                                key: ConnectionHandleTipPreferenceKey.self,
+                                value: [device.id: tip]
+                            )
                     }
                 )
                 .highPriorityGesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .named("canvas"))
-                        .onChanged { value in
-                            let start = connectionHandleTip ?? CGPoint(x: device.posX, y: device.posY)
-                            if !isDraggingConnection {
-                                isDraggingConnection = true
-                                onBeginConnectionDrag(device, start)
-                            }
-                            onUpdateConnectionDrag(device, value.location)
+                    DragGesture(
+                        minimumDistance: 0,
+                        coordinateSpace: .named("canvas")
+                    )
+                    .onChanged { value in
+                        let start =
+                            connectionHandleTip
+                            ?? CGPoint(x: device.posX, y: device.posY)
+                        if !isDraggingConnection {
+                            isDraggingConnection = true
+                            onBeginConnectionDrag(device, start)
                         }
-                        .onEnded { _ in
-                            isDraggingConnection = false
-                            onEndConnectionDrag()
-                        }
+                        onUpdateConnectionDrag(device, value.location)
+                    }
+                    .onEnded { _ in
+                        isDraggingConnection = false
+                        onEndConnectionDrag()
+                    }
                 )
         }
         .overlay {
@@ -1855,7 +2619,11 @@ private struct DeviceCardView: View {
                 guard let fromId = UUID(uuidString: s) else { return }
                 if fromId == device.id { return }
                 DispatchQueue.main.async {
-                    connectionsStore.ensureLinkSummary(studioId: studioId, fromId: fromId, toId: device.id)
+                    connectionsStore.ensureLinkSummary(
+                        studioId: studioId,
+                        fromId: fromId,
+                        toId: device.id
+                    )
                 }
             }
             return true
@@ -1869,7 +2637,7 @@ private struct DeviceCardView: View {
             selection.selection = .device(device.id)
             onExplode()
         }
-// Update all call sites of buildPorts to include computerInterfaceCounts argument:
+        // Update all call sites of buildPorts to include computerInterfaceCounts argument:
         .onDisappear {
             isDraggingConnection = false
         }
@@ -1879,7 +2647,9 @@ private struct DeviceCardView: View {
                     // Capture original pos for this drag
                     beginDragIfNeeded(device)
 
-                    guard let origin = dragOrigin, origin.id == device.id else { return }
+                    guard let origin = dragOrigin, origin.id == device.id else {
+                        return
+                    }
 
                     // Approx label size; used for clamping so it stays on-screen.
                     let cardSize = CGSize(width: 260, height: 96)
@@ -1889,8 +2659,14 @@ private struct DeviceCardView: View {
                     let rawX = origin.x + Double(v.translation.width)
                     let rawY = origin.y + Double(v.translation.height)
 
-                    let clampedX = min(max(rawX, halfW), Double(canvasSize.width) - halfW)
-                    let clampedY = min(max(rawY, halfH), Double(canvasSize.height) - halfH)
+                    let clampedX = min(
+                        max(rawX, halfW),
+                        Double(canvasSize.width) - halfW
+                    )
+                    let clampedY = min(
+                        max(rawY, halfH),
+                        Double(canvasSize.height) - halfH
+                    )
 
                     device.posX = clampedX
                     device.posY = clampedY
@@ -1901,7 +2677,6 @@ private struct DeviceCardView: View {
         )
     }
 }
-
 
 // MARK: - Inspector
 
@@ -1938,45 +2713,63 @@ private struct InspectorPanel: View {
                         Section("Device") {
                             LabeledContent("Nickname", value: d.nickname)
 
-                            if !d.manufacturer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                LabeledContent("Manufacturer", value: d.manufacturer)
+                            if !d.manufacturer.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
+                                LabeledContent(
+                                    "Manufacturer",
+                                    value: d.manufacturer
+                                )
                             }
 
-                            if !d.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if !d.model.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
                                 LabeledContent("Product ID", value: d.model)
                             }
 
-                            LabeledContent("Category", value: d.category.rawValue)
+                            LabeledContent(
+                                "Category",
+                                value: d.category.rawValue
+                            )
 
-                            if !d.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                LabeledContent("Serial Number", value: d.serialNumber)
+                            if !d.serialNumber.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
+                                LabeledContent(
+                                    "Serial Number",
+                                    value: d.serialNumber
+                                )
                             }
 
-                            if !d.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if !d.location.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
                                 LabeledContent("Location", value: d.location)
                             }
 
                             if let url = d.supportPageURL {
                                 LabeledContent("Support Page") {
-                                    Link(url.absoluteString, destination: url).lineLimit(1)
+                                    Link(url.absoluteString, destination: url)
+                                        .lineLimit(1)
                                 }
                             }
 
                             if let url = d.downloadsPageURL {
                                 LabeledContent("Downloads Page") {
-                                    Link(url.absoluteString, destination: url).lineLimit(1)
+                                    Link(url.absoluteString, destination: url)
+                                        .lineLimit(1)
                                 }
                             }
                         }
-
-
 
                         Section("Ports") {
                             if d.ports.isEmpty {
                                 Text("No ports defined yet.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(d.ports.sorted(by: portSort), id: \.id) { p in
+                            ForEach(d.ports.sorted(by: portSort), id: \.id) {
+                                p in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(p.name)
@@ -1989,9 +2782,13 @@ private struct InspectorPanel: View {
                                     if !p.channels.isEmpty {
                                         Text(
                                             p.channels
-                                                .sorted(by: { $0.index < $1.index })
+                                                .sorted(by: {
+                                                    $0.index < $1.index
+                                                })
                                                 .map { ch in
-                                                    ch.nameShort.isEmpty ? "\(ch.index)" : ch.nameShort
+                                                    ch.nameShort.isEmpty
+                                                        ? "\(ch.index)"
+                                                        : ch.nameShort
                                                 }
                                                 .joined(separator: ", ")
                                         )
@@ -2009,8 +2806,15 @@ private struct InspectorPanel: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
 
-                                ForEach(ifaceCounts.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
-                                    Text("\(iface.rawValue) ×\(ifaceCounts[iface] ?? 0)")
+                                ForEach(
+                                    ifaceCounts.keys.sorted(by: {
+                                        $0.rawValue < $1.rawValue
+                                    }),
+                                    id: \.self
+                                ) { iface in
+                                    Text(
+                                        "\(iface.rawValue) ×\(ifaceCounts[iface] ?? 0)"
+                                    )
                                 }
                             }
                         }
@@ -2019,7 +2823,10 @@ private struct InspectorPanel: View {
                             Button {
                                 isImportingManual = true
                             } label: {
-                                Label("Add Manual", systemImage: "doc.badge.plus")
+                                Label(
+                                    "Add Manual",
+                                    systemImage: "doc.badge.plus"
+                                )
                             }
 
                             if d.docs.isEmpty {
@@ -2034,7 +2841,9 @@ private struct InspectorPanel: View {
                                             .lineLimit(1)
                                         Spacer()
                                         Button(role: .destructive) {
-                                            if let idx = d.docs.firstIndex(where: { $0.id == doc.id }) {
+                                            if let idx = d.docs.firstIndex(
+                                                where: { $0.id == doc.id })
+                                            {
                                                 d.docs.remove(at: idx)
                                             }
                                         } label: {
@@ -2047,23 +2856,37 @@ private struct InspectorPanel: View {
                                         // print("📱 Manual tapped: \(doc.title)")
                                         // print("📱 Has bookmark: \(doc.localBookmarkData != nil)")
                                         // print("📱 Has URL string: \(doc.urlString != nil)")
-                                        
+
                                         // Try bookmark first, fall back to URL string for legacy docs
-                                        if let bookmarkData = doc.localBookmarkData {
+                                        if let bookmarkData = doc
+                                            .localBookmarkData
+                                        {
                                             // print("📱 Attempting to resolve bookmark...")
                                             do {
-                                                let url = try ManualStorage.resolveBookmark(bookmarkData)
+                                                let url =
+                                                    try ManualStorage
+                                                    .resolveBookmark(
+                                                        bookmarkData
+                                                    )
                                                 // print("📱 ✅ Bookmark resolved to: \(url.path)")
-                                                manualViewerItem = IdentifiableURL(url: url)
+                                                manualViewerItem =
+                                                    IdentifiableURL(url: url)
                                             } catch {
-                                                print("📱 ❌ Bookmark resolution failed: \(error)")
+                                                print(
+                                                    "📱 ❌ Bookmark resolution failed: \(error)"
+                                                )
                                             }
                                         } else if let urlString = doc.urlString,
-                                                  let url = URL(string: urlString) {
+                                            let url = URL(string: urlString)
+                                        {
                                             // print("📱 Using legacy URL string: \(urlString)")
-                                            manualViewerItem = IdentifiableURL(url: url)
+                                            manualViewerItem = IdentifiableURL(
+                                                url: url
+                                            )
                                         } else {
-                                            print("📱 ❌ No bookmark or URL available")
+                                            print(
+                                                "📱 ❌ No bookmark or URL available"
+                                            )
                                         }
                                     }
                                 }
@@ -2094,16 +2917,23 @@ private struct InspectorPanel: View {
                                     Button {
                                         onCloneDevice(d)
                                     } label: {
-                                        Label("Clone", systemImage: "plus.square.on.square")
-                                            .frame(maxWidth: .infinity)
+                                        Label(
+                                            "Clone",
+                                            systemImage: "plus.square.on.square"
+                                        )
+                                        .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.bordered)
 
                                     Button {
                                         onRequestMoveDevice(d)
                                     } label: {
-                                        Label("Move", systemImage: "arrowshape.turn.up.right")
-                                            .frame(maxWidth: .infinity)
+                                        Label(
+                                            "Move",
+                                            systemImage:
+                                                "arrowshape.turn.up.right"
+                                        )
+                                        .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.bordered)
                                 }
@@ -2118,15 +2948,18 @@ private struct InspectorPanel: View {
                         allowsMultipleSelection: false
                     ) { result in
                         guard case .success(let urls) = result,
-                              let pickedURL = urls.first,
-                              let device = studio.devices.first(where: { $0.id == id })
+                            let pickedURL = urls.first,
+                            let device = studio.devices.first(where: {
+                                $0.id == id
+                            })
                         else { return }
 
                         do {
-                            let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
-                                pickedURL: pickedURL,
-                                deviceId: device.id
-                            )
+                            let (storedURL, bookmarkData) =
+                                try ManualStorage.copyPDFIntoAppSupport(
+                                    pickedURL: pickedURL,
+                                    deviceId: device.id
+                                )
 
                             let doc = DocLink(
                                 title: storedURL.lastPathComponent,
@@ -2139,13 +2972,19 @@ private struct InspectorPanel: View {
                         }
                     }
                     #if os(iOS)
-                    .fullScreenCover(item: $manualViewerItem) { item in
-                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
-                    }
+                        .fullScreenCover(item: $manualViewerItem) { item in
+                            ManualPDFViewer(
+                                url: item.url,
+                                title: item.url.lastPathComponent
+                            )
+                        }
                     #else
-                    .sheet(item: $manualViewerItem) { item in
-                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
-                    }
+                        .sheet(item: $manualViewerItem) { item in
+                            ManualPDFViewer(
+                                url: item.url,
+                                title: item.url.lastPathComponent
+                            )
+                        }
                     #endif
                 } else {
                     Text("Device not found")
@@ -2169,24 +3008,21 @@ private struct InspectorPanel: View {
     }
 }
 
-
-
 #if os(iOS)
-private typealias PlatformImage = UIImage
+    private typealias PlatformImage = UIImage
 #elseif os(macOS)
-private typealias PlatformImage = NSImage
+    private typealias PlatformImage = NSImage
 #endif
 
 private enum PlatformImageLoader {
     static func load(path: String) -> PlatformImage? {
-#if os(iOS)
-        return UIImage(contentsOfFile: path)
-#else
-        return NSImage(contentsOfFile: path)
-#endif
+        #if os(iOS)
+            return UIImage(contentsOfFile: path)
+        #else
+            return NSImage(contentsOfFile: path)
+        #endif
     }
 }
-
 
 private struct DiagramThumb: View {
     let image: PlatformImage
@@ -2199,15 +3035,15 @@ private struct DiagramThumb: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-#if os(iOS)
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-#else
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-#endif
+            #if os(iOS)
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            #else
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            #endif
         }
         .frame(maxWidth: .infinity)
         .frame(height: 200)
@@ -2231,15 +3067,15 @@ private struct DiagramZoomView: View {
         NavigationStack {
             ZoomableScrollView(scale: $scale) {
                 Group {
-#if os(iOS)
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-#else
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-#endif
+                    #if os(iOS)
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    #else
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    #endif
                 }
                 .padding()
             }
@@ -2279,7 +3115,6 @@ private struct ZoomableScrollView<Content: View>: View {
     }
 }
 
-
 // MARK: - Selection State and CanvasSelection
 
 // MARK: - Connection Line Row Helper
@@ -2287,42 +3122,189 @@ private struct ZoomableScrollView<Content: View>: View {
 private struct ConnectionLineRow: View {
     let link: ConnectionLinkSummary
     let studio: Studio
+    let connectionsStore: ConnectionsStore
     let handleTips: [UUID: CGPoint]
     let isSelected: Bool
     let onSelect: () -> Void
     let onDelete: () -> Void
 
+    // Calculate connection point on device card border
+    private func cardBorderPoint(
+        from center: CGPoint,
+        to otherCenter: CGPoint,
+        cardSize: CGSize
+    ) -> CGPoint {
+        let halfWidth = cardSize.width / 2
+        let halfHeight = cardSize.height / 2
+        
+        // No extension - we'll use straight segments to connect to the edge
+        let extendAmount: CGFloat = 0.0
+        
+        // Define 8 anchor points: 4 corners + 4 edge midpoints
+        // Each point is extended slightly beyond the edge
+        let anchorPoints: [(point: CGPoint, direction: CGPoint)] = [
+            // Corners (extended diagonally)
+            (CGPoint(x: center.x - halfWidth, y: center.y - halfHeight), 
+             CGPoint(x: -1, y: -1)),  // Top-left
+            (CGPoint(x: center.x + halfWidth, y: center.y - halfHeight), 
+             CGPoint(x: 1, y: -1)),   // Top-right
+            (CGPoint(x: center.x - halfWidth, y: center.y + halfHeight), 
+             CGPoint(x: -1, y: 1)),   // Bottom-left
+            (CGPoint(x: center.x + halfWidth, y: center.y + halfHeight), 
+             CGPoint(x: 1, y: 1)),    // Bottom-right
+            // Edge midpoints (extended perpendicular to edge)
+            (CGPoint(x: center.x, y: center.y - halfHeight), 
+             CGPoint(x: 0, y: -1)),   // Top-center
+            (CGPoint(x: center.x, y: center.y + halfHeight), 
+             CGPoint(x: 0, y: 1)),    // Bottom-center
+            (CGPoint(x: center.x - halfWidth, y: center.y), 
+             CGPoint(x: -1, y: 0)),   // Left-center
+            (CGPoint(x: center.x + halfWidth, y: center.y), 
+             CGPoint(x: 1, y: 0))     // Right-center
+        ]
+        
+        // Calculate direction to other device
+        let dx = otherCenter.x - center.x
+        let dy = otherCenter.y - center.y
+        let distance = sqrt(dx * dx + dy * dy)
+        guard distance > 0 else { return center }
+        
+        // Find the anchor point that is most aligned with the direction to the other device
+        var bestAnchor = anchorPoints[0].point
+        var bestDirection = anchorPoints[0].direction
+        var bestAlignment: CGFloat = -1.0
+        
+        for (anchor, direction) in anchorPoints {
+            let anchorDx = anchor.x - center.x
+            let anchorDy = anchor.y - center.y
+            let anchorDist = sqrt(anchorDx * anchorDx + anchorDy * anchorDy)
+            
+            guard anchorDist > 0 else { continue }
+            
+            // Calculate dot product (alignment) between anchor direction and target direction
+            let alignment = (anchorDx * dx + anchorDy * dy) / (anchorDist * distance)
+            
+            if alignment > bestAlignment {
+                bestAlignment = alignment
+                bestAnchor = anchor
+                bestDirection = direction
+            }
+        }
+        
+        // Extend the anchor point outward along its direction
+        let dirLength = sqrt(bestDirection.x * bestDirection.x + bestDirection.y * bestDirection.y)
+        let extendedPoint = CGPoint(
+            x: bestAnchor.x + (bestDirection.x / dirLength) * extendAmount,
+            y: bestAnchor.y + (bestDirection.y / dirLength) * extendAmount
+        )
+        
+        return extendedPoint
+    }
+
+    // Analyze connections to determine connection types and total channel count
+    private var connectionMetadata:
+        (types: [ConnectionVisualType], channelCount: Int)
+    {
+        // Get the connection bundle from ConnectionsStore (UserDefaults-based storage)
+        guard
+            let bundle = connectionsStore.bundle(
+                for: studio.id,
+                linkId: link.id
+            )
+        else {
+            print("⚠️ No bundle found for link \(link.id)")
+            return ([.unknown], 1)
+        }
+
+        print("🔍 Analyzing bundle with \(bundle.edges.count) edges")
+
+        guard !bundle.edges.isEmpty else {
+            print("⚠️ Bundle has no edges")
+            return ([.unknown], 1)
+        }
+
+        // Count connections by type
+        var typeCounts: [ConnectionVisualType: Int] = [:]
+        var portsNotFound = 0
+
+        for edge in bundle.edges {
+            // Look up the port type from the source device using the edge's endpoint
+            if let device = studio.devices.first(where: {
+                $0.id == edge.from.deviceId
+            }) {
+                // First try to find in regular ports
+                if let port = device.ports.first(where: {
+                    $0.id == edge.from.portId
+                }) {
+                    let visualType = ConnectionVisualType.from(
+                        portType: port.type
+                    )
+                    print(
+                        "  📍 Port '\(port.name)' type: \(port.type.rawValue) -> visual: \(visualType)"
+                    )
+                    typeCounts[visualType, default: 0] += 1
+                } else if !device.computerInterfaceCounts.isEmpty {
+                    // Port not found in device.ports - likely a computer interface virtual port
+                    // All computer interfaces (USB, Thunderbolt, Ethernet) use orange color
+                    print(
+                        "  📍 Computer interface port (virtual) -> visual: computer"
+                    )
+                    typeCounts[.computer, default: 0] += 1
+                } else {
+                    print(
+                        "  ⚠️ Could not find port for edge: deviceId=\(edge.from.deviceId), portId=\(edge.from.portId)"
+                    )
+                    portsNotFound += 1
+                }
+            } else {
+                print("  ⚠️ Could not find device: \(edge.from.deviceId)")
+                portsNotFound += 1
+            }
+        }
+
+        // Return all unique types sorted by count (most common first)
+        let sortedTypes = typeCounts.sorted { $0.value > $1.value }.map {
+            $0.key
+        }
+        let types = sortedTypes.isEmpty ? [.unknown] : sortedTypes
+        let totalChannels = bundle.edges.count
+
+        print(
+            "  Result: \(types.count) types, \(portsNotFound) ports not found"
+        )
+
+        return (types, totalChannels)
+    }
+
     var body: some View {
         Group {
-            if let fromDevice = studio.devices.first(where: { $0.id == link.fromDeviceId }),
-               let toDevice = studio.devices.first(where: { $0.id == link.toDeviceId }) {
+            if let fromDevice = studio.devices.first(where: {
+                $0.id == link.fromDeviceId
+            }),
+                let toDevice = studio.devices.first(where: {
+                    $0.id == link.toDeviceId
+                })
+            {
+                // Device centers - draw lines to center, device cards will occlude the inner portion
+                let fromCenter = CGPoint(x: fromDevice.posX, y: fromDevice.posY)
+                let toCenter = CGPoint(x: toDevice.posX, y: toDevice.posY)
 
-                // Must match DeviceCardView frame
-                let cardSize = CGSize(width: 260, height: 96)
-                let halfWidth = Double(cardSize.width) / 2.0
-
-                // Start at measured arrow tip if available
-                let fromPoint: CGPoint = handleTips[fromDevice.id]
-                    ?? CGPoint(
-                        x: CGFloat(fromDevice.posX + halfWidth),
-                        y: CGFloat(fromDevice.posY)
-                    )
-
-                // End at left edge of destination card
-                let toY: CGFloat = handleTips[toDevice.id]?.y ?? CGFloat(toDevice.posY)
-                let toPoint = CGPoint(
-                    x: CGFloat(toDevice.posX - halfWidth - 4.0),
-                    y: toY
-                )
+                let metadata = connectionMetadata
 
                 ConnectionLineView(
-                    from: fromPoint,
-                    to: toPoint,
-                    isSelected: isSelected
+                    from: fromCenter,
+                    to: toCenter,
+                    isSelected: isSelected,
+                    connectionTypes: metadata.types,
+                    channelCount: metadata.channelCount
                 )
                 // IMPORTANT: give the line a full-size layout box so macOS can attach a context menu
                 // while hit-testing still remains constrained to the stroked curve via ConnectionLineView.contentShape.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .topLeading
+                )
                 // Double-click (macOS) / double-tap (iOS) to delete
                 .highPriorityGesture(
                     TapGesture(count: 2)
@@ -2351,36 +3333,277 @@ private struct ConnectionLineRow: View {
 
 // MARK: - Connection Line View
 
+enum ConnectionVisualType {
+    case analog  // Blue
+    case digital  // Green
+    case midi  // Purple
+    case computer  // Orange
+    case unknown  // Gray
+
+    var color: Color {
+        switch self {
+        case .analog: return .blue
+        case .digital: return .green
+        case .midi: return .purple
+        case .computer: return .orange
+        case .unknown: return .secondary
+        }
+    }
+
+    static func from(portType: PortType) -> ConnectionVisualType {
+        switch portType {
+        case .analogIn, .analogOut, .headphoneOut:
+            return .analog
+        case .adatIn, .adatOut, .madiIn, .madiOut, .spdifIn, .spdifOut, .aesIn,
+            .aesOut, .wordClockIn, .wordClockOut:
+            return .digital
+        case .midiIn, .midiOut:
+            return .midi
+        case .usbAudio, .thunderboltAudio, .ethernet, .computerHost:
+            return .computer
+        }
+    }
+}
+
 private struct ConnectionLineView: View {
     let from: CGPoint
     let to: CGPoint
     let isSelected: Bool
+    var connectionTypes: [ConnectionVisualType] = [.unknown]
+    var channelCount: Int = 1
 
     private var path: Path {
         var p = Path()
-        p.move(to: from)
+        
         let dx = to.x - from.x
-        let c1 = CGPoint(x: from.x + dx * 0.35, y: from.y)
-        let c2 = CGPoint(x: from.x + dx * 0.65, y: to.y)
-        p.addCurve(to: to, control1: c1, control2: c2)
+        let dy = to.y - from.y
+        let distance = sqrt(dx * dx + dy * dy)
+        
+        // Length of straight segments at each end
+        let straightLength: CGFloat = 15.0
+        
+        if distance < straightLength * 2 {
+            // Too short for curved connection, just draw straight line
+            p.move(to: from)
+            p.addLine(to: to)
+        } else {
+            // Start with a straight segment perpendicular from the edge
+            let normalizedDx = dx / distance
+            let normalizedDy = dy / distance
+            
+            let fromStraightEnd = CGPoint(
+                x: from.x + normalizedDx * straightLength,
+                y: from.y + normalizedDy * straightLength
+            )
+            
+            let toStraightStart = CGPoint(
+                x: to.x - normalizedDx * straightLength,
+                y: to.y - normalizedDy * straightLength
+            )
+            
+            // Draw: straight segment -> curve -> straight segment
+            p.move(to: from)
+            p.addLine(to: fromStraightEnd)
+            
+            // Bezier curve in the middle
+            let curveDx = toStraightStart.x - fromStraightEnd.x
+            let curveDy = toStraightStart.y - fromStraightEnd.y
+            let c1 = CGPoint(
+                x: fromStraightEnd.x + curveDx * 0.35,
+                y: fromStraightEnd.y + curveDy * 0.35
+            )
+            let c2 = CGPoint(
+                x: fromStraightEnd.x + curveDx * 0.65,
+                y: fromStraightEnd.y + curveDy * 0.65
+            )
+            
+            p.addCurve(to: toStraightStart, control1: c1, control2: c2)
+            p.addLine(to: to)
+        }
+        
         return p
+    }
+
+    private var lineWidth: CGFloat {
+        // Base width 2, increase for multi-channel connections
+        let baseWidth: CGFloat = 2.0
+        if channelCount > 8 {
+            return baseWidth + 3.0  // Thick for 16+ channels
+        } else if channelCount > 2 {
+            return baseWidth + 1.5  // Medium for 3-8 channels
+        } else {
+            return baseWidth  // Thin for 1-2 channels
+        }
+    }
+
+    private var lineColor: Color {
+        if isSelected {
+            return .accentColor
+        } else {
+            // Use first (dominant) type color
+            return connectionTypes.first?.color.opacity(0.7)
+                ?? Color.secondary.opacity(0.7)
+        }
+    }
+
+    // Linear gradient for multi-type connections
+    private var lineGradient: LinearGradient? {
+        guard !isSelected && connectionTypes.count > 1 else { return nil }
+        let colors = connectionTypes.map { $0.color.opacity(0.7) }
+        return LinearGradient(
+            gradient: Gradient(colors: colors),
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    // Check if connection type is bidirectional (USB, Thunderbolt, Ethernet)
+    private var isBidirectional: Bool {
+        connectionTypes.contains(.computer)
+    }
+
+    // Calculate point on bezier curve at t (0 to 1)
+    private func pointOnCurve(t: CGFloat) -> CGPoint {
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let c1 = CGPoint(x: from.x + dx * 0.25, y: from.y + dy * 0.1)
+        let c2 = CGPoint(x: from.x + dx * 0.75, y: from.y + dy * 0.9)
+
+        // Cubic bezier formula
+        let mt = 1 - t
+        let mt2 = mt * mt
+        let mt3 = mt2 * mt
+        let t2 = t * t
+        let t3 = t2 * t
+
+        return CGPoint(
+            x: mt3 * from.x + 3 * mt2 * t * c1.x + 3 * mt * t2 * c2.x + t3
+                * to.x,
+            y: mt3 * from.y + 3 * mt2 * t * c1.y + 3 * mt * t2 * c2.y + t3
+                * to.y
+        )
+    }
+
+    // Calculate tangent direction at t
+    private func tangentAngle(t: CGFloat) -> CGFloat {
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let c1 = CGPoint(x: from.x + dx * 0.25, y: from.y + dy * 0.1)
+        let c2 = CGPoint(x: from.x + dx * 0.75, y: from.y + dy * 0.9)
+
+        let mt = 1 - t
+        let mt2 = mt * mt
+        let t2 = t * t
+
+        // Derivative of cubic bezier
+        let tangentX =
+            3 * mt2 * (c1.x - from.x) + 6 * mt * t * (c2.x - c1.x) + 3 * t2
+            * (to.x - c2.x)
+        let tangentY =
+            3 * mt2 * (c1.y - from.y) + 6 * mt * t * (c2.y - c1.y) + 3 * t2
+            * (to.y - c2.y)
+
+        return atan2(tangentY, tangentX)
+    }
+
+    // Create arrowhead at specified position and angle
+    private func makeArrow(at point: CGPoint, angle: CGFloat) -> Path {
+        let arrowLength: CGFloat = lineWidth * 3
+
+        var arrow = Path()
+        arrow.move(to: point)
+
+        // Left wing
+        let leftAngle = angle + .pi * 0.75
+        arrow.addLine(
+            to: CGPoint(
+                x: point.x + cos(leftAngle) * arrowLength,
+                y: point.y + sin(leftAngle) * arrowLength
+            )
+        )
+
+        arrow.move(to: point)
+
+        // Right wing
+        let rightAngle = angle - .pi * 0.75
+        arrow.addLine(
+            to: CGPoint(
+                x: point.x + cos(rightAngle) * arrowLength,
+                y: point.y + sin(rightAngle) * arrowLength
+            )
+        )
+
+        return arrow
+    }
+
+    // Generate arrowheads (one or two depending on directionality)
+    private func arrowheads() -> Path {
+        var arrows = Path()
+
+        if isBidirectional {
+            // Two arrows: one at 40% and one at 60%
+            let point1 = pointOnCurve(t: 0.4)
+            let angle1 = tangentAngle(t: 0.4)
+            arrows.addPath(makeArrow(at: point1, angle: angle1))
+
+            let point2 = pointOnCurve(t: 0.6)
+            let angle2 = tangentAngle(t: 0.6) + .pi  // Reverse direction
+            arrows.addPath(makeArrow(at: point2, angle: angle2))
+        } else {
+            // Single arrow at midpoint
+            let midPoint = pointOnCurve(t: 0.5)
+            let angle = tangentAngle(t: 0.5)
+            arrows.addPath(makeArrow(at: midPoint, angle: angle))
+        }
+
+        return arrows
     }
 
     var body: some View {
         ZStack {
             // Wide invisible stroke for easy hit-testing
             path
-                .stroke(Color.clear, style: StrokeStyle(lineWidth: 18, lineCap: .round))
-
-            // Visible line
-            path
                 .stroke(
-                    isSelected ? Color.accentColor : Color.secondary.opacity(0.55),
-                    style: StrokeStyle(lineWidth: isSelected ? 3 : 2, lineCap: .round)
+                    Color.clear,
+                    style: StrokeStyle(lineWidth: 18, lineCap: .round)
+                )
+
+            // Visible line (gradient if multiple types, solid color otherwise)
+            if let gradient = lineGradient {
+                path
+                    .stroke(
+                        gradient,
+                        style: StrokeStyle(
+                            lineWidth: isSelected ? lineWidth + 1 : lineWidth,
+                            lineCap: .round
+                        )
+                    )
+            } else {
+                path
+                    .stroke(
+                        lineColor,
+                        style: StrokeStyle(
+                            lineWidth: isSelected ? lineWidth + 1 : lineWidth,
+                            lineCap: .round
+                        )
+                    )
+            }
+
+            // Arrowhead(s) showing signal direction
+            arrowheads()
+                .stroke(
+                    lineColor,
+                    style: StrokeStyle(
+                        lineWidth: 1.5,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
                 )
         }
         // IMPORTANT: hit-test only the stroked curve, not the whole rectangular area.
-        .contentShape(path.strokedPath(StrokeStyle(lineWidth: 18, lineCap: .round)))
+        .contentShape(
+            path.strokedPath(StrokeStyle(lineWidth: 18, lineCap: .round))
+        )
     }
 }
 private struct Triangle: Shape {
@@ -2398,27 +3621,22 @@ private struct DeviceConnectionHandle: View {
     let deviceId: UUID
 
     var body: some View {
-        ZStack {
-            Triangle()
-                .fill(Color.accentColor.opacity(0.9))
-                .frame(width: 16, height: 14)
-                .rotationEffect(.degrees(90))
-                .shadow(radius: 1.5)
-
-            Triangle()
-                .stroke(Color.primary.opacity(0.35), lineWidth: 1)
-                .frame(width: 16, height: 14)
-                .rotationEffect(.degrees(90))
-        }
-        .padding(8)
-        .contentShape(Rectangle())
-        .accessibilityLabel("Drag to connect")
+        Image(systemName: "arrow.up.arrow.down")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Color.accentColor.opacity(0.8))
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.accentColor.opacity(0.15))
+            )
+            .contentShape(Rectangle())
+            .accessibilityLabel("Drag to connect")
     }
 }
 // MARK: - DeviceInstance UI Helpers
 
-private extension DeviceInstance {
-    var categorySymbolName: String {
+extension DeviceInstance {
+    fileprivate var categorySymbolName: String {
         switch category {
         case .adatExpander: return "rectangle.stack"
         case .audioInterface: return "hifispeaker.2"
@@ -2475,15 +3693,31 @@ private struct DeviceEditorSheet: View {
 
     let onCancel: () -> Void
     let onSave: () -> Void
-    
+
     private func syncCountBasedDigitalFormats() {
         // ADAT is count-based
-        if adatInputPorts > 0 { digitalInputs.insert(.adat) } else { digitalInputs.remove(.adat) }
-        if adatOutputPorts > 0 { digitalOutputs.insert(.adat) } else { digitalOutputs.remove(.adat) }
+        if adatInputPorts > 0 {
+            digitalInputs.insert(.adat)
+        } else {
+            digitalInputs.remove(.adat)
+        }
+        if adatOutputPorts > 0 {
+            digitalOutputs.insert(.adat)
+        } else {
+            digitalOutputs.remove(.adat)
+        }
 
         // MADI is count-based
-        if madiInputPorts > 0 { digitalInputs.insert(.madi) } else { digitalInputs.remove(.madi) }
-        if madiOutputPorts > 0 { digitalOutputs.insert(.madi) } else { digitalOutputs.remove(.madi) }
+        if madiInputPorts > 0 {
+            digitalInputs.insert(.madi)
+        } else {
+            digitalInputs.remove(.madi)
+        }
+        if madiOutputPorts > 0 {
+            digitalOutputs.insert(.madi)
+        } else {
+            digitalOutputs.remove(.madi)
+        }
     }
 
     private var digitalInputFormatChoices: [DigitalFormat] {
@@ -2497,352 +3731,498 @@ private struct DeviceEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-#if os(macOS)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            #if os(macOS)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
 
-                    GroupBox("Basics") {
-                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                            GridRow {
-                                Text("Nickname")
-                                TextField("", text: $nickname)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            GridRow {
-                                Text("Manufacturer")
-                                TextField("", text: $manufacturer)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            GridRow {
-                                Text("Product ID")
-                                TextField("", text: $productId)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            GridRow {
-                                Text("Category")
-                                Picker("", selection: $category) {
-                                    ForEach(DeviceCategory.allCases, id: \.self) { c in
-                                        Text(c.rawValue).tag(c)
+                        GroupBox("Basics") {
+                            Grid(
+                                alignment: .leading,
+                                horizontalSpacing: 12,
+                                verticalSpacing: 10
+                            ) {
+                                GridRow {
+                                    Text("Nickname")
+                                    TextField("", text: $nickname)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Manufacturer")
+                                    TextField("", text: $manufacturer)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Product ID")
+                                    TextField("", text: $productId)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Category")
+                                    Picker("", selection: $category) {
+                                        ForEach(
+                                            DeviceCategory.allCases,
+                                            id: \.self
+                                        ) { c in
+                                            Text(c.rawValue).tag(c)
+                                        }
                                     }
+                                    .labelsHidden()
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        alignment: .leading
+                                    )
                                 }
-                                .labelsHidden()
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                GridRow {
+                                    Text("Serial Number")
+                                    TextField("", text: $serialNumber)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Location")
+                                    TextField("", text: $location)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
-                            GridRow {
-                                Text("Serial Number")
-                                TextField("", text: $serialNumber)
+                            .padding(8)
+                        }
+
+                        GroupBox("Links") {
+                            Grid(
+                                alignment: .leading,
+                                horizontalSpacing: 12,
+                                verticalSpacing: 10
+                            ) {
+                                GridRow {
+                                    Text("Support Page")
+                                    TextField(
+                                        "https://…",
+                                        text: $supportPageURL
+                                    )
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: .infinity)
-                            }
-                            GridRow {
-                                Text("Location")
-                                TextField("", text: $location)
+                                }
+                                GridRow {
+                                    Text("Downloads Page")
+                                    TextField(
+                                        "https://…",
+                                        text: $downloadsPageURL
+                                    )
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: .infinity)
+                                }
                             }
+                            .padding(8)
                         }
-                        .padding(8)
-                    }
-                    
-                    GroupBox("Links") {
-                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                            GridRow {
-                                Text("Support Page")
-                                TextField("https://…", text: $supportPageURL)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            GridRow {
-                                Text("Downloads Page")
-                                TextField("https://…", text: $downloadsPageURL)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .padding(8)
-                    }
 
-                    GroupBox("Analog I/O") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Stepper(value: $audioInputs, in: 0...128) {
-                                HStack {
-                                    Text("Analog Inputs")
-                                    Spacer()
-                                    Text("\(audioInputs)").foregroundStyle(.secondary)
-                                }
-                            }
-                            Stepper(value: $audioOutputs, in: 0...128) {
-                                HStack {
-                                    Text("Analog Outputs")
-                                    Spacer()
-                                    Text("\(audioOutputs)").foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(8)
-                    }
-                    
-                    GroupBox("Digital I/O") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("Sample Rate", selection: $sampleRate) {
-                                ForEach(SampleRate.allCases, id: \.self) { r in
-                                    Text(r.displayName).tag(r)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            Divider().padding(.vertical, 4)
-
-                            Stepper(value: $adatInputPorts, in: 0...8) {
-                                HStack {
-                                    Text("ADAT Input Ports")
-                                    Spacer()
-                                    Text("\(adatInputPorts)").foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Stepper(value: $adatOutputPorts, in: 0...8) {
-                                HStack {
-                                    Text("ADAT Output Ports")
-                                    Spacer()
-                                    Text("\(adatOutputPorts)").foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Stepper(value: $madiInputPorts, in: 0...8) {
-                                HStack {
-                                    Text("MADI Input Ports")
-                                    Spacer()
-                                    Text("\(madiInputPorts)").foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Stepper(value: $madiOutputPorts, in: 0...8) {
-                                HStack {
-                                    Text("MADI Output Ports")
-                                    Spacer()
-                                    Text("\(madiOutputPorts)").foregroundStyle(.secondary)
-                                }
-                            }
-
-
-                        }
-                        .padding(8)
-                    }
-
-                    GroupBox("Digital Inputs") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(digitalInputFormatChoices, id: \.self) { f in
-                                Toggle(f.rawValue, isOn: Binding(
-                                    get: { digitalInputs.contains(f) },
-                                    set: { isOn in
-                                        if isOn { digitalInputs.insert(f) } else { digitalInputs.remove(f) }
-                                    }
-                                ))
-                            }
-                        }
-                        .padding(8)
-                    }
-
-                    GroupBox("Digital Outputs") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(digitalOutputFormatChoices, id: \.self) { f in
-                                Toggle(f.rawValue, isOn: Binding(
-                                    get: { digitalOutputs.contains(f) },
-                                    set: { isOn in
-                                        if isOn { digitalOutputs.insert(f) } else { digitalOutputs.remove(f) }
-                                    }
-                                ))
-                            }
-                        }
-                        .padding(8)
-                    }
-                    
-                    GroupBox("Computer I/O"){
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(ComputerInterface.allCases, id: \.self) { f in
-                                Stepper(value: Binding(
-                                    get: { max(0, computerInterfaceCounts[f] ?? 0) },
-                                    set: { newValue in
-                                        let v = max(0, newValue)
-                                        if v == 0 { computerInterfaceCounts.removeValue(forKey: f) }
-                                        else { computerInterfaceCounts[f] = v }
-                                    }
-                                ), in: 0...8) {
+                        GroupBox("Analog I/O") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Stepper(value: $audioInputs, in: 0...128) {
                                     HStack {
-                                        Text(f.rawValue)
+                                        Text("Analog Inputs")
                                         Spacer()
-                                        Text("\(computerInterfaceCounts[f] ?? 0)")
+                                        Text("\(audioInputs)").foregroundStyle(
+                                            .secondary
+                                        )
+                                    }
+                                }
+                                Stepper(value: $audioOutputs, in: 0...128) {
+                                    HStack {
+                                        Text("Analog Outputs")
+                                        Spacer()
+                                        Text("\(audioOutputs)").foregroundStyle(
+                                            .secondary
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(8)
+                        }
+
+                        GroupBox("Digital I/O") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Picker("Sample Rate", selection: $sampleRate) {
+                                    ForEach(SampleRate.allCases, id: \.self) {
+                                        r in
+                                        Text(r.displayName).tag(r)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                                Divider().padding(.vertical, 4)
+
+                                Stepper(value: $adatInputPorts, in: 0...8) {
+                                    HStack {
+                                        Text("ADAT Input Ports")
+                                        Spacer()
+                                        Text("\(adatInputPorts)")
                                             .foregroundStyle(.secondary)
                                     }
                                 }
+
+                                Stepper(value: $adatOutputPorts, in: 0...8) {
+                                    HStack {
+                                        Text("ADAT Output Ports")
+                                        Spacer()
+                                        Text("\(adatOutputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Stepper(value: $madiInputPorts, in: 0...8) {
+                                    HStack {
+                                        Text("MADI Input Ports")
+                                        Spacer()
+                                        Text("\(madiInputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Stepper(value: $madiOutputPorts, in: 0...8) {
+                                    HStack {
+                                        Text("MADI Output Ports")
+                                        Spacer()
+                                        Text("\(madiOutputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                            }
+                            .padding(8)
+                        }
+
+                        GroupBox("Digital Inputs") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(digitalInputFormatChoices, id: \.self) {
+                                    f in
+                                    Toggle(
+                                        f.rawValue,
+                                        isOn: Binding(
+                                            get: { digitalInputs.contains(f) },
+                                            set: { isOn in
+                                                if isOn {
+                                                    digitalInputs.insert(f)
+                                                } else {
+                                                    digitalInputs.remove(f)
+                                                }
+                                            }
+                                        )
+                                    )
+                                }
+                            }
+                            .padding(8)
+                        }
+
+                        GroupBox("Digital Outputs") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(digitalOutputFormatChoices, id: \.self)
+                                { f in
+                                    Toggle(
+                                        f.rawValue,
+                                        isOn: Binding(
+                                            get: { digitalOutputs.contains(f) },
+                                            set: { isOn in
+                                                if isOn {
+                                                    digitalOutputs.insert(f)
+                                                } else {
+                                                    digitalOutputs.remove(f)
+                                                }
+                                            }
+                                        )
+                                    )
+                                }
+                            }
+                            .padding(8)
+                        }
+
+                        GroupBox("Computer I/O") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(ComputerInterface.allCases, id: \.self)
+                                { f in
+                                    Stepper(
+                                        value: Binding(
+                                            get: {
+                                                max(
+                                                    0,
+                                                    computerInterfaceCounts[f]
+                                                        ?? 0
+                                                )
+                                            },
+                                            set: { newValue in
+                                                let v = max(0, newValue)
+                                                if v == 0 {
+                                                    computerInterfaceCounts
+                                                        .removeValue(forKey: f)
+                                                } else {
+                                                    computerInterfaceCounts[f] =
+                                                        v
+                                                }
+                                            }
+                                        ),
+                                        in: 0...8
+                                    ) {
+                                        HStack {
+                                            Text(f.rawValue)
+                                            Spacer()
+                                            Text(
+                                                "\(computerInterfaceCounts[f] ?? 0)"
+                                            )
+                                            .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(8)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .padding(16)
+                }
+                .onAppear { syncCountBasedDigitalFormats() }
+                .onChange(of: adatInputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .onChange(of: adatOutputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .onChange(of: madiInputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .onChange(of: madiOutputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .frame(
+                    minWidth: 560,
+                    idealWidth: 640,
+                    maxWidth: .infinity,
+                    minHeight: 640,
+                    idealHeight: 720,
+                    maxHeight: .infinity
+                )
+                .navigationTitle(title)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            onCancel()
+                            dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            onSave()
+                            dismiss()
+                        }
+                    }
+                }
+            #else
+                Form {
+                    Section("Basics") {
+                        TextField("Nickname", text: $nickname)
+                        TextField("Manufacturer", text: $manufacturer)
+                        TextField("Product ID", text: $productId)
+
+                        Picker("Category", selection: $category) {
+                            ForEach(DeviceCategory.allCases, id: \.self) { c in
+                                Text(c.rawValue).tag(c)
                             }
                         }
-                        .padding(8)
+
+                        TextField("Serial Number", text: $serialNumber)
+                        TextField("Location", text: $location)
+                    }
+
+                    Section("Links") {
+                        TextField("Support Page (URL)", text: $supportPageURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+
+                        TextField(
+                            "Downloads Page (URL)",
+                            text: $downloadsPageURL
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    }
+
+                    Section("Analog I/O") {
+                        Stepper(value: $audioInputs, in: 0...128) {
+                            HStack {
+                                Text("Analog Inputs")
+                                Spacer()
+                                Text("\(audioInputs)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+                        Stepper(value: $audioOutputs, in: 0...128) {
+                            HStack {
+                                Text("Analog Outputs")
+                                Spacer()
+                                Text("\(audioOutputs)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+                    }
+
+                    Section("Digital I/O") {
+                        Picker("Sample Rate", selection: $sampleRate) {
+                            ForEach(SampleRate.allCases, id: \.self) { r in
+                                Text(r.displayName).tag(r)
+                            }
+                        }
+
+                        Stepper(value: $adatInputPorts, in: 0...8) {
+                            HStack {
+                                Text("ADAT Input Ports")
+                                Spacer()
+                                Text("\(adatInputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+                        Stepper(value: $adatOutputPorts, in: 0...8) {
+                            HStack {
+                                Text("ADAT Output Ports")
+                                Spacer()
+                                Text("\(adatOutputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+                        Stepper(value: $madiInputPorts, in: 0...8) {
+                            HStack {
+                                Text("MADI Input Ports")
+                                Spacer()
+                                Text("\(madiInputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+                        Stepper(value: $madiOutputPorts, in: 0...8) {
+                            HStack {
+                                Text("MADI Output Ports")
+                                Spacer()
+                                Text("\(madiOutputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+
+                    }
+
+                    Section("Digital Inputs") {
+                        ForEach(digitalInputFormatChoices, id: \.self) { f in
+                            Toggle(
+                                f.rawValue,
+                                isOn: Binding(
+                                    get: { digitalInputs.contains(f) },
+                                    set: { isOn in
+                                        if isOn {
+                                            digitalInputs.insert(f)
+                                        } else {
+                                            digitalInputs.remove(f)
+                                        }
+                                    }
+                                )
+                            )
+                        }
+                    }
+
+                    Section("Digital Outputs") {
+                        ForEach(digitalOutputFormatChoices, id: \.self) { f in
+                            Toggle(
+                                f.rawValue,
+                                isOn: Binding(
+                                    get: { digitalOutputs.contains(f) },
+                                    set: { isOn in
+                                        if isOn {
+                                            digitalOutputs.insert(f)
+                                        } else {
+                                            digitalOutputs.remove(f)
+                                        }
+                                    }
+                                )
+                            )
+                        }
+                    }
+
+                    Section("Computer I/O") {
+                        ForEach(ComputerInterface.allCases, id: \.self) { f in
+                            Stepper(
+                                value: Binding(
+                                    get: {
+                                        max(0, computerInterfaceCounts[f] ?? 0)
+                                    },
+                                    set: { newValue in
+                                        let v = max(0, newValue)
+                                        if v == 0 {
+                                            computerInterfaceCounts.removeValue(
+                                                forKey: f
+                                            )
+                                        } else {
+                                            computerInterfaceCounts[f] = v
+                                        }
+                                    }
+                                ),
+                                in: 0...8
+                            ) {
+                                HStack {
+                                    Text(f.rawValue)
+                                    Spacer()
+                                    Text("\(computerInterfaceCounts[f] ?? 0)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
 
                     if let errorMessage {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
-                }
-                .padding(16)
-            }
-            .onAppear { syncCountBasedDigitalFormats() }
-            .onChange(of: adatInputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .onChange(of: adatOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .onChange(of: madiInputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .onChange(of: madiOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .frame(minWidth: 560, idealWidth: 640, maxWidth: .infinity,
-                   minHeight: 640, idealHeight: 720, maxHeight: .infinity)
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave()
-                        dismiss()
-                    }
-                }
-            }
-#else
-            Form {
-                Section("Basics") {
-                    TextField("Nickname", text: $nickname)
-                    TextField("Manufacturer", text: $manufacturer)
-                    TextField("Product ID", text: $productId)
-
-                    Picker("Category", selection: $category) {
-                        ForEach(DeviceCategory.allCases, id: \.self) { c in
-                            Text(c.rawValue).tag(c)
-                        }
-                    }
-
-                    TextField("Serial Number", text: $serialNumber)
-                    TextField("Location", text: $location)
-                }
-                
-                Section("Links") {
-                    TextField("Support Page (URL)", text: $supportPageURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-
-                    TextField("Downloads Page (URL)", text: $downloadsPageURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                }
-
-                Section("Analog I/O") {
-                    Stepper(value: $audioInputs, in: 0...128) {
-                        HStack { Text("Analog Inputs"); Spacer(); Text("\(audioInputs)").foregroundStyle(.secondary) }
-                    }
-                    Stepper(value: $audioOutputs, in: 0...128) {
-                        HStack { Text("Analog Outputs"); Spacer(); Text("\(audioOutputs)").foregroundStyle(.secondary) }
-                    }
-                }
-
-                Section("Digital I/O") {
-                    Picker("Sample Rate", selection: $sampleRate) {
-                        ForEach(SampleRate.allCases, id: \.self) { r in
-                            Text(r.displayName).tag(r)
-                        }
-                    }
-
-                    Stepper(value: $adatInputPorts, in: 0...8) {
-                        HStack { Text("ADAT Input Ports"); Spacer(); Text("\(adatInputPorts)").foregroundStyle(.secondary) }
-                    }
-                    Stepper(value: $adatOutputPorts, in: 0...8) {
-                        HStack { Text("ADAT Output Ports"); Spacer(); Text("\(adatOutputPorts)").foregroundStyle(.secondary) }
-                    }
-                    Stepper(value: $madiInputPorts, in: 0...8) {
-                        HStack { Text("MADI Input Ports"); Spacer(); Text("\(madiInputPorts)").foregroundStyle(.secondary) }
-                    }
-                    Stepper(value: $madiOutputPorts, in: 0...8) {
-                        HStack { Text("MADI Output Ports"); Spacer(); Text("\(madiOutputPorts)").foregroundStyle(.secondary) }
-                    }
-
-                }
-
-                Section("Digital Inputs") {
-                    ForEach(digitalInputFormatChoices, id: \.self) { f in
-                        Toggle(f.rawValue, isOn: Binding(
-                            get: { digitalInputs.contains(f) },
-                            set: { isOn in
-                                if isOn { digitalInputs.insert(f) } else { digitalInputs.remove(f) }
-                            }
-                        ))
-                    }
-                }
-
-                Section("Digital Outputs") {
-                    ForEach(digitalOutputFormatChoices, id: \.self) { f in
-                        Toggle(f.rawValue, isOn: Binding(
-                            get: { digitalOutputs.contains(f) },
-                            set: { isOn in
-                                if isOn { digitalOutputs.insert(f) } else { digitalOutputs.remove(f) }
-                            }
-                        ))
-                    }
-                }
-                
-                Section("Computer I/O") {
-                    ForEach(ComputerInterface.allCases, id: \.self) { f in
-                        Stepper(value: Binding(
-                            get: { max(0, computerInterfaceCounts[f] ?? 0) },
-                            set: { newValue in
-                                let v = max(0, newValue)
-                                if v == 0 { computerInterfaceCounts.removeValue(forKey: f) }
-                                else { computerInterfaceCounts[f] = v }
-                            }
-                        ), in: 0...8) {
-                            HStack {
-                                Text(f.rawValue)
-                                Spacer()
-                                Text("\(computerInterfaceCounts[f] ?? 0)")
-                                    .foregroundStyle(.secondary)
-                            }
+                        Section {
+                            Text(errorMessage)
+                                .foregroundStyle(.red)
                         }
                     }
                 }
-
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
+                .onAppear { syncCountBasedDigitalFormats() }
+                .onChange(of: adatInputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .onChange(of: adatOutputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .onChange(of: madiInputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .onChange(of: madiOutputPorts) { _, _ in
+                    syncCountBasedDigitalFormats()
+                }
+                .navigationTitle(title)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            onCancel()
+                            dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            onSave()
+                            dismiss()
+                        }
                     }
                 }
-            }
-            .onAppear { syncCountBasedDigitalFormats() }
-            .onChange(of: adatInputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .onChange(of: adatOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .onChange(of: madiInputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .onChange(of: madiOutputPorts) { _, _ in syncCountBasedDigitalFormats() }
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave()
-                        dismiss()
-                    }
-                }
-            }
-#endif
+            #endif
         }
     }
 }
@@ -2857,10 +4237,6 @@ private struct IdentifiableURL: Identifiable {
     let id = UUID()
     let url: URL
 }
-
-
-
-
 
 private struct DeviceInspectorOverlay: View {
     let studio: Studio
@@ -2883,33 +4259,52 @@ private struct DeviceInspectorOverlay: View {
                         Section("Device") {
                             LabeledContent("Nickname", value: d.nickname)
 
-                            if !d.manufacturer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                LabeledContent("Manufacturer", value: d.manufacturer)
+                            if !d.manufacturer.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
+                                LabeledContent(
+                                    "Manufacturer",
+                                    value: d.manufacturer
+                                )
                             }
 
-                            if !d.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if !d.model.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
                                 LabeledContent("Product ID", value: d.model)
                             }
 
-                            LabeledContent("Category", value: d.category.rawValue)
+                            LabeledContent(
+                                "Category",
+                                value: d.category.rawValue
+                            )
 
-                            if !d.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                LabeledContent("Serial Number", value: d.serialNumber)
+                            if !d.serialNumber.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
+                                LabeledContent(
+                                    "Serial Number",
+                                    value: d.serialNumber
+                                )
                             }
 
-                            if !d.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if !d.location.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
                                 LabeledContent("Location", value: d.location)
                             }
 
                             if let url = d.supportPageURL {
                                 LabeledContent("Support Page") {
-                                    Link(url.absoluteString, destination: url).lineLimit(1)
+                                    Link(url.absoluteString, destination: url)
+                                        .lineLimit(1)
                                 }
                             }
 
                             if let url = d.downloadsPageURL {
                                 LabeledContent("Downloads Page") {
-                                    Link(url.absoluteString, destination: url).lineLimit(1)
+                                    Link(url.absoluteString, destination: url)
+                                        .lineLimit(1)
                                 }
                             }
                         }
@@ -2919,7 +4314,8 @@ private struct DeviceInspectorOverlay: View {
                                 Text("No ports defined yet.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(d.ports.sorted(by: portSort), id: \.id) { p in
+                            ForEach(d.ports.sorted(by: portSort), id: \.id) {
+                                p in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(p.name)
@@ -2932,9 +4328,13 @@ private struct DeviceInspectorOverlay: View {
                                     if !p.channels.isEmpty {
                                         Text(
                                             p.channels
-                                                .sorted(by: { $0.index < $1.index })
+                                                .sorted(by: {
+                                                    $0.index < $1.index
+                                                })
                                                 .map { ch in
-                                                    ch.nameShort.isEmpty ? "\(ch.index)" : ch.nameShort
+                                                    ch.nameShort.isEmpty
+                                                        ? "\(ch.index)"
+                                                        : ch.nameShort
                                                 }
                                                 .joined(separator: ", ")
                                         )
@@ -2952,7 +4352,12 @@ private struct DeviceInspectorOverlay: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
 
-                                ForEach(d.computerInterfaces.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { iface in
+                                ForEach(
+                                    d.computerInterfaces.sorted(by: {
+                                        $0.rawValue < $1.rawValue
+                                    }),
+                                    id: \.self
+                                ) { iface in
                                     Text(iface.rawValue)
                                 }
                             }
@@ -2962,7 +4367,10 @@ private struct DeviceInspectorOverlay: View {
                             Button {
                                 isImportingManual = true
                             } label: {
-                                Label("Add Manual", systemImage: "doc.badge.plus")
+                                Label(
+                                    "Add Manual",
+                                    systemImage: "doc.badge.plus"
+                                )
                             }
 
                             if d.docs.isEmpty {
@@ -2977,7 +4385,9 @@ private struct DeviceInspectorOverlay: View {
                                             .lineLimit(1)
                                         Spacer()
                                         Button(role: .destructive) {
-                                            if let idx = d.docs.firstIndex(where: { $0.id == doc.id }) {
+                                            if let idx = d.docs.firstIndex(
+                                                where: { $0.id == doc.id })
+                                            {
                                                 d.docs.remove(at: idx)
                                             }
                                         } label: {
@@ -2990,23 +4400,37 @@ private struct DeviceInspectorOverlay: View {
                                         // print("📱 Manual tapped: \(doc.title)")
                                         // print("📱 Has bookmark: \(doc.localBookmarkData != nil)")
                                         // print("📱 Has URL string: \(doc.urlString != nil)")
-                                        
+
                                         // Try bookmark first, fall back to URL string for legacy docs
-                                        if let bookmarkData = doc.localBookmarkData {
+                                        if let bookmarkData = doc
+                                            .localBookmarkData
+                                        {
                                             // print("📱 Attempting to resolve bookmark...")
                                             do {
-                                                let url = try ManualStorage.resolveBookmark(bookmarkData)
+                                                let url =
+                                                    try ManualStorage
+                                                    .resolveBookmark(
+                                                        bookmarkData
+                                                    )
                                                 // print("📱 ✅ Bookmark resolved to: \(url.path)")
-                                                manualViewerItem = IdentifiableURL(url: url)
+                                                manualViewerItem =
+                                                    IdentifiableURL(url: url)
                                             } catch {
-                                                print("📱 ❌ Bookmark resolution failed: \(error)")
+                                                print(
+                                                    "📱 ❌ Bookmark resolution failed: \(error)"
+                                                )
                                             }
                                         } else if let urlString = doc.urlString,
-                                                  let url = URL(string: urlString) {
+                                            let url = URL(string: urlString)
+                                        {
                                             // print("📱 Using legacy URL string: \(urlString)")
-                                            manualViewerItem = IdentifiableURL(url: url)
+                                            manualViewerItem = IdentifiableURL(
+                                                url: url
+                                            )
                                         } else {
-                                            print("📱 ❌ No bookmark or URL available")
+                                            print(
+                                                "📱 ❌ No bookmark or URL available"
+                                            )
                                         }
                                     }
                                 }
@@ -3038,16 +4462,23 @@ private struct DeviceInspectorOverlay: View {
                                     Button {
                                         onCloneDevice(d)
                                     } label: {
-                                        Label("Clone", systemImage: "plus.square.on.square")
-                                            .frame(maxWidth: .infinity)
+                                        Label(
+                                            "Clone",
+                                            systemImage: "plus.square.on.square"
+                                        )
+                                        .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.bordered)
 
                                     Button {
                                         onRequestMoveDevice(d)
                                     } label: {
-                                        Label("Move", systemImage: "arrowshape.turn.up.right")
-                                            .frame(maxWidth: .infinity)
+                                        Label(
+                                            "Move",
+                                            systemImage:
+                                                "arrowshape.turn.up.right"
+                                        )
+                                        .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.bordered)
                                 }
@@ -3062,15 +4493,18 @@ private struct DeviceInspectorOverlay: View {
                         allowsMultipleSelection: false
                     ) { result in
                         guard case .success(let urls) = result,
-                              let pickedURL = urls.first,
-                              let device = studio.devices.first(where: { $0.id == deviceId })
+                            let pickedURL = urls.first,
+                            let device = studio.devices.first(where: {
+                                $0.id == deviceId
+                            })
                         else { return }
 
                         do {
-                            let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
-                                pickedURL: pickedURL,
-                                deviceId: device.id
-                            )
+                            let (storedURL, bookmarkData) =
+                                try ManualStorage.copyPDFIntoAppSupport(
+                                    pickedURL: pickedURL,
+                                    deviceId: device.id
+                                )
 
                             let doc = DocLink(
                                 title: storedURL.lastPathComponent,
@@ -3083,13 +4517,19 @@ private struct DeviceInspectorOverlay: View {
                         }
                     }
                     #if os(iOS)
-                    .fullScreenCover(item: $manualViewerItem) { item in
-                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
-                    }
+                        .fullScreenCover(item: $manualViewerItem) { item in
+                            ManualPDFViewer(
+                                url: item.url,
+                                title: item.url.lastPathComponent
+                            )
+                        }
                     #else
-                    .sheet(item: $manualViewerItem) { item in
-                        ManualPDFViewer(url: item.url, title: item.url.lastPathComponent)
-                    }
+                        .sheet(item: $manualViewerItem) { item in
+                            ManualPDFViewer(
+                                url: item.url,
+                                title: item.url.lastPathComponent
+                            )
+                        }
                     #endif
                 } else {
                     VStack(spacing: 12) {
@@ -3123,12 +4563,20 @@ private struct DeviceExplosionDetailView: View {
     let connectionsStore: ConnectionsStore
 
     private func endpoint(for port: Port, channel: Channel) -> IOEndpointRef {
-        let dir: IOEndpointRef.Direction = (port.direction == .input) ? .input : .output
-        return IOEndpointRef(deviceId: device.id, portId: port.id, channelId: channel.id, direction: dir)
+        let dir: IOEndpointRef.Direction =
+            (port.direction == .input) ? .input : .output
+        return IOEndpointRef(
+            deviceId: device.id,
+            portId: port.id,
+            channelId: channel.id,
+            direction: dir
+        )
     }
 
     private func rowLabel(port: Port, channel: Channel) -> String {
-        let short = channel.nameShort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let short = channel.nameShort.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         if short.isEmpty {
             return port.name
         }
@@ -3137,11 +4585,18 @@ private struct DeviceExplosionDetailView: View {
     }
 
     private func statusText(for endpoint: IOEndpointRef) -> String {
-        connectionsStore.connectedToText(studio: studio, studioId: studio.id, endpoint: endpoint) ?? "open"
+        connectionsStore.connectedToText(
+            studio: studio,
+            studioId: studio.id,
+            endpoint: endpoint
+        ) ?? "open"
     }
 
     private func isOpen(_ endpoint: IOEndpointRef) -> Bool {
-        connectionsStore.occupancyForEndpoint(studioId: studio.id, endpoint: endpoint) == nil
+        connectionsStore.occupancyForEndpoint(
+            studioId: studio.id,
+            endpoint: endpoint
+        ) == nil
     }
 
     private func isComputerInterfacePort(_ p: Port) -> Bool {
@@ -3166,7 +4621,7 @@ private struct DeviceExplosionDetailView: View {
             .filter { $0.direction == .output && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
-    
+
     private struct ComputerInterfaceRow: Identifiable {
         let id: String
         let label: String
@@ -3183,9 +4638,18 @@ private struct DeviceExplosionDetailView: View {
             let n = max(0, counts[iface] ?? 0)
             if n == 0 { continue }
             for idx in 1...n {
-                let label = (n > 1) ? "\(iface.rawValue) \(idx)" : iface.rawValue
-                let portId = stableComputerPortId(deviceId: device.id, iface: iface, index: idx)
-                let channelId = stableComputerChannelId(deviceId: device.id, iface: iface, index: idx)
+                let label =
+                    (n > 1) ? "\(iface.rawValue) \(idx)" : iface.rawValue
+                let portId = stableComputerPortId(
+                    deviceId: device.id,
+                    iface: iface,
+                    index: idx
+                )
+                let channelId = stableComputerChannelId(
+                    deviceId: device.id,
+                    iface: iface,
+                    index: idx
+                )
                 rows.append(
                     ComputerInterfaceRow(
                         id: "\(iface.rawValue)|\(idx)",
@@ -3212,14 +4676,14 @@ private struct DeviceExplosionDetailView: View {
     var body: some View {
         Group {
             #if os(macOS)
-            Form {
-                explosionContent
-            }
-            .formStyle(.grouped)
+                Form {
+                    explosionContent
+                }
+                .formStyle(.grouped)
             #else
-            List {
-                explosionContent
-            }
+                List {
+                    explosionContent
+                }
             #endif
         }
         .navigationTitle("Device I/O")
@@ -3227,111 +4691,135 @@ private struct DeviceExplosionDetailView: View {
 
     @ViewBuilder
     private var explosionContent: some View {
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(device.nickname)
-                        .font(.title2)
-                        .bold()
-                    let used = (inputPorts + outputPorts).flatMap { p in p.channels.map { endpoint(for: p, channel: $0) } }
-                        .filter { !isOpen($0) }
-                        .count
-                    let total = (inputPorts + outputPorts).reduce(0) { $0 + $1.channels.count }
-                    Text("\(used) in use • \(max(0, total - used)) open")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(device.nickname)
+                    .font(.title2)
+                    .bold()
+                let used = (inputPorts + outputPorts).flatMap { p in
+                    p.channels.map { endpoint(for: p, channel: $0) }
                 }
-                .padding(.vertical, 4)
+                .filter { !isOpen($0) }
+                .count
+                let total = (inputPorts + outputPorts).reduce(0) {
+                    $0 + $1.channels.count
+                }
+                Text("\(used) in use • \(max(0, total - used)) open")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            
-            // Computer Interfaces: render the actual generated ports (USB In/Out etc) so we can show connection status.
-            
-            if !computerInterfaceRows.isEmpty {
-                Section("Computer Interfaces") {
-                    ForEach(computerInterfaceRows) { row in
-                        let connectedText = connectionsStore.connectedToText(
+            .padding(.vertical, 4)
+        }
+
+        // Computer Interfaces: render the actual generated ports (USB In/Out etc) so we can show connection status.
+
+        if !computerInterfaceRows.isEmpty {
+            Section("Computer Interfaces") {
+                ForEach(computerInterfaceRows) { row in
+                    let connectedText =
+                        connectionsStore.connectedToText(
                             studio: studio,
                             studioId: studio.id,
                             endpoint: row.inputEndpoint
-                        ) ?? connectionsStore.connectedToText(
+                        )
+                        ?? connectionsStore.connectedToText(
                             studio: studio,
                             studioId: studio.id,
                             endpoint: row.outputEndpoint
                         )
-                        let isOpen = (connectedText == nil)
+                    let isOpen = (connectedText == nil)
 
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.label)
+                            Text(connectedText ?? "open")
+                                .font(.caption)
+                                .foregroundStyle(isOpen ? .secondary : .primary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Image(
+                            systemName: isOpen
+                                ? "circle" : "checkmark.circle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+
+        if !inputPorts.isEmpty {
+            Section("Inputs") {
+                ForEach(inputPorts, id: \.id) { p in
+                    ForEach(
+                        p.channels.sorted(by: { $0.index < $1.index }),
+                        id: \.id
+                    ) { ch in
+                        let ep = endpoint(for: p, channel: ch)
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(row.label)
-                                Text(connectedText ?? "open")
+                                Text(rowLabel(port: p, channel: ch))
+                                Text(statusText(for: ep))
                                     .font(.caption)
-                                    .foregroundStyle(isOpen ? .secondary : .primary)
+                                    .foregroundStyle(
+                                        isOpen(ep) ? .secondary : .primary
+                                    )
                                     .lineLimit(2)
                             }
                             Spacer()
-                            Image(systemName: isOpen ? "circle" : "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Image(
+                                systemName: isOpen(ep)
+                                    ? "circle" : "checkmark.circle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 2)
                     }
                 }
             }
+        }
 
-
-            if !inputPorts.isEmpty {
-                Section("Inputs") {
-                    ForEach(inputPorts, id: \.id) { p in
-                        ForEach(p.channels.sorted(by: { $0.index < $1.index }), id: \.id) { ch in
-                            let ep = endpoint(for: p, channel: ch)
-                            HStack(alignment: .top, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(rowLabel(port: p, channel: ch))
-                                    Text(statusText(for: ep))
-                                        .font(.caption)
-                                        .foregroundStyle(isOpen(ep) ? .secondary : .primary)
-                                        .lineLimit(2)
-                                }
-                                Spacer()
-                                Image(systemName: isOpen(ep) ? "circle" : "checkmark.circle.fill")
+        if !outputPorts.isEmpty {
+            Section("Outputs") {
+                ForEach(outputPorts, id: \.id) { p in
+                    ForEach(
+                        p.channels.sorted(by: { $0.index < $1.index }),
+                        id: \.id
+                    ) { ch in
+                        let ep = endpoint(for: p, channel: ch)
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(rowLabel(port: p, channel: ch))
+                                Text(statusText(for: ep))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(
+                                        isOpen(ep) ? .secondary : .primary
+                                    )
+                                    .lineLimit(2)
                             }
-                            .padding(.vertical, 2)
+                            Spacer()
+                            Image(
+                                systemName: isOpen(ep)
+                                    ? "circle" : "checkmark.circle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             }
+        }
 
-            if !outputPorts.isEmpty {
-                Section("Outputs") {
-                    ForEach(outputPorts, id: \.id) { p in
-                        ForEach(p.channels.sorted(by: { $0.index < $1.index }), id: \.id) { ch in
-                            let ep = endpoint(for: p, channel: ch)
-                            HStack(alignment: .top, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(rowLabel(port: p, channel: ch))
-                                    Text(statusText(for: ep))
-                                        .font(.caption)
-                                        .foregroundStyle(isOpen(ep) ? .secondary : .primary)
-                                        .lineLimit(2)
-                                }
-                                Spacer()
-                                Image(systemName: isOpen(ep) ? "circle" : "checkmark.circle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
+        if inputPorts.isEmpty && outputPorts.isEmpty {
+            Section {
+                Text("No I/O endpoints found for this device yet.")
+                    .foregroundStyle(.secondary)
             }
-
-            if inputPorts.isEmpty && outputPorts.isEmpty {
-                Section {
-                    Text("No I/O endpoints found for this device yet.")
-                        .foregroundStyle(.secondary)
-                }
-            }
+        }
     }
 }
 
@@ -3395,21 +4883,139 @@ private func portSort(_ a: Port, _ b: Port) -> Bool {
     return a.name.localizedStandardCompare(b.name) == .orderedAscending
 }
 
-private func stableComputerPortId(deviceId: UUID, iface: ComputerInterface, index: Int) -> UUID {
+private func stableComputerPortId(
+    deviceId: UUID,
+    iface: ComputerInterface,
+    index: Int
+) -> UUID {
     stableUUID("computerPort|\(deviceId.uuidString)|\(iface.rawValue)|\(index)")
 }
 
-private func stableComputerChannelId(deviceId: UUID, iface: ComputerInterface, index: Int) -> UUID {
+private func stableComputerChannelId(
+    deviceId: UUID,
+    iface: ComputerInterface,
+    index: Int
+) -> UUID {
     stableUUID("computerCh|\(deviceId.uuidString)|\(iface.rawValue)|\(index)")
 }
 private func stableUUID(_ s: String) -> UUID {
     let digest = SHA256.hash(data: Data(s.utf8))
     let bytes = Array(digest)
     let uuidBytes = Array(bytes.prefix(16))
-    return UUID(uuid: (
-        uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
-        uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
-        uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
-        uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]
-    ))
+    return UUID(
+        uuid: (
+            uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
+            uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
+            uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
+            uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]
+        )
+    )
+}
+
+// MARK: - Connection Legend View
+
+private struct ConnectionLegendView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Connection Colors") {
+                    LegendRow(
+                        color: .blue,
+                        title: "Analog",
+                        description: "Analog I/O, headphone outputs"
+                    )
+                    LegendRow(
+                        color: .green,
+                        title: "Digital",
+                        description: "ADAT, MADI, S/PDIF, AES, Word Clock"
+                    )
+                    LegendRow(
+                        color: .purple,
+                        title: "MIDI",
+                        description: "MIDI In/Out connections"
+                    )
+                    LegendRow(
+                        color: .orange,
+                        title: "Computer / Bidirectional",
+                        description: "USB, Thunderbolt, Ethernet (two arrows)"
+                    )
+                }
+
+                Section("Line Thickness") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Rectangle()
+                                .fill(Color.secondary)
+                                .frame(width: 60, height: 2)
+                            Text("1-2 channels")
+                                .font(.subheadline)
+                        }
+
+                        HStack {
+                            Rectangle()
+                                .fill(Color.secondary)
+                                .frame(width: 60, height: 3.5)
+                            Text("3-8 channels")
+                                .font(.subheadline)
+                        }
+
+                        HStack {
+                            Rectangle()
+                                .fill(Color.secondary)
+                                .frame(width: 60, height: 5)
+                            Text("9+ channels (ADAT/MADI)")
+                                .font(.subheadline)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Signal Flow") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("• Arrows indicate signal direction")
+                        Text(
+                            "• Computer connections show two arrows (bidirectional)"
+                        )
+                        Text(
+                            "• Use Auto-Arrange to organize devices by signal flow"
+                        )
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Connection Legend")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct LegendRow: View {
+    let color: Color
+    let title: String
+    let description: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(color)
+                .frame(width: 20, height: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }

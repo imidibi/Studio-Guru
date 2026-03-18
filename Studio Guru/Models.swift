@@ -457,6 +457,7 @@ struct ExportableDevice: Codable {
     let scale: Double
     let zIndex: Int
     let ports: [ExportablePort]
+    let docs: [ExportableDocLink]
     
     init(from device: DeviceInstance) {
         self.id = device.id
@@ -484,6 +485,7 @@ struct ExportableDevice: Codable {
         self.scale = device.scale
         self.zIndex = device.zIndex
         self.ports = device.ports.map { ExportablePort(from: $0) }
+        self.docs = device.docs.map { ExportableDocLink(from: $0) }
     }
 }
 
@@ -544,5 +546,21 @@ struct ExportableConnection: Codable {
         self.cableRaw = connection.cableRaw
         self.label = connection.label
         self.notes = connection.notes
+    }
+}
+
+struct ExportableDocLink: Codable {
+    let id: UUID
+    let title: String
+    let kindRaw: String
+    let urlString: String?
+    let localBookmarkData: Data?
+    
+    init(from docLink: DocLink) {
+        self.id = docLink.id
+        self.title = docLink.title
+        self.kindRaw = docLink.kindRaw
+        self.urlString = docLink.urlString
+        self.localBookmarkData = docLink.localBookmarkData
     }
 }

@@ -1637,34 +1637,39 @@ struct StudioCanvasView: View {
             incoming[conn.toDeviceId, default: []].insert(conn.fromDeviceId)
         }
 
-        // SIMPLIFIED 3-TIER HIERARCHY
-        // Tier 0: Computers
-        // Tier 1: Interfaces and ADAT expanders
-        // Tier 2: Everything else
+        // PYRAMID STRUCTURE - 3 HORIZONTAL ROWS
+        // Row 0 (Top): Computers
+        // Row 1 (Middle): Digital devices - interfaces, ADAT expanders, digital mixers
+        // Row 2 (Bottom): Analog input devices - instruments, microphones, keyboards, etc.
 
-        var deviceTiers: [UUID: Int] = [:]
+        var deviceRows: [UUID: Int] = [:]
 
         for device in studio.devices {
             if device.category == .computer {
-                deviceTiers[device.id] = 0
+                deviceRows[device.id] = 0  // Top row
             } else if device.category == .audioInterface
                 || device.category == .adatExpander
+                || device.category == .digitalMixer
+                || device.adatInputPortsCount > 0
+                || device.adatOutputPortsCount > 0
+                || device.madiInputPortsCount > 0
+                || device.madiOutputPortsCount > 0
             {
-                deviceTiers[device.id] = 1
+                deviceRows[device.id] = 1  // Middle row - digital devices
             } else {
-                deviceTiers[device.id] = 2
+                deviceRows[device.id] = 2  // Bottom row - analog input devices
             }
         }
 
-        // Group devices by tier
+        // Group devices by row
         var layerGroups: [[DeviceInstance]] = [[], [], []]
 
         for device in studio.devices {
-            let tier = deviceTiers[device.id] ?? 2
-            layerGroups[tier].append(device)
+            let row = deviceRows[device.id] ?? 2
+            layerGroups[row].append(device)
         }
 
-        // Sort within each tier by category then nickname
+        // Sort within each row by category then nickname
         func categoryPriority(_ category: DeviceCategory) -> Int {
             switch category {
             case .computer: return 0
@@ -1685,10 +1690,10 @@ struct StudioCanvasView: View {
             }
         }
 
-        // Remove empty tiers
+        // Remove empty rows
         layerGroups = layerGroups.filter { !$0.isEmpty }
 
-        // Calculate layout to fit viewport - ensure everything is visible
+        // Calculate layout to fit viewport - PYRAMID structure
         let deviceCardHeight: Double = 96
         let deviceCardWidth: Double = 260
         let padding: Double = 50  // Padding from edges
@@ -1697,51 +1702,32 @@ struct StudioCanvasView: View {
         let targetWidth: Double = 1200
         let targetHeight: Double = 700
 
-        // Find max devices in any tier
-        let maxDevicesInTier = layerGroups.map { $0.count }.max() ?? 1
+        // Find max devices in any row
+        let maxDevicesInRow = layerGroups.map { $0.count }.max() ?? 1
 
-        // Calculate required space
-        let numTiers = layerGroups.count
-        let totalRequiredWidth = Double(numTiers) * deviceCardWidth
-        let totalRequiredHeight = Double(maxDevicesInTier) * deviceCardHeight
+        // Calculate spacing
+        let numRows = layerGroups.count
+        let horizontalSpacing: Double = 80  // Space between devices horizontally
+        let verticalSpacing: Double = 150  // Space between rows vertically
 
-        // Calculate spacing - ensure it fits
-        let availableWidthForSpacing =
-            targetWidth - totalRequiredWidth - (2 * padding)
-        let horizontalSpacing =
-            numTiers > 1
-            ? max(60, availableWidthForSpacing / Double(numTiers - 1)) : 0
-
-        let availableHeightForSpacing =
-            targetHeight - totalRequiredHeight - (2 * padding)
-        let verticalSpacing =
-            maxDevicesInTier > 1
-            ? max(30, availableHeightForSpacing / Double(maxDevicesInTier - 1))
-            : 0
-
-        // Position devices
-        // Note: Device positions are the CENTER of the card, so we need to account for half the card size
+        // Position devices in pyramid structure
+        // Note: Device positions are the CENTER of the card
         let halfCardWidth = deviceCardWidth / 2
         let halfCardHeight = deviceCardHeight / 2
 
-        for (tierIndex, devicesInTier) in layerGroups.enumerated() {
-            // Calculate x position for this tier's center (accounting for card width)
-            let x =
-                padding + halfCardWidth + Double(tierIndex)
-                * (deviceCardWidth + horizontalSpacing)
+        for (rowIndex, devicesInRow) in layerGroups.enumerated() {
+            // Calculate Y position for this row
+            let y = padding + halfCardHeight + Double(rowIndex) * (deviceCardHeight + verticalSpacing)
 
-            // Center this tier vertically
-            let tierHeight =
-                Double(devicesInTier.count) * deviceCardHeight + Double(
-                    max(0, devicesInTier.count - 1)
-                ) * verticalSpacing
-            let tierStartY =
-                padding + halfCardHeight + (targetHeight - tierHeight) / 2
+            // Calculate total width needed for this row
+            let rowWidth = Double(devicesInRow.count) * deviceCardWidth + 
+                          Double(max(0, devicesInRow.count - 1)) * horizontalSpacing
 
-            for (index, device) in devicesInTier.enumerated() {
-                let y =
-                    tierStartY + Double(index)
-                    * (deviceCardHeight + verticalSpacing)
+            // Center this row horizontally
+            let rowStartX = (targetWidth - rowWidth) / 2 + halfCardWidth
+
+            for (index, device) in devicesInRow.enumerated() {
+                let x = rowStartX + Double(index) * (deviceCardWidth + horizontalSpacing)
                 device.posX = x
                 device.posY = y
             }
@@ -3539,20 +3525,37 @@ private struct ConnectionLineView: View {
     // Generate arrowheads (one or two depending on directionality)
     private func arrowheads() -> Path {
         var arrows = Path()
+        
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let distance = sqrt(dx * dx + dy * dy)
 
         if isBidirectional {
-            // Two arrows: one at 40% and one at 60%
-            let point1 = pointOnCurve(t: 0.4)
-            let angle1 = tangentAngle(t: 0.4)
+            // Two arrows positioned along the actual line
+            // For bidirectional, place them at 35% and 65% of total distance
+            let normalizedDx = dx / distance
+            let normalizedDy = dy / distance
+            
+            let point1 = CGPoint(
+                x: from.x + normalizedDx * distance * 0.35,
+                y: from.y + normalizedDy * distance * 0.35
+            )
+            let angle1 = atan2(dy, dx)
             arrows.addPath(makeArrow(at: point1, angle: angle1))
-
-            let point2 = pointOnCurve(t: 0.6)
-            let angle2 = tangentAngle(t: 0.6) + .pi  // Reverse direction
+            
+            let point2 = CGPoint(
+                x: from.x + normalizedDx * distance * 0.65,
+                y: from.y + normalizedDy * distance * 0.65
+            )
+            let angle2 = atan2(dy, dx) + .pi  // Reverse direction
             arrows.addPath(makeArrow(at: point2, angle: angle2))
         } else {
             // Single arrow at midpoint
-            let midPoint = pointOnCurve(t: 0.5)
-            let angle = tangentAngle(t: 0.5)
+            let midPoint = CGPoint(
+                x: from.x + dx * 0.5,
+                y: from.y + dy * 0.5
+            )
+            let angle = atan2(dy, dx)
             arrows.addPath(makeArrow(at: midPoint, angle: angle))
         }
 

@@ -50,6 +50,9 @@ struct StudioCanvasView: View {
 
     // Connection Legend
     @State private var isShowingConnectionLegend: Bool = false
+    
+    // Connection Matrix View
+    @State private var isShowingMatrixView: Bool = false
 
     // Selection (devices/connections)
     @StateObject private var selectionState = SelectionState()
@@ -224,6 +227,21 @@ struct StudioCanvasView: View {
         .sheet(isPresented: $isShowingConnectionLegend) {
             ConnectionLegendView()
         }
+        #if os(macOS)
+        .sheet(isPresented: $isShowingMatrixView) {
+            if let studio = studios.first(where: { $0.id == selectedStudioId }) {
+                ConnectionMatrixView(studio: studio, connectionsStore: connectionsStore)
+                    .frame(minWidth: 1200, maxWidth: .infinity, minHeight: 800, maxHeight: .infinity)
+                    .presentationSizing(.fitted)
+            }
+        }
+        #else
+        .fullScreenCover(isPresented: $isShowingMatrixView) {
+            if let studio = studios.first(where: { $0.id == selectedStudioId }) {
+                ConnectionMatrixView(studio: studio, connectionsStore: connectionsStore)
+            }
+        }
+        #endif
         .fileExporter(
             isPresented: $isShowingExportPicker,
             document: exportDocument,
@@ -305,6 +323,15 @@ struct StudioCanvasView: View {
                         Label("Auto-Arrange", systemImage: "square.grid.3x2")
                     }
                     .help("Automatically arrange devices by signal flow")
+                }
+                
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        isShowingMatrixView.toggle()
+                    } label: {
+                        Label("Connection Matrix", systemImage: "tablecells")
+                    }
+                    .help("View connections in spreadsheet format")
                 }
             }
 
@@ -2515,9 +2542,11 @@ private struct DeviceCardView: View {
     @EnvironmentObject var selection: SelectionState
     @State private var isDraggingConnection: Bool = false
     
+    @Environment(\.colorScheme) private var colorScheme
+    
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 12)
-            .fill(Color(white: 0.85))
+            .fill(colorScheme == .dark ? Color(white: 0.25) : Color(white: 0.85))
     }
     
     private var cardBorder: some View {
@@ -5021,4 +5050,181 @@ private struct LegendRow: View {
         }
         .padding(.vertical, 4)
     }
+}
+
+// MARK: - Connection Matrix View
+
+private struct ConnectionMatrixView: View {
+    let studio: Studio
+    let connectionsStore: ConnectionsStore
+    @Environment(\.dismiss) private var dismiss
+    
+    private var links: [ConnectionLinkSummary] {
+        connectionsStore.links(for: studio.id)
+    }
+    
+    // Build a map of device pairs to their connection info
+    private var connectionMap: [String: ConnectionInfo] {
+        var map: [String: ConnectionInfo] = [:]
+        
+        for link in links {
+            guard let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id),
+                  !bundle.edges.isEmpty else { continue }
+            
+            let key = "\(link.fromDeviceId)_\(link.toDeviceId)"
+            
+            // Analyze connection types and channel count
+            var typeCounts: [ConnectionVisualType: Int] = [:]
+            var uniqueChannels: Set<String> = []  // Track unique from.channelId
+            
+            for edge in bundle.edges {
+                // Count unique channels (avoid counting duplicates)
+                uniqueChannels.insert(edge.from.channelId.uuidString)
+                
+                if let device = studio.devices.first(where: { $0.id == edge.from.deviceId }),
+                   let port = device.ports.first(where: { $0.id == edge.from.portId }) {
+                    let visualType = ConnectionVisualType.from(portType: port.type)
+                    typeCounts[visualType, default: 0] += 1
+                } else if let device = studio.devices.first(where: { $0.id == edge.from.deviceId }),
+                          !device.computerInterfaceCounts.isEmpty {
+                    // Computer interface virtual port
+                    typeCounts[.computer, default: 0] += 1
+                }
+            }
+            
+            let types = typeCounts.sorted { $0.value > $1.value }.map { $0.key }
+            // Use unique channel count if available, otherwise fall back to edge count
+            let channelCount = uniqueChannels.isEmpty ? bundle.edges.count : uniqueChannels.count
+            map[key] = ConnectionInfo(
+                types: types.isEmpty ? [.unknown] : types,
+                channelCount: channelCount
+            )
+        }
+        
+        return map
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Main scrollable matrix
+                ScrollView([.horizontal, .vertical]) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Header row
+                        HStack(spacing: 0) {
+                            // Top-left corner cell
+                            Text("From \\ To")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .frame(width: 120, height: 40, alignment: .center)
+                                .background(Color(white: 0.15).opacity(0.2))
+                                .border(Color.secondary.opacity(0.3))
+                            
+                            // Column headers (destination devices)
+                            ForEach(studio.devices, id: \.id) { device in
+                                Text(device.nickname)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .frame(width: 100, height: 40, alignment: .center)
+                                    .background(Color(white: 0.15).opacity(0.1))
+                                    .border(Color.secondary.opacity(0.3))
+                            }
+                        }
+                        
+                        // Data rows
+                        ForEach(studio.devices, id: \.id) { fromDevice in
+                            HStack(spacing: 0) {
+                                // Row header (source device)
+                                Text(fromDevice.nickname)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .frame(width: 120, height: 60, alignment: .center)
+                                    .background(Color(white: 0.15).opacity(0.1))
+                                    .border(Color.secondary.opacity(0.3))
+                                
+                                // Connection cells
+                                ForEach(studio.devices, id: \.id) { toDevice in
+                                    connectionCell(from: fromDevice, to: toDevice)
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                }
+                
+                // Color legend at bottom
+                Divider()
+                
+                HStack(spacing: 24) {
+                    legendItem(color: .blue, label: "Analog")
+                    legendItem(color: .green, label: "Digital (ADAT/MADI/S/PDIF)")
+                    legendItem(color: .purple, label: "MIDI")
+                    legendItem(color: .orange, label: "Computer (USB/Thunderbolt/Ethernet)")
+                }
+                .padding()
+                .background(Color.secondary.opacity(0.1))
+            }
+            .navigationTitle("Connection Matrix")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 12, height: 12)
+            Text(label)
+                .font(.caption)
+        }
+    }
+    
+    @ViewBuilder
+    private func connectionCell(from fromDevice: DeviceInstance, to toDevice: DeviceInstance) -> some View {
+        let key = "\(fromDevice.id)_\(toDevice.id)"
+        
+        if let info = connectionMap[key] {
+            // Has connection
+            VStack(spacing: 2) {
+                // Connection type indicator
+                HStack(spacing: 2) {
+                    ForEach(Array(info.types.prefix(3)), id: \.self) { type in
+                        Circle()
+                            .fill(type.color)
+                            .frame(width: 8, height: 8)
+                    }
+                }
+                
+                // Channel count
+                Text("\(info.channelCount)ch")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 100, height: 60)
+            .background(info.types.first?.color.opacity(0.15) ?? Color.clear)
+            .border(Color.secondary.opacity(0.3))
+        } else if fromDevice.id == toDevice.id {
+            // Diagonal - same device
+            Rectangle()
+                .fill(Color.secondary.opacity(0.05))
+                .frame(width: 100, height: 60)
+                .border(Color.secondary.opacity(0.3))
+        } else {
+            // No connection
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 100, height: 60)
+                .border(Color.secondary.opacity(0.3))
+        }
+    }
+}
+
+private struct ConnectionInfo {
+    let types: [ConnectionVisualType]
+    let channelCount: Int
 }

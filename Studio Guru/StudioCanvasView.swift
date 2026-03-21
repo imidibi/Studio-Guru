@@ -5116,18 +5116,26 @@ private struct ConnectionMatrixView: View {
                             Text("From \\ To")
                                 .font(.caption)
                                 .fontWeight(.semibold)
-                                .frame(width: 120, height: 40, alignment: .center)
+                                .frame(width: 120, height: 60, alignment: .center)
                                 .background(Color(white: 0.15).opacity(0.2))
                                 .border(Color.secondary.opacity(0.3))
                             
                             // Column headers (destination devices)
                             ForEach(studio.devices, id: \.id) { device in
-                                Text(device.nickname)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .frame(width: 100, height: 40, alignment: .center)
-                                    .background(Color(white: 0.15).opacity(0.1))
-                                    .border(Color.secondary.opacity(0.3))
+                                VStack(spacing: 2) {
+                                    Text(device.nickname)
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(1)
+                                    Text(ioSummary(for: device))
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(width: 100, height: 60, alignment: .center)
+                                .background(Color(white: 0.15).opacity(0.1))
+                                .border(Color.secondary.opacity(0.3))
                             }
                         }
                         
@@ -5135,12 +5143,20 @@ private struct ConnectionMatrixView: View {
                         ForEach(studio.devices, id: \.id) { fromDevice in
                             HStack(spacing: 0) {
                                 // Row header (source device)
-                                Text(fromDevice.nickname)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .frame(width: 120, height: 60, alignment: .center)
-                                    .background(Color(white: 0.15).opacity(0.1))
-                                    .border(Color.secondary.opacity(0.3))
+                                VStack(spacing: 2) {
+                                    Text(fromDevice.nickname)
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(1)
+                                    Text(ioSummary(for: fromDevice))
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(width: 120, height: 60, alignment: .center)
+                                .background(Color(white: 0.15).opacity(0.1))
+                                .border(Color.secondary.opacity(0.3))
                                 
                                 // Connection cells
                                 ForEach(studio.devices, id: \.id) { toDevice in
@@ -5182,6 +5198,54 @@ private struct ConnectionMatrixView: View {
             Text(label)
                 .font(.caption)
         }
+    }
+    
+    private func ioSummary(for device: DeviceInstance) -> String {
+        var parts: [String] = []
+        
+        // Analog I/O
+        if device.audioInputsCount > 0 || device.audioOutputsCount > 0 {
+            parts.append("Analog \(device.audioInputsCount)/\(device.audioOutputsCount)")
+        }
+        
+        // ADAT
+        let adatIn = device.adatInputPortsCount * 8
+        let adatOut = device.adatOutputPortsCount * 8
+        if adatIn > 0 || adatOut > 0 {
+            parts.append("ADAT \(adatIn)/\(adatOut)")
+        }
+        
+        // MADI
+        let madiIn = device.madiInputPortsCount * 64
+        let madiOut = device.madiOutputPortsCount * 64
+        if madiIn > 0 || madiOut > 0 {
+            parts.append("MADI \(madiIn)/\(madiOut)")
+        }
+        
+        // Digital I/O (MIDI, S/PDIF, etc.)
+        var digitalIns = 0
+        var digitalOuts = 0
+        for input in device.digitalInputs {
+            switch input {
+            case .spdif: digitalIns += 2
+            case .aesebu: digitalIns += 2
+            case .midi: digitalIns += 1
+            default: break
+            }
+        }
+        for output in device.digitalOutputs {
+            switch output {
+            case .spdif: digitalOuts += 2
+            case .aesebu: digitalOuts += 2
+            case .midi: digitalOuts += 1
+            default: break
+            }
+        }
+        if digitalIns > 0 || digitalOuts > 0 {
+            parts.append("Digital \(digitalIns)/\(digitalOuts)")
+        }
+        
+        return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
     }
     
     @ViewBuilder

@@ -10,6 +10,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import CryptoKit
 import Combine
+import SwiftData
 
 
 // MARK: - Connections Data Models + Store
@@ -114,11 +115,95 @@ struct ConnectionBundle: Identifiable, Hashable, Codable {
 @MainActor
 final class ConnectionsStore: ObservableObject {
     @Published private(set) var bundlesByStudio: [UUID: [String: ConnectionBundle]] = [:]
+    
+    private var modelContext: ModelContext?
+    private var migrationCompleted: Bool = false
 
     init() {}
+    
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
+        // Migrate UserDefaults data to SwiftData if needed
+        if !migrationCompleted {
+            migrateFromUserDefaults()
+            migrationCompleted = true
+        }
+    }
+    
+    private func migrateFromUserDefaults() {
+        guard let context = modelContext else { return }
+        
+        // Check if we have any UserDefaults data to migrate
+        let defaults = UserDefaults.standard
+        let allKeys = defaults.dictionaryRepresentation().keys
+        let connectionKeys = allKeys.filter { $0.hasPrefix("studio-guru.connections.") }
+        
+        guard !connectionKeys.isEmpty else { return }
+        
+        for key in connectionKeys {
+            guard let data = defaults.data(forKey: key),
+                  let decoded = try? JSONDecoder().decode([String: ConnectionBundle].self, from: data) else {
+                continue
+            }
+            
+            // Extract studioId from key: "studio-guru.connections.<UUID>"
+            let components = key.split(separator: ".")
+            guard components.count >= 3,
+                  let studioId = UUID(uuidString: String(components[2])) else {
+                continue
+            }
+            
+            // Migrate each bundle to SwiftData
+            for (_, bundle) in decoded {
+                saveBundleToSwiftData(studioId: studioId, bundle: bundle, context: context)
+            }
+            
+            // Remove from UserDefaults after successful migration
+            defaults.removeObject(forKey: key)
+        }
+        
+        try? context.save()
+    }
+    
+    private func saveBundleToSwiftData(studioId: UUID, bundle: ConnectionBundle, context: ModelContext) {
+        let bundleModel = ConnectionBundleModel(
+            id: bundle.id,
+            studioId: studioId,
+            fromDeviceId: bundle.fromDeviceId,
+            toDeviceId: bundle.toDeviceId
+        )
+        
+        // Add edges
+        for edge in bundle.edges {
+            let edgeModel = ConnectionEdgeModel(
+                id: edge.id,
+                fromDeviceId: edge.from.deviceId,
+                fromPortId: edge.from.portId,
+                fromChannelId: edge.from.channelId,
+                fromDirection: edge.from.direction.rawValue,
+                toDeviceId: edge.to.deviceId,
+                toPortId: edge.to.portId,
+                toChannelId: edge.to.channelId,
+                toDirection: edge.to.direction.rawValue,
+                fromName: edge.fromName,
+                toName: edge.toName
+            )
+            bundleModel.edges?.append(edgeModel)
+            context.insert(edgeModel)
+        }
+        
+        // Add endpoint names
+        for (key, name) in bundle.endpointNames {
+            let nameModel = EndpointNameModel(endpointKey: key, name: name)
+            bundleModel.endpointNames?.append(nameModel)
+            context.insert(nameModel)
+        }
+        
+        context.insert(bundleModel)
+    }
 
     /// Ensure a bundle exists for the device pair so the main canvas can render a link.
-    func ensureLinkSummary(studioId: UUID, fromId: UUID, toId: UUID) {
+    func ensureLinkSummary(studioId: UUID, fromId: UUID, toId: UUID, studio: Studio? = nil) {
         _ = ensureBundle(studioId: studioId, fromId: fromId, toId: toId)
     }
 
@@ -261,14 +346,14 @@ final class ConnectionsStore: ObservableObject {
         }
 
         // 2) Fall back to device port/channel labels
-        guard let device = studio.devices.first(where: { $0.id == endpoint.deviceId }) else {
+        guard let device = studio.devices?.first(where: { $0.id == endpoint.deviceId }) else {
             return "(Unknown)"
         }
 
         // Regular device ports
-        if let p = device.ports.first(where: { $0.id == endpoint.portId }) {
+        if let p = device.ports?.first(where: { $0.id == endpoint.portId }) {
             let portName = p.name
-            if let ch = p.channels.first(where: { $0.id == endpoint.channelId }) {
+            if let ch = p.channels?.first(where: { $0.id == endpoint.channelId }) {
                 let short = ch.nameShort.trimmingCharacters(in: .whitespacesAndNewlines)
                 return short.isEmpty ? portName : "\(portName) \(short)"
             }
@@ -296,7 +381,7 @@ final class ConnectionsStore: ObservableObject {
     func connectedToText(studio: Studio, studioId: UUID, endpoint: IOEndpointRef) -> String? {
         guard let occ = occupancyForEndpoint(studioId: studioId, endpoint: endpoint) else { return nil }
 
-        let otherDeviceName = studio.devices.first(where: { $0.id == occ.otherEndpoint.deviceId })?.nickname ?? "(Unknown Device)"
+        let otherDeviceName = studio.devices?.first(where: { $0.id == occ.otherEndpoint.deviceId })?.nickname ?? "(Unknown Device)"
 
         // Prefer other endpoint's user-entered name (from bundle.endpointNames), else edge-provided name, else model label.
         let otherLabelFromNames = endpointDisplayLabel(studio: studio, bundle: occ.bundle, endpoint: occ.otherEndpoint)
@@ -315,17 +400,104 @@ final class ConnectionsStore: ObservableObject {
     }
 
     func load(studioId: UUID) {
+        guard let context = modelContext else {
+            // Fallback to UserDefaults for backward compatibility
+            loadFromUserDefaults(studioId: studioId)
+            return
+        }
+        
+        // Load from SwiftData
+        let descriptor = FetchDescriptor<ConnectionBundleModel>(
+            predicate: #Predicate { $0.studioId == studioId }
+        )
+        
+        guard let bundleModels = try? context.fetch(descriptor) else { return }
+        
+        var bundles: [String: ConnectionBundle] = [:]
+        for bundleModel in bundleModels {
+            let bundle = convertToConnectionBundle(bundleModel)
+            bundles[bundle.normalizedPairKey] = bundle
+        }
+        
+        bundlesByStudio[studioId] = bundles
+    }
+    
+    private func loadFromUserDefaults(studioId: UUID) {
         let key = persistenceKey(studioId)
         guard let data = UserDefaults.standard.data(forKey: key) else { return }
         do {
-            let decoded = try JSONDecoder().decode([String: ConnectionBundle].self, from: data)
+            let decoded = try? JSONDecoder().decode([String: ConnectionBundle].self, from: data)
             bundlesByStudio[studioId] = decoded
-        } catch {
-            print("ConnectionsStore.load decode error:", error)
         }
+    }
+    
+    private func convertToConnectionBundle(_ model: ConnectionBundleModel) -> ConnectionBundle {
+        var bundle = ConnectionBundle(
+            id: model.id,
+            fromDeviceId: model.fromDeviceId,
+            toDeviceId: model.toDeviceId
+        )
+        
+        // Convert edges
+        for edgeModel in model.edges ?? [] {
+            let fromRef = IOEndpointRef(
+                deviceId: edgeModel.fromDeviceId,
+                portId: edgeModel.fromPortId,
+                channelId: edgeModel.fromChannelId,
+                direction: IOEndpointRef.Direction(rawValue: edgeModel.fromDirection) ?? .output
+            )
+            let toRef = IOEndpointRef(
+                deviceId: edgeModel.toDeviceId,
+                portId: edgeModel.toPortId,
+                channelId: edgeModel.toChannelId,
+                direction: IOEndpointRef.Direction(rawValue: edgeModel.toDirection) ?? .input
+            )
+            let edge = ConnectionEdge(
+                id: edgeModel.id,
+                from: fromRef,
+                to: toRef,
+                fromName: edgeModel.fromName,
+                toName: edgeModel.toName
+            )
+            bundle.edges.append(edge)
+        }
+        
+        // Convert endpoint names
+        for nameModel in model.endpointNames ?? [] {
+            bundle.endpointNames[nameModel.endpointKey] = nameModel.name
+        }
+        
+        return bundle
     }
 
     func persist(studioId: UUID) {
+        guard let context = modelContext else {
+            // Fallback to UserDefaults
+            persistToUserDefaults(studioId: studioId)
+            return
+        }
+        
+        guard let bundles = bundlesByStudio[studioId] else { return }
+        
+        // Delete existing bundles for this studio
+        let descriptor = FetchDescriptor<ConnectionBundleModel>(
+            predicate: #Predicate { $0.studioId == studioId }
+        )
+        if let existing = try? context.fetch(descriptor) {
+            for bundle in existing {
+                context.delete(bundle)
+            }
+        }
+        
+        // Insert new bundles
+        for (_, bundle) in bundles {
+            saveBundleToSwiftData(studioId: studioId, bundle: bundle, context: context)
+        }
+        
+        try? context.save()
+    }
+    
+    private func persistToUserDefaults(studioId: UUID) {
         let key = persistenceKey(studioId)
         let bundles = bundlesByStudio[studioId] ?? [:]
         DispatchQueue.global(qos: .utility).async {
@@ -345,7 +517,7 @@ final class ConnectionsStore: ObservableObject {
         
         // Group connections by device pair
         var connectionsByPair: [String: [Connection]] = [:]
-        for connection in studio.connections {
+        for connection in studio.connections ?? [] {
             let key = normalizedPairKey(connection.fromDeviceId, connection.toDeviceId)
             connectionsByPair[key, default: []].append(connection)
         }
@@ -456,8 +628,8 @@ struct ConnectionsDialogView: View {
         _workingBundle = State(initialValue: b)
     }
 
-    private var fromDevice: DeviceInstance? { studio.devices.first(where: { $0.id == fromDeviceId }) }
-    private var toDevice: DeviceInstance? { studio.devices.first(where: { $0.id == toDeviceId }) }
+    private var fromDevice: DeviceInstance? { studio.devices?.first(where: { $0.id == fromDeviceId }) }
+    private var toDevice: DeviceInstance? { studio.devices?.first(where: { $0.id == toDeviceId }) }
 
     var body: some View {
         NavigationStack {
@@ -762,6 +934,12 @@ struct ConnectionsDialogView: View {
             return
         }
 
+        // Check if this is an ADAT connection - if so, connect all channels in the port
+        if isADATConnection(output: output, input: input) {
+            stageADATPortConnection(output: output, input: input)
+            return
+        }
+
         // Bundle-local conflict
         if workingBundle.edges.contains(where: { $0.to == input }) {
             pendingEdge = (from: output, to: input)
@@ -785,6 +963,65 @@ struct ConnectionsDialogView: View {
         }
 
         applyEdgeToWorkingBundle(output, input)
+    }
+    
+    private func isADATConnection(output: IOEndpointRef, input: IOEndpointRef) -> Bool {
+        let outR = resolveEndpoint(output)
+        let inR = resolveEndpoint(input)
+        
+        if case let .devicePort(type: outType, portName: _) = outR.kind,
+           case let .devicePort(type: inType, portName: _) = inR.kind {
+            return (outType == .adatOut && inType == .adatIn) ||
+                   (outType == .spdifOut && inType == .spdifIn)
+        }
+        return false
+    }
+    
+    private func stageADATPortConnection(output: IOEndpointRef, input: IOEndpointRef) {
+        // Find the ports for both endpoints
+        guard let fromDevice = fromDevice,
+              let toDevice = toDevice,
+              let outPort = fromDevice.ports?.first(where: { $0.id == output.portId }),
+              let inPort = toDevice.ports?.first(where: { $0.id == input.portId }) else {
+            return
+        }
+        
+        // Connect all channels in the port sequentially
+        let channelCount = min(outPort.channels?.count ?? 0, inPort.channels?.count ?? 0)
+        for i in 0..<channelCount {
+            guard let outChannel = outPort.channels?[i],
+                  let inChannel = inPort.channels?[i] else { continue }
+            
+            let outEndpoint = IOEndpointRef(
+                deviceId: output.deviceId,
+                portId: output.portId,
+                channelId: outChannel.id,
+                direction: .output
+            )
+            
+            let inEndpoint = IOEndpointRef(
+                deviceId: input.deviceId,
+                portId: input.portId,
+                channelId: inChannel.id,
+                direction: .input
+            )
+            
+            // Check for conflicts for each channel
+            let hasLocalConflict = workingBundle.edges.contains(where: { $0.to == inEndpoint })
+            let hasStudioConflict = store.conflictForDestinationInput(studioId: studio.id, destination: inEndpoint) != nil
+            
+            // Skip channels that are already connected or have conflicts
+            if !hasLocalConflict && !hasStudioConflict {
+                if let reason = validateEdge(output: outEndpoint, input: inEndpoint) {
+                    // If validation fails, show error and stop
+                    saveBlockedMessage = reason
+                    isShowingSaveBlockedAlert = true
+                    return
+                }
+                
+                applyEdgeToWorkingBundle(outEndpoint, inEndpoint)
+            }
+        }
     }
 
     private func applyEdgeToWorkingBundle(_ output: IOEndpointRef, _ input: IOEndpointRef) {
@@ -854,12 +1091,12 @@ struct ConnectionsDialogView: View {
     }
 
     private func resolveEndpoint(_ e: IOEndpointRef) -> ResolvedEndpoint {
-        guard let device = studio.devices.first(where: { $0.id == e.deviceId }) else {
+        guard let device = studio.devices?.first(where: { $0.id == e.deviceId }) else {
             return ResolvedEndpoint(kind: .unknown)
         }
 
         // 1) Try resolve as a regular device port
-        if let p = device.ports.first(where: { $0.id == e.portId }) {
+        if let p = device.ports?.first(where: { $0.id == e.portId }) {
             let t = p.type
             return ResolvedEndpoint(kind: .devicePort(type: t, portName: p.name))
         }
@@ -949,7 +1186,7 @@ fileprivate struct EndpointsColumnView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let device {
-                let ports = device.ports
+                let ports = (device.ports ?? [])
                     .filter { port in
                         (direction == .output && port.directionRaw == "output") ||
                         (direction == .input && port.directionRaw == "input")
@@ -962,7 +1199,7 @@ fileprivate struct EndpointsColumnView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        let channels = port.channels.sorted(by: { connectionChannelSortKey($0.nameShort) < connectionChannelSortKey($1.nameShort) })
+                        let channels = (port.channels ?? []).sorted(by: { connectionChannelSortKey($0.nameShort) < connectionChannelSortKey($1.nameShort) })
                         ForEach(channels, id: \.id) { ch in
                             let endpoint = IOEndpointRef(
                                 deviceId: device.id,

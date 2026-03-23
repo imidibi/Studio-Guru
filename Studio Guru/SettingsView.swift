@@ -6,9 +6,15 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var studios: [Studio]
+    
+    @State private var showingSyncReset = false
+    @State private var syncResetConfirmed = false
     
     var body: some View {
         NavigationStack {
@@ -25,6 +31,12 @@ struct SettingsView: View {
                         Text("Your studios sync automatically across all your devices using iCloud.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        
+                        if studios.count > 0 {
+                            Text("Currently syncing \(studios.count) studio\(studios.count == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Data Sync")
@@ -40,7 +52,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("• No configuration needed")
+                        Text("• Last modified data takes priority")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
@@ -50,6 +62,40 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("How It Works")
+                }
+                
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("If you see different data on different devices:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Text("1. Ensure both devices are online")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Text("2. Wait a few minutes for sync to complete")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Text("3. Force quit and relaunch the app on both devices")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Text("4. The most recently saved changes will appear on all devices")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Button(role: .destructive) {
+                        showingSyncReset = true
+                    } label: {
+                        Label("Reset Sync & Use This Device's Data", systemImage: "arrow.triangle.2.circlepath.icloud")
+                    }
+                } header: {
+                    Text("Troubleshooting")
+                } footer: {
+                    Text("Use 'Reset Sync' only if data isn't syncing properly. This will upload this device's data to iCloud and other devices will download it.")
                 }
                 
                 Section {
@@ -86,7 +132,38 @@ struct SettingsView: View {
                     }
                 }
             }
+            .alert("Reset iCloud Sync?", isPresented: $showingSyncReset) {
+                Button("Cancel", role: .cancel) {}
+                Button("Reset & Upload This Data", role: .destructive) {
+                    resetSyncAndForceUpload()
+                }
+            } message: {
+                Text("This will mark all data on this device as 'new' and upload it to iCloud. Other devices will download this data. Use this if sync seems stuck.\n\nIMPORTANT: Make sure this device has the data you want to keep!")
+            }
         }
+    }
+    
+    private func resetSyncAndForceUpload() {
+        // Touch all studios to update their modification dates
+        // This makes CloudKit prioritize this device's data
+        for studio in studios {
+            // Update timestamp by accessing and re-setting a property
+            let currentName = studio.name
+            studio.name = currentName
+            
+            // Same for devices
+            for device in studio.devices ?? [] {
+                let currentNickname = device.nickname
+                device.nickname = currentNickname
+            }
+        }
+        
+        // Save to trigger CloudKit sync
+        try? modelContext.save()
+        
+        #if DEBUG
+        print("🔄 Sync reset: Updated \(studios.count) studios to force upload to iCloud")
+        #endif
     }
 }
 

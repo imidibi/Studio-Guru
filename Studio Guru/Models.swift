@@ -104,12 +104,12 @@ enum SampleRate: Int, Codable, CaseIterable {
 
 @Model
 final class Studio {
-    @Attribute(.unique) var id: UUID
-    var name: String
-    var createdAt: Date
+    var id: UUID = UUID()
+    var name: String = ""
+    var createdAt: Date = Date()
 
-    @Relationship(deleteRule: .cascade) var devices: [DeviceInstance]
-    @Relationship(deleteRule: .cascade) var connections: [Connection]
+    @Relationship(deleteRule: .cascade, inverse: \DeviceInstance.studio) var devices: [DeviceInstance]? = []
+    @Relationship(deleteRule: .cascade, inverse: \Connection.studio) var connections: [Connection]? = []
 
     init(name: String) {
         self.id = UUID()
@@ -124,56 +124,58 @@ final class Studio {
 
 @Model
 final class DeviceInstance {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
-    var manufacturer: String
-    var model: String
-    var nickname: String
+    var manufacturer: String = ""
+    var model: String = ""
+    var nickname: String = ""
 
     // Core metadata
-    var categoryRaw: String
-    var serialNumber: String
-    var location: String
+    var categoryRaw: String = DeviceCategory.other.rawValue
+    var serialNumber: String = ""
+    var location: String = ""
 
     // External resources
     var supportPageURLString: String?
     var downloadsPageURLString: String?
 
     // I/O summary (high-level counts)
-    var audioInputsCount: Int
-    var audioOutputsCount: Int
+    var audioInputsCount: Int = 0
+    var audioOutputsCount: Int = 0
 
     // Digital audio port counts
-    var adatInputPortsCount: Int
-    var adatOutputPortsCount: Int
-    var madiInputPortsCount: Int
-    var madiOutputPortsCount: Int
+    var adatInputPortsCount: Int = 0
+    var adatOutputPortsCount: Int = 0
+    var madiInputPortsCount: Int = 0
+    var madiOutputPortsCount: Int = 0
 
     // Networking / control ports (used for Dante, remote control, etc.)
-    var ethernetPortsCount: Int
+    var ethernetPortsCount: Int = 0
 
-    var sampleRateRaw: Int
+    var sampleRateRaw: Int = SampleRate.hz48000.rawValue
 
     // Digital formats stored as raw strings
-    var digitalInputsRaw: [String]
-    var digitalOutputsRaw: [String]
+    var digitalInputsRaw: [String] = []
+    var digitalOutputsRaw: [String] = []
 
     // Computer interfaces (bi-directional host connections).
     // NOTE: This array supports quantities by allowing duplicates (e.g. ["USB", "USB"] means 2x USB).
-    var computerInterfacesRaw: [String]
+    var computerInterfacesRaw: [String] = []
 
     // Canvas placement
-    var posX: Double
-    var posY: Double
-    var scale: Double
-    var zIndex: Int
+    var posX: Double = 200
+    var posY: Double = 200
+    var scale: Double = 1.0
+    var zIndex: Int = 0
 
     // Optional image paths (sandbox)
     var frontImagePath: String?
     var rearImagePath: String?
 
-    @Relationship(deleteRule: .cascade) var ports: [Port]
-    @Relationship(deleteRule: .cascade) var docs: [DocLink]
+    @Relationship(deleteRule: .cascade, inverse: \Port.device) var ports: [Port]? = []
+    @Relationship(deleteRule: .cascade, inverse: \DocLink.device) var docs: [DocLink]? = []
+    
+    var studio: Studio?
 
     init(manufacturer: String,
          model: String,
@@ -287,13 +289,15 @@ final class DeviceInstance {
 
 @Model
 final class Port {
-    @Attribute(.unique) var id: UUID
-    var name: String
+    var id: UUID = UUID()
+    var name: String = ""
 
-    var typeRaw: String
-    var directionRaw: String
+    var typeRaw: String = PortType.usbAudio.rawValue
+    var directionRaw: String = PortDirection.bidirectional.rawValue
 
-    @Relationship(deleteRule: .cascade) var channels: [Channel]
+    @Relationship(deleteRule: .cascade, inverse: \Channel.port) var channels: [Channel]? = []
+    
+    var device: DeviceInstance?
 
     init(name: String, type: PortType, direction: PortDirection) {
         self.id = UUID()
@@ -316,12 +320,14 @@ final class Port {
 
 @Model
 final class Channel {
-    @Attribute(.unique) var id: UUID
-    var index: Int
-    var nameLong: String
-    var nameShort: String
-    var signalRaw: String
-    var groupingRaw: String
+    var id: UUID = UUID()
+    var index: Int = 0
+    var nameLong: String = ""
+    var nameShort: String = ""
+    var signalRaw: String = SignalType.audio.rawValue
+    var groupingRaw: String = ChannelGrouping.mono.rawValue
+    
+    var port: Port?
 
     init(index: Int,
          nameLong: String,
@@ -344,19 +350,21 @@ final class Channel {
 
 @Model
 final class Connection {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
-    var fromDeviceId: UUID
-    var fromPortId: UUID
-    var fromChannelId: UUID
+    var fromDeviceId: UUID = UUID()
+    var fromPortId: UUID = UUID()
+    var fromChannelId: UUID = UUID()
 
-    var toDeviceId: UUID
-    var toPortId: UUID
-    var toChannelId: UUID
+    var toDeviceId: UUID = UUID()
+    var toPortId: UUID = UUID()
+    var toChannelId: UUID = UUID()
 
-    var cableRaw: String
-    var label: String
+    var cableRaw: String = CableType.other.rawValue
+    var label: String = ""
     var notes: String?
+    
+    var studio: Studio?
 
     init(fromDeviceId: UUID,
          fromPortId: UUID,
@@ -386,12 +394,14 @@ final class Connection {
 
 @Model
 final class DocLink {
-    @Attribute(.unique) var id: UUID
-    var title: String
-    var kindRaw: String
+    var id: UUID = UUID()
+    var title: String = ""
+    var kindRaw: String = DocKind.other.rawValue
 
     var urlString: String?
     var localBookmarkData: Data?
+    
+    var device: DeviceInstance?
 
     init(title: String, kind: DocKind, url: URL) {
         self.id = UUID()
@@ -415,7 +425,7 @@ final class DocLink {
 // MARK: - Export/Import Data Structures
 
 /// Codable representation of a studio for export/import
-struct ExportableStudio: Codable {
+struct ExportableStudio: Codable, Sendable {
     let name: String
     let devices: [ExportableDevice]
     let connections: [ExportableConnection]
@@ -424,14 +434,14 @@ struct ExportableStudio: Codable {
     
     init(from studio: Studio) {
         self.name = studio.name
-        self.devices = studio.devices.map { ExportableDevice(from: $0) }
-        self.connections = studio.connections.map { ExportableConnection(from: $0) }
+        self.devices = (studio.devices ?? []).map { ExportableDevice(from: $0) }
+        self.connections = (studio.connections ?? []).map { ExportableConnection(from: $0) }
         self.exportDate = Date()
         self.appVersion = "1.0"
     }
 }
 
-struct ExportableDevice: Codable {
+struct ExportableDevice: Codable, Sendable {
     let id: UUID
     let manufacturer: String
     let model: String
@@ -484,12 +494,12 @@ struct ExportableDevice: Codable {
         self.posY = device.posY
         self.scale = device.scale
         self.zIndex = device.zIndex
-        self.ports = device.ports.map { ExportablePort(from: $0) }
-        self.docs = device.docs.map { ExportableDocLink(from: $0) }
+        self.ports = (device.ports ?? []).map { ExportablePort(from: $0) }
+        self.docs = (device.docs ?? []).map { ExportableDocLink(from: $0) }
     }
 }
 
-struct ExportablePort: Codable {
+struct ExportablePort: Codable, Sendable {
     let id: UUID
     let name: String
     let typeRaw: String
@@ -501,11 +511,11 @@ struct ExportablePort: Codable {
         self.name = port.name
         self.typeRaw = port.typeRaw
         self.directionRaw = port.directionRaw
-        self.channels = port.channels.map { ExportableChannel(from: $0) }
+        self.channels = (port.channels ?? []).map { ExportableChannel(from: $0) }
     }
 }
 
-struct ExportableChannel: Codable {
+struct ExportableChannel: Codable, Sendable {
     let id: UUID
     let index: Int
     let nameLong: String
@@ -523,7 +533,7 @@ struct ExportableChannel: Codable {
     }
 }
 
-struct ExportableConnection: Codable {
+struct ExportableConnection: Codable, Sendable {
     let id: UUID
     let fromDeviceId: UUID
     let fromPortId: UUID
@@ -549,7 +559,7 @@ struct ExportableConnection: Codable {
     }
 }
 
-struct ExportableDocLink: Codable {
+struct ExportableDocLink: Codable, Sendable {
     let id: UUID
     let title: String
     let kindRaw: String
@@ -562,5 +572,82 @@ struct ExportableDocLink: Codable {
         self.kindRaw = docLink.kindRaw
         self.urlString = docLink.urlString
         self.localBookmarkData = docLink.localBookmarkData
+    }
+}
+
+// MARK: - New Connection Bundle Models (replaces UserDefaults-based storage)
+
+@Model
+final class ConnectionBundleModel {
+    var id: UUID = UUID()
+    var studioId: UUID = UUID()
+    var fromDeviceId: UUID = UUID()
+    var toDeviceId: UUID = UUID()
+    
+    @Relationship(deleteRule: .cascade, inverse: \ConnectionEdgeModel.bundle) var edges: [ConnectionEdgeModel]? = []
+    @Relationship(deleteRule: .cascade, inverse: \EndpointNameModel.bundle) var endpointNames: [EndpointNameModel]? = []
+    
+    init(id: UUID = UUID(), studioId: UUID, fromDeviceId: UUID, toDeviceId: UUID) {
+        self.id = id
+        self.studioId = studioId
+        self.fromDeviceId = fromDeviceId
+        self.toDeviceId = toDeviceId
+        self.edges = []
+        self.endpointNames = []
+    }
+}
+
+@Model
+final class ConnectionEdgeModel {
+    var id: UUID = UUID()
+    
+    // From endpoint
+    var fromDeviceId: UUID = UUID()
+    var fromPortId: UUID = UUID()
+    var fromChannelId: UUID = UUID()
+    var fromDirection: String = "output"
+    
+    // To endpoint
+    var toDeviceId: UUID = UUID()
+    var toPortId: UUID = UUID()
+    var toChannelId: UUID = UUID()
+    var toDirection: String = "input"
+    
+    // Labels
+    var fromName: String = ""
+    var toName: String = ""
+    
+    var bundle: ConnectionBundleModel?
+    
+    init(id: UUID = UUID(),
+         fromDeviceId: UUID, fromPortId: UUID, fromChannelId: UUID, fromDirection: String,
+         toDeviceId: UUID, toPortId: UUID, toChannelId: UUID, toDirection: String,
+         fromName: String = "", toName: String = "") {
+        self.id = id
+        self.fromDeviceId = fromDeviceId
+        self.fromPortId = fromPortId
+        self.fromChannelId = fromChannelId
+        self.fromDirection = fromDirection
+        self.toDeviceId = toDeviceId
+        self.toPortId = toPortId
+        self.toChannelId = toChannelId
+        self.toDirection = toDirection
+        self.fromName = fromName
+        self.toName = toName
+    }
+}
+
+@Model
+final class EndpointNameModel {
+    var id: UUID = UUID()
+    var endpointKey: String = ""
+    var name: String = ""
+    
+    var bundle: ConnectionBundleModel?
+    
+    init(id: UUID = UUID(), endpointKey: String, name: String) {
+        self.id = id
+        self.endpointKey = endpointKey
+        self.name = name
     }
 }

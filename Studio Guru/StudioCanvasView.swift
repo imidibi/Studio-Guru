@@ -10,6 +10,7 @@ import CryptoKit
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+import CloudKit
 
 #if os(iOS)
     import UIKit
@@ -179,9 +180,9 @@ struct StudioCanvasView: View {
             Button("Delete", role: .destructive) { deletePendingStudio() }
             Button("Cancel", role: .cancel) { studioIdPendingDelete = nil }
         } message: {
-            if let studio = studioPendingDelete, !studio.devices.isEmpty {
+            if let studio = studioPendingDelete, !(studio.devices?.isEmpty ?? true) {
                 Text(
-                    "This studio has \(studio.devices.count) device(s). Deleting it will permanently delete the studio and all its devices and connections."
+                    "This studio has \(studio.devices?.count ?? 0) device(s). Deleting it will permanently delete the studio and all its devices and connections."
                 )
             } else {
                 Text("This studio will be permanently deleted.")
@@ -258,6 +259,49 @@ struct StudioCanvasView: View {
             handleImportResult(result)
         }
         .onAppear {
+            // Set up model context for ConnectionsStore (enables iCloud sync)
+            connectionsStore.setModelContext(modelContext)
+            
+            #if DEBUG
+            print("📱 StudioCanvasView appeared - Studios count: \(studios.count)")
+            if !studios.isEmpty {
+                print("📱 Studios: \(studios.map { $0.name }.joined(separator: ", "))")
+                print("📱 Studio IDs: \(studios.map { $0.id.uuidString }.joined(separator: ", "))")
+            }
+            
+            // CloudKit diagnostics
+            print("📱 ModelContext: \(modelContext)")
+            print("📱 Container: \(modelContext.container)")
+            if let config = modelContext.container.configurations.first {
+                print("📱 Container URL: \(config.url.path)")
+                print("📱 CloudKit database: \(config.cloudKitDatabase)")
+            }
+            
+            // Check CloudKit account status
+            CKContainer(identifier: "iCloud.com.ianmiller.studioguru").accountStatus { status, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("❌ CloudKit account error: \(error)")
+                    } else {
+                        switch status {
+                        case .available:
+                            print("✅ CloudKit account: Available")
+                        case .noAccount:
+                            print("⚠️ CloudKit account: No iCloud account signed in")
+                        case .restricted:
+                            print("⚠️ CloudKit account: Restricted")
+                        case .couldNotDetermine:
+                            print("⚠️ CloudKit account: Could not determine")
+                        case .temporarilyUnavailable:
+                            print("⚠️ CloudKit account: Temporarily unavailable")
+                        @unknown default:
+                            print("⚠️ CloudKit account: Unknown status")
+                        }
+                    }
+                }
+            }
+            #endif
+            
             if selectedStudioId == nil {
                 selectedStudioId = studios.first?.id
             }
@@ -538,7 +582,7 @@ struct StudioCanvasView: View {
     private var explosionSheetContent: some View {
         if let studio = currentStudio,
             let center = explosionDeviceSnapshot
-                ?? studio.devices.first(where: { $0.id == explosionDeviceId })
+                ?? studio.devices?.first(where: { $0.id == explosionDeviceId })
         {
             ExplosionOverviewView(
                 studio: studio,
@@ -586,7 +630,7 @@ struct StudioCanvasView: View {
     private var moveDeviceSheetContent: some View {
         if let deviceId = deviceIdPendingMove,
             let sourceStudio = currentStudio,
-            let device = sourceStudio.devices.first(where: { $0.id == deviceId }
+            let device = sourceStudio.devices?.first(where: { $0.id == deviceId }
             )
         {
             NavigationStack {
@@ -761,7 +805,7 @@ struct StudioCanvasView: View {
         editingDeviceId = nil
         deviceEditorError = nil
 
-        draftNickname = "New Device"
+        draftNickname = ""
         draftManufacturer = ""
         draftProductId = ""
         draftCategory = .other
@@ -866,7 +910,7 @@ struct StudioCanvasView: View {
 
         // Warn if another device in this studio already uses the same serial number
         if !serialNumber.isEmpty {
-            let duplicate = studio.devices.first { other in
+            let duplicate = studio.devices?.first { other in
                 other.serialNumber.trimmingCharacters(
                     in: .whitespacesAndNewlines
                 )
@@ -883,7 +927,7 @@ struct StudioCanvasView: View {
 
         let device: DeviceInstance
         if let id = editingDeviceId,
-            let existing = studio.devices.first(where: { $0.id == id })
+            let existing = studio.devices?.first(where: { $0.id == id })
         {
             device = existing
         } else {
@@ -916,7 +960,10 @@ struct StudioCanvasView: View {
                 scale: 1.0,
                 zIndex: 0
             )
-            studio.devices.append(device)
+            if studio.devices == nil {
+                studio.devices = []
+            }
+            studio.devices?.append(device)
         }
 
         device.nickname = nickname
@@ -965,11 +1012,11 @@ struct StudioCanvasView: View {
     private func deletePendingDevice() {
         guard let studio = currentStudio else { return }
         guard let id = deviceIdPendingDelete else { return }
-        guard let idx = studio.devices.firstIndex(where: { $0.id == id }) else {
+        guard let idx = studio.devices?.firstIndex(where: { $0.id == id }) else {
             return
         }
 
-        studio.devices.remove(at: idx)
+        studio.devices?.remove(at: idx)
         deviceIdPendingDelete = nil
         selectionState.selection = nil
     }
@@ -999,9 +1046,9 @@ struct StudioCanvasView: View {
             scale: device.scale,
             zIndex: device.zIndex
         )
-        newDevice.ports = device.ports.map { p in
+        newDevice.ports = device.ports?.map { p in
             let np = Port(name: p.name, type: p.type, direction: p.direction)
-            np.channels = p.channels.map { ch in
+            np.channels = p.channels?.map { ch in
                 Channel(
                     index: ch.index,
                     nameLong: ch.nameLong,
@@ -1009,10 +1056,13 @@ struct StudioCanvasView: View {
                     signal: ch.signal,
                     grouping: ch.grouping
                 )
-            }
+            } ?? []
             return np
         }
-        studio.devices.append(newDevice)
+        if studio.devices == nil {
+            studio.devices = []
+        }
+        studio.devices?.append(newDevice)
         selectionState.selection = .device(newDevice.id)
     }
 
@@ -1022,11 +1072,11 @@ struct StudioCanvasView: View {
         to destination: Studio
     ) {
         // Remove from source studio
-        if let idx = source.devices.firstIndex(where: { $0.id == device.id }) {
+        if let idx = source.devices?.firstIndex(where: { $0.id == device.id }) {
             // Dismiss any presented inspector overlay during move
             presentedInspectorDeviceId = nil
 
-            let removed = source.devices.remove(at: idx)
+            guard let removed = source.devices?.remove(at: idx) else { return }
             // Append to destination studio
             let newPos = findAvailableDevicePosition(
                 in: destination,
@@ -1057,13 +1107,13 @@ struct StudioCanvasView: View {
             )
             moved.frontImagePath = removed.frontImagePath
             moved.rearImagePath = removed.rearImagePath
-            moved.ports = removed.ports.map { p in
+            moved.ports = removed.ports?.map { p in
                 let np = Port(
                     name: p.name,
                     type: p.type,
                     direction: p.direction
                 )
-                np.channels = p.channels.map { ch in
+                np.channels = p.channels?.map { ch in
                     Channel(
                         index: ch.index,
                         nameLong: ch.nameLong,
@@ -1071,10 +1121,13 @@ struct StudioCanvasView: View {
                         signal: ch.signal,
                         grouping: ch.grouping
                     )
-                }
+                } ?? []
                 return np
             }
-            destination.devices.append(moved)
+            if destination.devices == nil {
+                destination.devices = []
+            }
+            destination.devices?.append(moved)
 
             // Remove any connections involving the old device in the source studio
             let sourceLinks = connectionsStore.links(for: source.id)
@@ -1213,14 +1266,15 @@ struct StudioCanvasView: View {
                     )
                 )
             case .spdif:
-                ports.append(
-                    digitalPort(
-                        type: .spdifIn,
-                        name: "Digital In (S/PDIF)",
-                        direction: .input,
-                        channels: 2
+                let p = Port(name: "Digital In (S/PDIF)", type: .spdifIn, direction: .input)
+                p.channels = [
+                    Channel(
+                        index: 1,
+                        nameLong: "Digital In (S/PDIF) L/R",
+                        nameShort: "L/R"
                     )
-                )
+                ]
+                ports.append(p)
             case .midi:
                 ports.append(
                     digitalPort(
@@ -1230,12 +1284,20 @@ struct StudioCanvasView: View {
                         channels: 1
                     )
                 )
-            default:
-                // Fallback to analog types but preserve name
+            case .wordClock:
                 ports.append(
                     digitalPort(
-                        type: .analogIn,
-                        name: "Digital In (\(f.rawValue))",
+                        type: .wordClockIn,
+                        name: "Word Clock In",
+                        direction: .input,
+                        channels: 1
+                    )
+                )
+            case .aesebu:
+                ports.append(
+                    digitalPort(
+                        type: .aesIn,
+                        name: "Digital In (AES/EBU)",
                         direction: .input,
                         channels: 2
                     )
@@ -1281,14 +1343,15 @@ struct StudioCanvasView: View {
                     )
                 )
             case .spdif:
-                ports.append(
-                    digitalPort(
-                        type: .spdifOut,
-                        name: "Digital Out (S/PDIF)",
-                        direction: .output,
-                        channels: 2
+                let p = Port(name: "Digital Out (S/PDIF)", type: .spdifOut, direction: .output)
+                p.channels = [
+                    Channel(
+                        index: 1,
+                        nameLong: "Digital Out (S/PDIF) L/R",
+                        nameShort: "L/R"
                     )
-                )
+                ]
+                ports.append(p)
             case .midi:
                 ports.append(
                     digitalPort(
@@ -1298,11 +1361,20 @@ struct StudioCanvasView: View {
                         channels: 1
                     )
                 )
-            default:
+            case .wordClock:
                 ports.append(
                     digitalPort(
-                        type: .analogOut,
-                        name: "Digital Out (\(f.rawValue))",
+                        type: .wordClockOut,
+                        name: "Word Clock Out",
+                        direction: .output,
+                        channels: 1
+                    )
+                )
+            case .aesebu:
+                ports.append(
+                    digitalPort(
+                        type: .aesOut,
+                        name: "Digital Out (AES/EBU)",
                         direction: .output,
                         channels: 2
                     )
@@ -1383,7 +1455,7 @@ struct StudioCanvasView: View {
             let topA = y - halfH - pad
             let bottomA = y + halfH + pad
 
-            for d in studio.devices {
+            for d in studio.devices ?? [] {
                 let dx = d.posX
                 let dy = d.posY
                 let leftB = dx - halfW
@@ -1442,7 +1514,7 @@ struct StudioCanvasView: View {
         }
 
         // Fallback: staggered placement based on count
-        let idx = Double(studio.devices.count)
+        let idx = Double(studio.devices?.count ?? 0)
         let (fx, fy) = clamped(
             centerX + (idx * 20).truncatingRemainder(dividingBy: 240) - 120,
             centerY + (idx * 16).truncatingRemainder(dividingBy: 200) - 100
@@ -1527,7 +1599,7 @@ struct StudioCanvasView: View {
 
     private func duplicateStudio(from source: Studio) {
         let copy = Studio(name: "\(source.name) Copy")
-        for d in source.devices {
+        for d in source.devices ?? [] {
             let newDevice = DeviceInstance(
                 manufacturer: d.manufacturer,
                 model: d.model,
@@ -1540,14 +1612,17 @@ struct StudioCanvasView: View {
             newDevice.frontImagePath = d.frontImagePath
             newDevice.rearImagePath = d.rearImagePath
 
-            for p in d.ports {
+            for p in d.ports ?? [] {
                 let newPort = Port(
                     name: p.name,
                     type: p.type,
                     direction: p.direction
                 )
-                for ch in p.channels {
-                    newPort.channels.append(
+                for ch in p.channels ?? [] {
+                    if newPort.channels == nil {
+                        newPort.channels = []
+                    }
+                    newPort.channels?.append(
                         Channel(
                             index: ch.index,
                             nameLong: ch.nameLong,
@@ -1557,10 +1632,16 @@ struct StudioCanvasView: View {
                         )
                     )
                 }
-                newDevice.ports.append(newPort)
+                if newDevice.ports == nil {
+                    newDevice.ports = []
+                }
+                newDevice.ports?.append(newPort)
             }
 
-            copy.devices.append(newDevice)
+            if copy.devices == nil {
+                copy.devices = []
+            }
+            copy.devices?.append(newDevice)
         }
 
         modelContext.insert(copy)
@@ -1584,9 +1665,9 @@ struct StudioCanvasView: View {
     /// Fixes port types for computer interface and MIDI ports without changing port IDs (preserves connections)
     private func fixComputerInterfacePortTypes(in studio: Studio) {
         print(
-            "🔧 Running port type migration for \(studio.devices.count) devices..."
+            "🔧 Running port type migration for \(studio.devices?.count ?? 0) devices..."
         )
-        for device in studio.devices {
+        for device in studio.devices ?? [] {
             // Fix computer interface ports
             let counts = device.computerInterfaceCounts
             if !counts.isEmpty {
@@ -1615,7 +1696,7 @@ struct StudioCanvasView: View {
                         let suffix = count > 1 ? " \(i + 1)" : ""
                         let expectedName = "\(iface.rawValue)\(suffix)"
 
-                        if let port = device.ports.first(where: {
+                        if let port = device.ports?.first(where: {
                             $0.name == expectedName
                         }) {
                             if port.type != correctPortType {
@@ -1630,7 +1711,7 @@ struct StudioCanvasView: View {
             }
 
             // Fix MIDI ports (legacy devices may have "Digital In/Out (MIDI)" with wrong type)
-            for port in device.ports {
+            for port in device.ports ?? [] {
                 if port.name.contains("MIDI") {
                     let expectedType: PortType =
                         port.direction == .input ? .midiIn : .midiOut
@@ -1646,20 +1727,20 @@ struct StudioCanvasView: View {
     }
 
     private func autoArrangeDevices(in studio: Studio) {
-        guard !studio.devices.isEmpty else { return }
+        guard !(studio.devices?.isEmpty ?? true) else { return }
 
         // Build adjacency map: device -> devices it connects to
         var outgoing: [UUID: Set<UUID>] = [:]
         var incoming: [UUID: Set<UUID>] = [:]
 
         // Initialize with all devices
-        for device in studio.devices {
+        for device in studio.devices ?? [] {
             outgoing[device.id] = []
             incoming[device.id] = []
         }
 
         // Populate from connections
-        for conn in studio.connections {
+        for conn in studio.connections ?? [] {
             outgoing[conn.fromDeviceId, default: []].insert(conn.toDeviceId)
             incoming[conn.toDeviceId, default: []].insert(conn.fromDeviceId)
         }
@@ -1671,7 +1752,7 @@ struct StudioCanvasView: View {
 
         var deviceRows: [UUID: Int] = [:]
 
-        for device in studio.devices {
+        for device in studio.devices ?? [] {
             if device.category == .computer {
                 deviceRows[device.id] = 0  // Top row
             } else if device.category == .audioInterface
@@ -1691,7 +1772,7 @@ struct StudioCanvasView: View {
         // Group devices by row
         var layerGroups: [[DeviceInstance]] = [[], [], []]
 
-        for device in studio.devices {
+        for device in studio.devices ?? [] {
             let row = deviceRows[device.id] ?? 2
             layerGroups[row].append(device)
         }
@@ -1727,13 +1808,13 @@ struct StudioCanvasView: View {
 
         // Target viewport (conservative to ensure visibility on all screens)
         let targetWidth: Double = 1200
-        let targetHeight: Double = 700
+        _ = 700  // targetHeight - reserved for future use
 
         // Find max devices in any row
-        let maxDevicesInRow = layerGroups.map { $0.count }.max() ?? 1
+        _ = layerGroups.map { $0.count }.max() ?? 1  // maxDevicesInRow - reserved for future use
 
         // Calculate spacing
-        let numRows = layerGroups.count
+        _ = layerGroups.count  // numRows - reserved for future use
         let horizontalSpacing: Double = 80  // Space between devices horizontally
         let verticalSpacing: Double = 150  // Space between rows vertically
 
@@ -1766,7 +1847,7 @@ struct StudioCanvasView: View {
 
     private func syncConnectionsToSwiftData(studio: Studio) {
         // Clear existing SwiftData connections
-        studio.connections.removeAll()
+        studio.connections?.removeAll()
 
         // Get all bundles for this studio from ConnectionsStore
         let bundles = connectionsStore.links(for: studio.id)
@@ -1779,11 +1860,11 @@ struct StudioCanvasView: View {
         var portIds = Set<UUID>()
         var channelIds = Set<UUID>()
 
-        for device in studio.devices {
+        for device in studio.devices ?? [] {
             deviceIds.insert(device.id)
-            for port in device.ports {
+            for port in device.ports ?? [] {
                 portIds.insert(port.id)
-                for channel in port.channels {
+                for channel in port.channels ?? [] {
                     channelIds.insert(channel.id)
                 }
             }
@@ -1818,7 +1899,10 @@ struct StudioCanvasView: View {
                     label: edge.fromName,  // Use the edge name as label
                     notes: nil
                 )
-                studio.connections.append(connection)
+                if studio.connections == nil {
+                    studio.connections = []
+                }
+                studio.connections?.append(connection)
                 validCount += 1
             }
         }
@@ -1939,12 +2023,18 @@ struct StudioCanvasView: View {
                                 rawValue: exportableChannel.groupingRaw
                             ) ?? .mono
                         )
-                        port.channels.append(channel)
+                        if port.channels == nil {
+                            port.channels = []
+                        }
+                        port.channels?.append(channel)
                         // Map old channel UUID to new channel
                         channelMap[exportableChannel.id] = channel
                     }
 
-                    device.ports.append(port)
+                    if device.ports == nil {
+                        device.ports = []
+                    }
+                    device.ports?.append(port)
                     // Map old port UUID to new port
                     portMap[exportablePort.id] = port
                 }
@@ -1972,10 +2062,16 @@ struct StudioCanvasView: View {
                         // Skip docs without valid URL or bookmark
                         continue
                     }
-                    device.docs.append(docLink)
+                    if device.docs == nil {
+                        device.docs = []
+                    }
+                    device.docs?.append(docLink)
                 }
 
-                studio.devices.append(device)
+                if studio.devices == nil {
+                    studio.devices = []
+                }
+                studio.devices?.append(device)
                 // Map old device UUID to new device
                 deviceMap[exportableDevice.id] = device
             }
@@ -2008,7 +2104,10 @@ struct StudioCanvasView: View {
                     label: exportableConnection.label,
                     notes: exportableConnection.notes
                 )
-                studio.connections.append(connection)
+                if studio.connections == nil {
+                    studio.connections = []
+                }
+                studio.connections?.append(connection)
             }
 
             // Save to model context
@@ -2071,11 +2170,11 @@ struct StudioCanvasView: View {
 
 // MARK: - File-Level Helper Functions
 
-private func ioSummary(from ports: [Port]) -> String {
+private func ioSummary(from ports: [Port]?) -> String {
     func chCount(_ type: PortType, _ dir: PortDirection) -> Int {
-        ports
+        (ports ?? [])
             .filter { $0.type == type && $0.direction == dir }
-            .reduce(0) { $0 + $1.channels.count }
+            .reduce(0) { $0 + ($1.channels?.count ?? 0) }
     }
 
     let ain = chCount(.analogIn, .input)
@@ -2313,7 +2412,7 @@ private struct CanvasSurfaceView: View {
                             linkRow(link)
                         }
 
-                        ForEach(studio.devices, id: \.id) { d in
+                        ForEach(studio.devices ?? [], id: \.id) { d in
                             deviceCard(d, canvasSize: geo.size)
                         }
 
@@ -2505,7 +2604,7 @@ private struct CanvasSurfaceView: View {
         let halfW = Double(cardSize.width / 2)
         let halfH = Double(cardSize.height / 2)
 
-        for d in studio.devices {
+        for d in studio.devices ?? [] {
             if d.id == excludedId { continue }
             let rect = CGRect(
                 x: d.posX - halfW,
@@ -2723,7 +2822,7 @@ private struct InspectorPanel: View {
                 .padding()
 
             case .device(let id):
-                if let d = studio.devices.first(where: { $0.id == id }) {
+                if let d = studio.devices?.first(where: { $0.id == id }) {
                     Form {
                         Section("Device") {
                             LabeledContent("Nickname", value: d.nickname)
@@ -2779,24 +2878,24 @@ private struct InspectorPanel: View {
                         }
 
                         Section("Ports") {
-                            if d.ports.isEmpty {
+                            if d.ports?.isEmpty ?? true {
                                 Text("No ports defined yet.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(d.ports.sorted(by: portSort), id: \.id) {
+                            ForEach((d.ports ?? []).sorted(by: portSort), id: \.id) {
                                 p in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(p.name)
                                         Spacer()
-                                        Text("\(p.channels.count) ch")
+                                        Text("\(p.channels?.count ?? 0) ch")
                                             .foregroundStyle(.secondary)
                                     }
                                     .font(.subheadline)
 
-                                    if !p.channels.isEmpty {
+                                    if !(p.channels?.isEmpty ?? true) {
                                         Text(
-                                            p.channels
+                                            (p.channels ?? [])
                                                 .sorted(by: {
                                                     $0.index < $1.index
                                                 })
@@ -2844,11 +2943,11 @@ private struct InspectorPanel: View {
                                 )
                             }
 
-                            if d.docs.isEmpty {
+                            if d.docs?.isEmpty ?? true {
                                 Text("No manuals attached.")
                                     .foregroundStyle(.secondary)
                             } else {
-                                ForEach(d.docs, id: \.id) { doc in
+                                ForEach(d.docs ?? [], id: \.id) { doc in
                                     HStack {
                                         Image(systemName: "doc.richtext")
                                             .foregroundStyle(.secondary)
@@ -2856,10 +2955,10 @@ private struct InspectorPanel: View {
                                             .lineLimit(1)
                                         Spacer()
                                         Button(role: .destructive) {
-                                            if let idx = d.docs.firstIndex(
+                                            if let idx = d.docs?.firstIndex(
                                                 where: { $0.id == doc.id })
                                             {
-                                                d.docs.remove(at: idx)
+                                                d.docs?.remove(at: idx)
                                             }
                                         } label: {
                                             Image(systemName: "trash")
@@ -2964,7 +3063,7 @@ private struct InspectorPanel: View {
                     ) { result in
                         guard case .success(let urls) = result,
                             let pickedURL = urls.first,
-                            let device = studio.devices.first(where: {
+                            let device = studio.devices?.first(where: {
                                 $0.id == id
                             })
                         else { return }
@@ -2981,7 +3080,10 @@ private struct InspectorPanel: View {
                                 kind: .manual,
                                 bookmarkData: bookmarkData
                             )
-                            device.docs.append(doc)
+                            if device.docs == nil {
+                                device.docs = []
+                            }
+                            device.docs?.append(doc)
                         } catch {
                             print("Manual import failed: \(error)")
                         }
@@ -3244,11 +3346,11 @@ private struct ConnectionLineRow: View {
 
         for edge in bundle.edges {
             // Look up the port type from the source device using the edge's endpoint
-            if let device = studio.devices.first(where: {
+            if let device = studio.devices?.first(where: {
                 $0.id == edge.from.deviceId
             }) {
                 // First try to find in regular ports
-                if let port = device.ports.first(where: {
+                if let port = device.ports?.first(where: {
                     $0.id == edge.from.portId
                 }) {
                     let visualType = ConnectionVisualType.from(
@@ -3293,10 +3395,10 @@ private struct ConnectionLineRow: View {
 
     var body: some View {
         Group {
-            if let fromDevice = studio.devices.first(where: {
+            if let fromDevice = studio.devices?.first(where: {
                 $0.id == link.fromDeviceId
             }),
-                let toDevice = studio.devices.first(where: {
+                let toDevice = studio.devices?.first(where: {
                     $0.id == link.toDeviceId
                 })
             {
@@ -3452,13 +3554,11 @@ private struct ConnectionLineView: View {
     }
 
     private var lineColor: Color {
-        if isSelected {
-            return .accentColor
-        } else {
-            // Use first (dominant) type color
-            return connectionTypes.first?.color.opacity(0.7)
-                ?? Color.secondary.opacity(0.7)
-        }
+        // Use first (dominant) type color
+        let baseColor = connectionTypes.first?.color ?? Color.secondary
+        
+        // When selected, use full opacity instead of changing color
+        return isSelected ? baseColor : baseColor.opacity(0.7)
     }
 
     // Linear gradient for multi-type connections
@@ -4286,7 +4386,7 @@ private struct DeviceInspectorOverlay: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let d = studio.devices.first(where: { $0.id == deviceId }) {
+                if let d = studio.devices?.first(where: { $0.id == deviceId }) {
                     Form {
                         Section("Device") {
                             LabeledContent("Nickname", value: d.nickname)
@@ -4342,24 +4442,24 @@ private struct DeviceInspectorOverlay: View {
                         }
 
                         Section("Ports") {
-                            if d.ports.isEmpty {
+                            if d.ports?.isEmpty ?? true {
                                 Text("No ports defined yet.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(d.ports.sorted(by: portSort), id: \.id) {
+                            ForEach((d.ports ?? []).sorted(by: portSort), id: \.id) {
                                 p in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(p.name)
                                         Spacer()
-                                        Text("\(p.channels.count) ch")
+                                        Text("\(p.channels?.count ?? 0) ch")
                                             .foregroundStyle(.secondary)
                                     }
                                     .font(.subheadline)
 
-                                    if !p.channels.isEmpty {
+                                    if !(p.channels?.isEmpty ?? true) {
                                         Text(
-                                            p.channels
+                                            (p.channels ?? [])
                                                 .sorted(by: {
                                                     $0.index < $1.index
                                                 })
@@ -4405,11 +4505,11 @@ private struct DeviceInspectorOverlay: View {
                                 )
                             }
 
-                            if d.docs.isEmpty {
+                            if d.docs?.isEmpty ?? true {
                                 Text("No manuals attached.")
                                     .foregroundStyle(.secondary)
                             } else {
-                                ForEach(d.docs, id: \.id) { doc in
+                                ForEach(d.docs ?? [], id: \.id) { doc in
                                     HStack {
                                         Image(systemName: "doc.richtext")
                                             .foregroundStyle(.secondary)
@@ -4417,10 +4517,10 @@ private struct DeviceInspectorOverlay: View {
                                             .lineLimit(1)
                                         Spacer()
                                         Button(role: .destructive) {
-                                            if let idx = d.docs.firstIndex(
+                                            if let idx = d.docs?.firstIndex(
                                                 where: { $0.id == doc.id })
                                             {
-                                                d.docs.remove(at: idx)
+                                                d.docs?.remove(at: idx)
                                             }
                                         } label: {
                                             Image(systemName: "trash")
@@ -4526,7 +4626,7 @@ private struct DeviceInspectorOverlay: View {
                     ) { result in
                         guard case .success(let urls) = result,
                             let pickedURL = urls.first,
-                            let device = studio.devices.first(where: {
+                            let device = studio.devices?.first(where: {
                                 $0.id == deviceId
                             })
                         else { return }
@@ -4543,7 +4643,10 @@ private struct DeviceInspectorOverlay: View {
                                 kind: .manual,
                                 bookmarkData: bookmarkData
                             )
-                            device.docs.append(doc)
+                            if device.docs == nil {
+                                device.docs = []
+                            }
+                            device.docs?.append(doc)
                         } catch {
                             print("Manual import failed: \(error)")
                         }
@@ -4643,13 +4746,13 @@ private struct DeviceExplosionDetailView: View {
     }
 
     private var inputPorts: [Port] {
-        device.ports
+        (device.ports ?? [])
             .filter { $0.direction == .input && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
 
     private var outputPorts: [Port] {
-        device.ports
+        (device.ports ?? [])
             .filter { $0.direction == .output && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
@@ -4729,12 +4832,12 @@ private struct DeviceExplosionDetailView: View {
                     .font(.title2)
                     .bold()
                 let used = (inputPorts + outputPorts).flatMap { p in
-                    p.channels.map { endpoint(for: p, channel: $0) }
+                    (p.channels ?? []).map { endpoint(for: p, channel: $0) }
                 }
                 .filter { !isOpen($0) }
                 .count
                 let total = (inputPorts + outputPorts).reduce(0) {
-                    $0 + $1.channels.count
+                    $0 + ($1.channels?.count ?? 0)
                 }
                 Text("\(used) in use • \(max(0, total - used)) open")
                     .font(.caption)
@@ -4786,7 +4889,7 @@ private struct DeviceExplosionDetailView: View {
             Section("Inputs") {
                 ForEach(inputPorts, id: \.id) { p in
                     ForEach(
-                        p.channels.sorted(by: { $0.index < $1.index }),
+                        (p.channels ?? []).sorted(by: { $0.index < $1.index }),
                         id: \.id
                     ) { ch in
                         let ep = endpoint(for: p, channel: ch)
@@ -4818,7 +4921,7 @@ private struct DeviceExplosionDetailView: View {
             Section("Outputs") {
                 ForEach(outputPorts, id: \.id) { p in
                     ForEach(
-                        p.channels.sorted(by: { $0.index < $1.index }),
+                        (p.channels ?? []).sorted(by: { $0.index < $1.index }),
                         id: \.id
                     ) { ch in
                         let ep = endpoint(for: p, channel: ch)
@@ -5081,11 +5184,11 @@ private struct ConnectionMatrixView: View {
                 // Count unique channels (avoid counting duplicates)
                 uniqueChannels.insert(edge.from.channelId.uuidString)
                 
-                if let device = studio.devices.first(where: { $0.id == edge.from.deviceId }),
-                   let port = device.ports.first(where: { $0.id == edge.from.portId }) {
+                if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
+                   let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
                     let visualType = ConnectionVisualType.from(portType: port.type)
                     typeCounts[visualType, default: 0] += 1
-                } else if let device = studio.devices.first(where: { $0.id == edge.from.deviceId }),
+                } else if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
                           !device.computerInterfaceCounts.isEmpty {
                     // Computer interface virtual port
                     typeCounts[.computer, default: 0] += 1
@@ -5121,7 +5224,7 @@ private struct ConnectionMatrixView: View {
                                 .border(Color.secondary.opacity(0.3))
                             
                             // Column headers (destination devices)
-                            ForEach(studio.devices, id: \.id) { device in
+                            ForEach(studio.devices ?? [], id: \.id) { device in
                                 VStack(spacing: 2) {
                                     Text(device.nickname)
                                         .font(.caption)
@@ -5140,7 +5243,7 @@ private struct ConnectionMatrixView: View {
                         }
                         
                         // Data rows
-                        ForEach(studio.devices, id: \.id) { fromDevice in
+                        ForEach(studio.devices ?? [], id: \.id) { fromDevice in
                             HStack(spacing: 0) {
                                 // Row header (source device)
                                 VStack(spacing: 2) {
@@ -5159,7 +5262,7 @@ private struct ConnectionMatrixView: View {
                                 .border(Color.secondary.opacity(0.3))
                                 
                                 // Connection cells
-                                ForEach(studio.devices, id: \.id) { toDevice in
+                                ForEach(studio.devices ?? [], id: \.id) { toDevice in
                                     connectionCell(from: fromDevice, to: toDevice)
                                 }
                             }
@@ -5222,14 +5325,16 @@ private struct ConnectionMatrixView: View {
             parts.append("MADI \(madiIn)/\(madiOut)")
         }
         
-        // Digital I/O (MIDI, S/PDIF, etc.)
+        // Digital I/O (MIDI, S/PDIF, etc.) - exclude word clock as it's sync only
         var digitalIns = 0
         var digitalOuts = 0
+        var hasWordClock = false
         for input in device.digitalInputs {
             switch input {
             case .spdif: digitalIns += 2
             case .aesebu: digitalIns += 2
             case .midi: digitalIns += 1
+            case .wordClock: hasWordClock = true
             default: break
             }
         }
@@ -5238,11 +5343,17 @@ private struct ConnectionMatrixView: View {
             case .spdif: digitalOuts += 2
             case .aesebu: digitalOuts += 2
             case .midi: digitalOuts += 1
+            case .wordClock: hasWordClock = true
             default: break
             }
         }
         if digitalIns > 0 || digitalOuts > 0 {
             parts.append("Digital \(digitalIns)/\(digitalOuts)")
+        }
+        
+        // Word Clock (sync only, not audio channels)
+        if hasWordClock {
+            parts.append("WC")
         }
         
         return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")

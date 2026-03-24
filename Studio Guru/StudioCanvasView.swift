@@ -54,6 +54,9 @@ struct StudioCanvasView: View {
     
     // Connection Matrix View
     @State private var isShowingMatrixView: Bool = false
+    
+    // Help
+    @State private var isShowingHelp: Bool = false
 
     // Selection (devices/connections)
     @StateObject private var selectionState = SelectionState()
@@ -243,6 +246,9 @@ struct StudioCanvasView: View {
             }
         }
         #endif
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView()
+        }
         .fileExporter(
             isPresented: $isShowingExportPicker,
             document: exportDocument,
@@ -376,6 +382,15 @@ struct StudioCanvasView: View {
                         Label("Connection Matrix", systemImage: "tablecells")
                     }
                     .help("View connections in spreadsheet format")
+                }
+                
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        isShowingHelp = true
+                    } label: {
+                        Label("Help", systemImage: "questionmark.circle")
+                    }
+                    .help("How to use Studio Guru")
                 }
             }
 
@@ -1806,8 +1821,8 @@ struct StudioCanvasView: View {
         let deviceCardWidth: Double = 260
         let padding: Double = 50  // Padding from edges
 
-        // Target viewport (conservative to ensure visibility on all screens)
-        let targetWidth: Double = 1200
+        // Use actual canvas width for responsive layout
+        let targetWidth: Double = max(canvasSize.width, 600)  // Minimum 600 to prevent cramping
         _ = 700  // targetHeight - reserved for future use
 
         // Find max devices in any row
@@ -2426,6 +2441,7 @@ private struct CanvasSurfaceView: View {
                             .zIndex(10)
                         }
                     }
+                    .coordinateSpace(name: "canvasContent")
                     .frame(width: geo.size.width, height: geo.size.height)
                     .scaleEffect(canvasScale, anchor: .center)
                     .frame(
@@ -2674,12 +2690,13 @@ private struct DeviceCardView: View {
         .overlay(cardBorder)
         .overlay(alignment: .topTrailing) {
             // Handle is visually anchored to the card corner.
-            // We compute the drag line start point in the CANVAS coordinate space from the device position.
+            // We compute the drag line start point using device position directly.
             DeviceConnectionHandle(deviceId: device.id)
                 .offset(x: 18, y: -12)
                 .background(
                     GeometryReader { proxy in
-                        let frame = proxy.frame(in: .named("canvas"))
+                        // Get position in the ZStack's local coordinate space
+                        let frame = proxy.frame(in: .named("canvasContent"))
 
                         // DeviceConnectionHandle is Triangle(16x14) + padding(8).
                         // Rotated to point right, the tip is at right edge, midY of the 16x14.
@@ -2698,7 +2715,7 @@ private struct DeviceCardView: View {
                 .highPriorityGesture(
                     DragGesture(
                         minimumDistance: 0,
-                        coordinateSpace: .named("canvas")
+                        coordinateSpace: .named("canvasContent")
                     )
                     .onChanged { value in
                         let start =
@@ -5162,6 +5179,10 @@ private struct ConnectionMatrixView: View {
     let connectionsStore: ConnectionsStore
     @Environment(\.dismiss) private var dismiss
     
+    @State private var canvasScale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var isPanEnabled: Bool = false
+    
     private var links: [ConnectionLinkSummary] {
         connectionsStore.links(for: studio.id)
     }
@@ -5210,7 +5231,7 @@ private struct ConnectionMatrixView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Main scrollable matrix
+                // Main scrollable matrix with zoom support
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 0) {
                         // Header row
@@ -5269,7 +5290,32 @@ private struct ConnectionMatrixView: View {
                         }
                     }
                     .padding()
+                    .scaleEffect(canvasScale, anchor: .center)
                 }
+                .scrollDisabled(!isPanEnabled)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            if !isPanEnabled {
+                                canvasScale = lastScale * value
+                            }
+                        }
+                        .onEnded { value in
+                            if !isPanEnabled {
+                                // Clamp scale between 0.5x and 5x
+                                canvasScale = min(
+                                    max(lastScale * value, 0.5),
+                                    5.0
+                                )
+                                lastScale = canvasScale
+                                
+                                // Auto-enable pan mode when zoomed in
+                                if canvasScale > 1.0 {
+                                    isPanEnabled = true
+                                }
+                            }
+                        }
+                )
                 
                 // Color legend at bottom
                 Divider()
@@ -5287,6 +5333,33 @@ private struct ConnectionMatrixView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+                
+                ToolbarItem(placement: .primaryAction) {
+                    if canvasScale > 1.0 {
+                        Menu {
+                            Button {
+                                isPanEnabled.toggle()
+                            } label: {
+                                Label(
+                                    isPanEnabled ? "Pan Mode" : "Zoom Mode",
+                                    systemImage: isPanEnabled ? "hand.draw" : "magnifyingglass"
+                                )
+                            }
+                            
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    canvasScale = 1.0
+                                    lastScale = 1.0
+                                    isPanEnabled = false
+                                }
+                            } label: {
+                                Label("Reset Zoom", systemImage: "arrow.counterclockwise")
+                            }
+                        } label: {
+                            Image(systemName: isPanEnabled ? "hand.draw" : "magnifyingglass")
+                        }
+                    }
                 }
             }
         }
@@ -5402,4 +5475,101 @@ private struct ConnectionMatrixView: View {
 private struct ConnectionInfo {
     let types: [ConnectionVisualType]
     let channelCount: Int
+}
+
+// MARK: - Help View
+
+private struct HelpView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    private let helpItems: [(String, String)] = [
+        ("1", "Add your devices and their manuals"),
+        ("2", "Drag connections between devices"),
+        ("3", "Click on the connections to define the details"),
+        ("4", "Click on a device to review it, edit or delete"),
+        ("5", "Long click on a device to see all its connection details"),
+        ("6", "Hold or right click a connection to delete it"),
+        ("7", "Press auto-arrange to tidy up the screen or drag devices manually"),
+        ("8", "Select Matrix to view a structured from→to diagram")
+    ]
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Welcome header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Welcome to Studio Guru")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                        
+                        Text("Your studio connection management tool")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.bottom, 8)
+                    
+                    Divider()
+                    
+                    // Help items
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Getting Started")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        ForEach(helpItems, id: \.0) { item in
+                            HStack(alignment: .top, spacing: 12) {
+                                // Number badge
+                                Text(item.0)
+                                    .font(.headline)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.accentColor)
+                                    )
+                                
+                                // Help text
+                                Text(item.1)
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                
+                                Spacer()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Additional tips
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Tips")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Use iCloud sync to keep your studios in sync across devices", systemImage: "icloud")
+                            Label("Export studios to share your configurations with others", systemImage: "square.and.arrow.up")
+                            Label("Add device manuals for quick reference while working", systemImage: "doc")
+                        }
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(24)
+            }
+            .navigationTitle("Help")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 600, minHeight: 700)
+        #endif
+    }
 }

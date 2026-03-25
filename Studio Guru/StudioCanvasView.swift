@@ -269,43 +269,43 @@ struct StudioCanvasView: View {
             connectionsStore.setModelContext(modelContext)
             
             #if DEBUG
-            print("📱 StudioCanvasView appeared - Studios count: \(studios.count)")
-            if !studios.isEmpty {
-                print("📱 Studios: \(studios.map { $0.name }.joined(separator: ", "))")
-                print("📱 Studio IDs: \(studios.map { $0.id.uuidString }.joined(separator: ", "))")
-            }
-            
-            // CloudKit diagnostics
-            print("📱 ModelContext: \(modelContext)")
-            print("📱 Container: \(modelContext.container)")
-            if let config = modelContext.container.configurations.first {
-                print("📱 Container URL: \(config.url.path)")
-                print("📱 CloudKit database: \(config.cloudKitDatabase)")
-            }
-            
-            // Check CloudKit account status
-            CKContainer(identifier: "iCloud.com.ianmiller.studioguru").accountStatus { status, error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        print("❌ CloudKit account error: \(error)")
-                    } else {
-                        switch status {
-                        case .available:
-                            print("✅ CloudKit account: Available")
-                        case .noAccount:
-                            print("⚠️ CloudKit account: No iCloud account signed in")
-                        case .restricted:
-                            print("⚠️ CloudKit account: Restricted")
-                        case .couldNotDetermine:
-                            print("⚠️ CloudKit account: Could not determine")
-                        case .temporarilyUnavailable:
-                            print("⚠️ CloudKit account: Temporarily unavailable")
-                        @unknown default:
-                            print("⚠️ CloudKit account: Unknown status")
-                        }
-                    }
-                }
-            }
+            // print("📱 StudioCanvasView appeared - Studios count: \(studios.count)")
+            // if !studios.isEmpty {
+            //     print("📱 Studios: \(studios.map { $0.name }.joined(separator: ", "))")
+            //     print("📱 Studio IDs: \(studios.map { $0.id.uuidString }.joined(separator: ", "))")
+            // }
+            // 
+            // // CloudKit diagnostics
+            // print("📱 ModelContext: \(modelContext)")
+            // print("📱 Container: \(modelContext.container)")
+            // if let config = modelContext.container.configurations.first {
+            //     print("📱 Container URL: \(config.url.path)")
+            //     print("📱 CloudKit database: \(config.cloudKitDatabase)")
+            // }
+            // 
+            // // Check CloudKit account status
+            // CKContainer(identifier: "iCloud.com.ianmiller.studioguru").accountStatus { status, error in
+            //     DispatchQueue.main.async {
+            //         if let error = error {
+            //             print("❌ CloudKit account error: \(error)")
+            //         } else {
+            //             switch status {
+            //             case .available:
+            //                 print("✅ CloudKit account: Available")
+            //             case .noAccount:
+            //                 print("⚠️ CloudKit account: No iCloud account signed in")
+            //             case .restricted:
+            //                 print("⚠️ CloudKit account: Restricted")
+            //             case .couldNotDetermine:
+            //                 print("⚠️ CloudKit account: Could not determine")
+            //             case .temporarilyUnavailable:
+            //                 print("⚠️ CloudKit account: Temporarily unavailable")
+            //             @unknown default:
+            //                 print("⚠️ CloudKit account: Unknown status")
+            //             }
+            //         }
+            //     }
+            // }
             #endif
             
             if selectedStudioId == nil {
@@ -1679,16 +1679,16 @@ struct StudioCanvasView: View {
 
     /// Fixes port types for computer interface and MIDI ports without changing port IDs (preserves connections)
     private func fixComputerInterfacePortTypes(in studio: Studio) {
-        print(
-            "🔧 Running port type migration for \(studio.devices?.count ?? 0) devices..."
-        )
+        // print(
+        //     "🔧 Running port type migration for \(studio.devices?.count ?? 0) devices..."
+        // )
         for device in studio.devices ?? [] {
             // Fix computer interface ports
             let counts = device.computerInterfaceCounts
             if !counts.isEmpty {
-                print(
-                    "  Device: \(device.nickname), computer interfaces: \(counts)"
-                )
+                // print(
+                //     "  Device: \(device.nickname), computer interfaces: \(counts)"
+                // )
 
                 for (iface, count) in counts {
                     guard count > 0 else { continue }
@@ -2449,7 +2449,7 @@ private struct CanvasSurfaceView: View {
                         height: geo.size.height * max(1.0, canvasScale)
                     )
                     .onChange(of: canvasScale) { _, newValue in
-                        print("🔍 Canvas scale changed to: \(newValue)")
+                        // print("🔍 Canvas scale changed to: \(newValue)")
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -3346,14 +3346,14 @@ private struct ConnectionLineRow: View {
                 linkId: link.id
             )
         else {
-            print("⚠️ No bundle found for link \(link.id)")
+            // print("⚠️ No bundle found for link \(link.id)")
             return ([.unknown], 1)
         }
 
-        print("🔍 Analyzing bundle with \(bundle.edges.count) edges")
+        // print("🔍 Analyzing bundle with \(bundle.edges.count) edges")
 
         guard !bundle.edges.isEmpty else {
-            print("⚠️ Bundle has no edges")
+            // print("⚠️ Bundle has no edges")
             return ([.unknown], 1)
         }
 
@@ -3373,25 +3373,25 @@ private struct ConnectionLineRow: View {
                     let visualType = ConnectionVisualType.from(
                         portType: port.type
                     )
-                    print(
-                        "  📍 Port '\(port.name)' type: \(port.type.rawValue) -> visual: \(visualType)"
-                    )
+                    // print(
+                    //     "  📍 Port '\(port.name)' type: \(port.type.rawValue) -> visual: \(visualType)"
+                    // )
                     typeCounts[visualType, default: 0] += 1
                 } else if !device.computerInterfaceCounts.isEmpty {
                     // Port not found in device.ports - likely a computer interface virtual port
                     // All computer interfaces (USB, Thunderbolt, Ethernet) use orange color
-                    print(
-                        "  📍 Computer interface port (virtual) -> visual: computer"
-                    )
+                    // print(
+                    //     "  📍 Computer interface port (virtual) -> visual: computer"
+                    // )
                     typeCounts[.computer, default: 0] += 1
                 } else {
-                    print(
-                        "  ⚠️ Could not find port for edge: deviceId=\(edge.from.deviceId), portId=\(edge.from.portId)"
-                    )
+                    // print(
+                    //     "  ⚠️ Could not find port for edge: deviceId=\(edge.from.deviceId), portId=\(edge.from.portId)"
+                    // )
                     portsNotFound += 1
                 }
             } else {
-                print("  ⚠️ Could not find device: \(edge.from.deviceId)")
+                // print("  ⚠️ Could not find device: \(edge.from.deviceId)")
                 portsNotFound += 1
             }
         }
@@ -3403,9 +3403,9 @@ private struct ConnectionLineRow: View {
         let types = sortedTypes.isEmpty ? [.unknown] : sortedTypes
         let totalChannels = bundle.edges.count
 
-        print(
-            "  Result: \(types.count) types, \(portsNotFound) ports not found"
-        )
+        // print(
+        //     "  Result: \(types.count) types, \(portsNotFound) ports not found"
+        // )
 
         return (types, totalChannels)
     }

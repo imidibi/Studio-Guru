@@ -986,11 +986,15 @@ struct ConnectionsDialogView: View {
             return
         }
         
+        // Sort channels by index to ensure correct order (SwiftData doesn't guarantee array order)
+        let outChannels = (outPort.channels ?? []).sorted(by: { $0.index < $1.index })
+        let inChannels = (inPort.channels ?? []).sorted(by: { $0.index < $1.index })
+        
         // Connect all channels in the port sequentially
-        let channelCount = min(outPort.channels?.count ?? 0, inPort.channels?.count ?? 0)
+        let channelCount = min(outChannels.count, inChannels.count)
         for i in 0..<channelCount {
-            guard let outChannel = outPort.channels?[i],
-                  let inChannel = inPort.channels?[i] else { continue }
+            let outChannel = outChannels[i]
+            let inChannel = inChannels[i]
             
             let outEndpoint = IOEndpointRef(
                 deviceId: output.deviceId,

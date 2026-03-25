@@ -34,9 +34,9 @@ struct Studio_GuruApp: App {
             
             // Log sync activity for debugging
             #if DEBUG
-            print("📱 SwiftData container initialized with CloudKit sync")
-            print("📱 Container URL: \(container.configurations.first?.url.path ?? "unknown")")
-            print("📱 CloudKit database: \(modelConfiguration.cloudKitDatabase)")
+            // print("📱 SwiftData container initialized with CloudKit sync")
+            // print("📱 Container URL: \(container.configurations.first?.url.path ?? "unknown")")
+            // print("📱 CloudKit database: \(modelConfiguration.cloudKitDatabase)")
             #endif
             
             return container

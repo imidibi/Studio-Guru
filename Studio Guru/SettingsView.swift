@@ -16,6 +16,14 @@ struct SettingsView: View {
     @State private var showingSyncReset = false
     @State private var syncResetConfirmed = false
     
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+    }
+    
+    private var buildNumber: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+    }
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -123,7 +131,31 @@ struct SettingsView: View {
                 } footer: {
                     Text("Exported files can be shared via email, AirDrop, or cloud storage services.")
                 }
+                
+                Section {
+                    HStack {
+                        Text("Version")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(appVersion)
+                    }
+                    .font(.caption)
+                    
+                    HStack {
+                        Text("Build")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(buildNumber)
+                    }
+                    .font(.caption)
+                } header: {
+                    Text("About")
+                }
             }
+            #if os(macOS)
+            .formStyle(.grouped)
+            .padding()
+            #endif
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

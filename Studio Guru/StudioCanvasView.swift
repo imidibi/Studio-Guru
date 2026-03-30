@@ -377,6 +377,15 @@ struct StudioCanvasView: View {
                 
                 ToolbarItem(placement: .navigation) {
                     Button {
+                        exportCanvasAsPDF(studio: studio)
+                    } label: {
+                        Label("Export Canvas", systemImage: "photo")
+                    }
+                    .help("Export studio canvas as PDF")
+                }
+                
+                ToolbarItem(placement: .navigation) {
+                    Button {
                         isShowingMatrixView.toggle()
                     } label: {
                         Label("Connection Matrix", systemImage: "tablecells")
@@ -391,6 +400,15 @@ struct StudioCanvasView: View {
                         Label("Help", systemImage: "questionmark.circle")
                     }
                     .help("How to use Studio Guru")
+                }
+                
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        isShowingGuru = true
+                    } label: {
+                        Label("Guru", systemImage: "lightbulb")
+                    }
+                    .help("Quick setup suggestions for common devices")
                 }
             }
 
@@ -1740,59 +1758,246 @@ struct StudioCanvasView: View {
             }
         }
     }
+    
+    private func exportCanvasAsPDF(studio: Studio) {
+        guard let devices = studio.devices, !devices.isEmpty else { return }
+        
+        // Calculate bounds of all devices
+        var minX = Double.infinity
+        var minY = Double.infinity
+        var maxX = -Double.infinity
+        var maxY = -Double.infinity
+        
+        for device in devices {
+            minX = min(minX, device.posX - 130) // Half card width
+            minY = min(minY, device.posY - 48)  // Half card height
+            maxX = max(maxX, device.posX + 130)
+            maxY = max(maxY, device.posY + 48)
+        }
+        
+        let padding: Double = 50
+        let canvasWidth = maxX - minX + padding * 2
+        let canvasHeight = maxY - minY + padding * 2
+        let offsetX = -minX + padding
+        let offsetY = -minY + padding
+        
+        // Create printable canvas view
+        let printableCanvas = ZStack {
+            Rectangle()
+                .fill(Color(white: 0.95))
+            
+            // Draw connection lines
+            let links = connectionsStore.links(for: studio.id)
+            ForEach(links, id: \.id) { link in
+                if let fromDevice = devices.first(where: { $0.id == link.fromDeviceId }),
+                   let toDevice = devices.first(where: { $0.id == link.toDeviceId }) {
+                    Path { path in
+                        let from = CGPoint(
+                            x: fromDevice.posX + offsetX,
+                            y: fromDevice.posY + offsetY
+                        )
+                        let to = CGPoint(
+                            x: toDevice.posX + offsetX,
+                            y: toDevice.posY + offsetY
+                        )
+                        path.move(to: from)
+                        path.addLine(to: to)
+                    }
+                    .stroke(Color.blue, lineWidth: 2)
+                }
+            }
+            
+            // Draw devices
+            ForEach(devices, id: \.id) { device in
+                VStack(spacing: 4) {
+                    Text(device.nickname)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                    
+                    Text(device.category.rawValue)
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    
+                    if let ports = device.ports, !ports.isEmpty {
+                        Text("\(ports.reduce(0) { $0 + ($1.channels?.count ?? 0) }) ch")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 240, height: 80)
+                .padding(8)
+                .background(Color.white)
+                .cornerRadius(8)
+                .shadow(radius: 2)
+                .position(
+                    x: device.posX + offsetX,
+                    y: device.posY + offsetY
+                )
+            }
+        }
+        .frame(width: canvasWidth, height: canvasHeight)
+        
+        // Create full printable view with title
+        let fullView = VStack(spacing: 0) {
+            Text("Studio Canvas: \(studio.name)")
+                .font(.title)
+                .fontWeight(.bold)
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white)
+            
+            printableCanvas
+        }
+        
+        #if os(iOS)
+        let renderer = ImageRenderer(content: fullView)
+        renderer.scale = 2.0
+        
+        if let pdfData = renderer.pdf() {
+            let filename = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.pdf"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try? pdfData.write(to: tempURL)
+            
+            let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                var presentingVC = rootVC
+                while let presented = presentingVC.presentedViewController {
+                    presentingVC = presented
+                }
+                
+                if let popover = activityVC.popoverPresentationController {
+                    popover.sourceView = presentingVC.view
+                    popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
+                    popover.permittedArrowDirections = []
+                }
+                
+                presentingVC.present(activityVC, animated: true)
+            }
+        }
+        #elseif os(macOS)
+        let renderer = ImageRenderer(content: fullView)
+        renderer.scale = 2.0
+        
+        if let pdfData = renderer.pdf() {
+            let savePanel = NSSavePanel()
+            savePanel.allowedContentTypes = [.pdf]
+            savePanel.nameFieldStringValue = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.pdf"
+            
+            savePanel.begin { response in
+                if response == .OK, let url = savePanel.url {
+                    try? pdfData.write(to: url)
+                }
+            }
+        }
+        #endif
+    }
 
     private func autoArrangeDevices(in studio: Studio) {
         guard !(studio.devices?.isEmpty ?? true) else { return }
 
+        // Get connections from the connection store (not SwiftData)
+        let links = connectionsStore.links(for: studio.id)
+        
         // Build adjacency map: device -> devices it connects to
         var outgoing: [UUID: Set<UUID>] = [:]
         var incoming: [UUID: Set<UUID>] = [:]
+        var deviceMap: [UUID: DeviceInstance] = [:]
 
         // Initialize with all devices
         for device in studio.devices ?? [] {
             outgoing[device.id] = []
             incoming[device.id] = []
+            deviceMap[device.id] = device
         }
 
-        // Populate from connections
-        for conn in studio.connections ?? [] {
-            outgoing[conn.fromDeviceId, default: []].insert(conn.toDeviceId)
-            incoming[conn.toDeviceId, default: []].insert(conn.fromDeviceId)
+        // Populate from ConnectionStore links
+        for link in links {
+            outgoing[link.fromDeviceId, default: []].insert(link.toDeviceId)
+            incoming[link.toDeviceId, default: []].insert(link.fromDeviceId)
         }
 
-        // PYRAMID STRUCTURE - 3 HORIZONTAL ROWS
-        // Row 0 (Top): Computers
-        // Row 1 (Middle): Digital devices - interfaces, ADAT expanders, digital mixers
-        // Row 2 (Bottom): Analog input devices - instruments, microphones, keyboards, etc.
-
-        var deviceRows: [UUID: Int] = [:]
-
+        // SIGNAL FLOW LAYOUT
+        // Audio signal flows from BOTTOM to TOP
+        // Bottom: Source devices (preamps, instruments, mics)
+        // Middle: Processing devices (compressors, effects)
+        // Upper: Converters (ADAT expanders, audio interfaces)
+        // Top: Computers
+        
+        var deviceLevels: [UUID: Int] = [:]
+        
+        // Calculate signal flow depth
+        // Depth 0 = source devices (no inputs, only outputs)
+        // Higher depth = further along signal chain toward destination
+        func calculateSignalDepth(for deviceId: UUID, visited: Set<UUID> = []) -> Int {
+            if let level = deviceLevels[deviceId] {
+                return level
+            }
+            
+            if visited.contains(deviceId) {
+                return 0  // Circular reference, treat as source
+            }
+            
+            var newVisited = visited
+            newVisited.insert(deviceId)
+            
+            // Get all devices that this device connects TO (outputs)
+            let outputs = outgoing[deviceId] ?? []
+            
+            if outputs.isEmpty {
+                // No outputs - this is a destination device (like computer)
+                // Check for special categories
+                if let device = deviceMap[deviceId] {
+                    if device.category == .computer {
+                        return 100  // Top level
+                    }
+                    if device.category == .audioInterface || device.category == .adatExpander {
+                        return 90  // Near top
+                    }
+                }
+                // Other endpoints
+                return 50
+            }
+            
+            // Find the minimum depth of output devices and subtract 1
+            // (source devices have lower depth than their destinations)
+            var minOutputDepth = 100
+            for outputId in outputs {
+                let outputDepth = calculateSignalDepth(for: outputId, visited: newVisited)
+                minOutputDepth = min(minOutputDepth, outputDepth)
+            }
+            
+            return max(0, minOutputDepth - 1)
+        }
+        
+        // Calculate depths for all devices
         for device in studio.devices ?? [] {
-            if device.category == .computer {
-                deviceRows[device.id] = 0  // Top row
-            } else if device.category == .audioInterface
-                || device.category == .adatExpander
-                || device.category == .digitalMixer
-                || device.adatInputPortsCount > 0
-                || device.adatOutputPortsCount > 0
-                || device.madiInputPortsCount > 0
-                || device.madiOutputPortsCount > 0
-            {
-                deviceRows[device.id] = 1  // Middle row - digital devices
-            } else {
-                deviceRows[device.id] = 2  // Bottom row - analog input devices
+            if deviceLevels[device.id] == nil {
+                deviceLevels[device.id] = calculateSignalDepth(for: device.id)
             }
         }
 
-        // Group devices by row
-        var layerGroups: [[DeviceInstance]] = [[], [], []]
-
-        for device in studio.devices ?? [] {
-            let row = deviceRows[device.id] ?? 2
-            layerGroups[row].append(device)
+        // Invert depths so lower depth = higher on screen
+        // Find max depth to invert
+        let maxDepth = deviceLevels.values.max() ?? 0
+        for (deviceId, depth) in deviceLevels {
+            deviceLevels[deviceId] = maxDepth - depth
         }
 
-        // Sort within each row by category then nickname
+        // Group devices by level
+        var levelGroups: [Int: [DeviceInstance]] = [:]
+        for device in studio.devices ?? [] {
+            let level = deviceLevels[device.id] ?? 0
+            levelGroups[level, default: []].append(device)
+        }
+
+        // Sort levels (0 = top of screen)
+        let sortedLevels = levelGroups.keys.sorted()
+        
+        // Category priority for sorting within levels
         func categoryPriority(_ category: DeviceCategory) -> Int {
             switch category {
             case .computer: return 0
@@ -1800,59 +2005,280 @@ struct StudioCanvasView: View {
             case .adatExpander: return 2
             case .digitalMixer, .mixer: return 3
             case .patchbay: return 4
-            default: return 5
+            case .preamp: return 5
+            case .compressor, .busCompressor: return 6
+            case .channelStrip: return 7
+            default: return 8
             }
         }
-
-        for i in 0..<layerGroups.count {
-            layerGroups[i].sort { d1, d2 in
+        
+        // Within each level, sort devices to keep connected ones together
+        for level in sortedLevels {
+            guard var devices = levelGroups[level] else { continue }
+            
+            if devices.count <= 1 {
+                continue  // No need to sort
+            }
+            
+            // Sort by category first, then try to group connected devices
+            devices.sort { d1, d2 in
                 let p1 = categoryPriority(d1.category)
                 let p2 = categoryPriority(d2.category)
                 if p1 != p2 { return p1 < p2 }
                 return d1.nickname < d2.nickname
             }
+            
+            // Reorder to keep connected devices adjacent
+            var orderedDevices: [DeviceInstance] = []
+            var remaining = Set(devices.map { $0.id })
+            
+            // Start with first device
+            if let first = devices.first {
+                orderedDevices.append(first)
+                remaining.remove(first.id)
+                
+                // Greedily add devices with strongest connection to already-placed devices
+                while !remaining.isEmpty {
+                    var bestDevice: DeviceInstance?
+                    var bestScore = -1
+                    
+                    for deviceId in remaining {
+                        guard let device = deviceMap[deviceId] else { continue }
+                        
+                        var score = 0
+                        let deviceInputs = incoming[deviceId] ?? []
+                        let deviceOutputs = outgoing[deviceId] ?? []
+                        
+                        // Check connectivity to already-placed devices
+                        for placedDevice in orderedDevices {
+                            // Direct connection gives high score
+                            if deviceInputs.contains(placedDevice.id) {
+                                score += 10
+                            }
+                            if deviceOutputs.contains(placedDevice.id) {
+                                score += 10
+                            }
+                            
+                            // Shared connections give lower score
+                            let placedInputs = incoming[placedDevice.id] ?? []
+                            score += deviceInputs.intersection(placedInputs).count * 2
+                        }
+                        
+                        if score > bestScore {
+                            bestScore = score
+                            bestDevice = device
+                        }
+                    }
+                    
+                    if let device = bestDevice, bestScore > 0 {
+                        orderedDevices.append(device)
+                        remaining.remove(device.id)
+                    } else {
+                        // No connections, add remaining in category/name order
+                        let remainingDevices = devices.filter { remaining.contains($0.id) }
+                        orderedDevices.append(contentsOf: remainingDevices)
+                        break
+                    }
+                }
+                
+                levelGroups[level] = orderedDevices
+            }
         }
 
-        // Remove empty rows
-        layerGroups = layerGroups.filter { !$0.isEmpty }
-
-        // Calculate layout to fit viewport - PYRAMID structure
+        // Calculate layout to fit viewport
         let deviceCardHeight: Double = 96
         let deviceCardWidth: Double = 260
-        let padding: Double = 50  // Padding from edges
+        let padding: Double = 50
+        let horizontalSpacing: Double = 80
+        let verticalSpacing: Double = 150
 
-        // Use actual canvas width for responsive layout
-        let targetWidth: Double = max(canvasSize.width, 600)  // Minimum 600 to prevent cramping
-        _ = 700  // targetHeight - reserved for future use
+        // Use actual viewport size
+        let targetWidth: Double = max(canvasSize.width - padding * 2, 600)
+        let targetHeight: Double = max(canvasSize.height - padding * 2, 600)
 
-        // Find max devices in any row
-        _ = layerGroups.map { $0.count }.max() ?? 1  // maxDevicesInRow - reserved for future use
+        // Calculate required space
+        let numLevels = sortedLevels.count
+        let maxDevicesInLevel = levelGroups.values.map { $0.count }.max() ?? 1
+        
+        // For positioning, we need space for cards AND gaps between them
+        // Device positions are CENTER points, so spacing = cardWidth + gap
+        let requiredWidth = Double(maxDevicesInLevel) * deviceCardWidth + 
+                           Double(max(0, maxDevicesInLevel - 1)) * horizontalSpacing
+        let requiredHeight = Double(numLevels) * deviceCardHeight + 
+                            Double(max(0, numLevels - 1)) * verticalSpacing
 
-        // Calculate spacing
-        _ = layerGroups.count  // numRows - reserved for future use
-        let horizontalSpacing: Double = 80  // Space between devices horizontally
-        let verticalSpacing: Double = 150  // Space between rows vertically
+        // Scale to fit if needed, but maintain minimum spacing
+        let widthScale = min(1.0, targetWidth / requiredWidth)
+        let heightScale = min(1.0, targetHeight / requiredHeight)
+        let layoutScale = min(widthScale, heightScale)
+        
+        // Don't scale cards down - keep them full size for readability
+        // Only adjust spacing if needed
+        let finalCardWidth = deviceCardWidth
+        let finalCardHeight = deviceCardHeight
+        
+        // Calculate actual spacing based on available space
+        let finalHorizontalSpacing: Double
+        let finalVerticalSpacing: Double
+        
+        if layoutScale < 1.0 {
+            // Need to compress - reduce spacing proportionally
+            finalHorizontalSpacing = max(20, horizontalSpacing * layoutScale)
+            finalVerticalSpacing = max(30, verticalSpacing * layoutScale)
+        } else {
+            // Plenty of space - use default spacing
+            finalHorizontalSpacing = horizontalSpacing
+            finalVerticalSpacing = verticalSpacing
+        }
 
-        // Position devices in pyramid structure
-        // Note: Device positions are the CENTER of the card
-        let halfCardWidth = deviceCardWidth / 2
-        let halfCardHeight = deviceCardHeight / 2
-
-        for (rowIndex, devicesInRow) in layerGroups.enumerated() {
-            // Calculate Y position for this row
-            let y = padding + halfCardHeight + Double(rowIndex) * (deviceCardHeight + verticalSpacing)
-
-            // Calculate total width needed for this row
-            let rowWidth = Double(devicesInRow.count) * deviceCardWidth + 
-                          Double(max(0, devicesInRow.count - 1)) * horizontalSpacing
-
-            // Center this row horizontally
-            let rowStartX = (targetWidth - rowWidth) / 2 + halfCardWidth
-
-            for (index, device) in devicesInRow.enumerated() {
-                let x = rowStartX + Double(index) * (deviceCardWidth + horizontalSpacing)
-                device.posX = x
-                device.posY = y
+        // SMART COLUMN-BASED POSITIONING TO AVOID LINE CROSSINGS
+        // Assign each device to a horizontal column based on its connections
+        var deviceColumns: [UUID: Int] = [:]
+        var columnsUsed: Set<Int> = []
+        
+        // Process levels from top to bottom, assigning columns
+        for (levelIndex, level) in sortedLevels.enumerated() {
+            guard let devicesInLevel = levelGroups[level] else { continue }
+            
+            for device in devicesInLevel {
+                if deviceColumns[device.id] != nil {
+                    continue // Already assigned
+                }
+                
+                // Find preferred column based on connections to already-positioned devices
+                var preferredColumn: Int? = nil
+                var columnScores: [Int: Int] = [:]
+                
+                // Check outputs (devices this connects TO in higher levels)
+                let deviceOutputs = outgoing[device.id] ?? []
+                for outputId in deviceOutputs {
+                    if let targetColumn = deviceColumns[outputId] {
+                        columnScores[targetColumn, default: 0] += 10
+                    }
+                }
+                
+                // Check inputs (devices that connect FROM this in lower levels)
+                let deviceInputs = incoming[device.id] ?? []
+                for inputId in deviceInputs {
+                    if let sourceColumn = deviceColumns[inputId] {
+                        columnScores[sourceColumn, default: 0] += 5
+                    }
+                }
+                
+                // Use highest scoring column if available
+                if let bestColumn = columnScores.max(by: { $0.value < $1.value })?.key {
+                    preferredColumn = bestColumn
+                }
+                
+                // If device connects to multiple levels (skip-level connections), offset it horizontally
+                if deviceOutputs.count > 1 {
+                    // Check if outputs are at different depth levels
+                    let outputLevels = deviceOutputs.compactMap { deviceLevels[$0] }
+                    let uniqueLevels = Set(outputLevels)
+                    
+                    if uniqueLevels.count > 1 {
+                        // Device has skip-level connections - force horizontal offset
+                        let connectedColumns = deviceOutputs.compactMap { deviceColumns[$0] }
+                        if connectedColumns.count >= 2 {
+                            let minCol = connectedColumns.min()!
+                            let maxCol = connectedColumns.max()!
+                            if minCol == maxCol {
+                                // All targets in same column but at different levels - offset to the right
+                                preferredColumn = minCol + 1
+                            } else {
+                                // Targets in different columns - position in middle
+                                preferredColumn = (minCol + maxCol) / 2
+                            }
+                        } else if let firstCol = connectedColumns.first {
+                            // Single target column at different level - offset to the right
+                            preferredColumn = firstCol + 1
+                        }
+                    } else {
+                        // Multiple connections but all at same level - stay in same column as targets
+                        let connectedColumns = deviceOutputs.compactMap { deviceColumns[$0] }
+                        if connectedColumns.count >= 2 {
+                            let minCol = connectedColumns.min()!
+                            let maxCol = connectedColumns.max()!
+                            preferredColumn = (minCol + maxCol) / 2
+                        }
+                    }
+                }
+                
+                // Find first available column at or near preferred position
+                var finalColumn = 0
+                if let preferred = preferredColumn {
+                    // Try preferred column first
+                    if !isColumnOccupied(preferred, level: level, levelGroups: levelGroups, deviceColumns: deviceColumns) {
+                        finalColumn = preferred
+                    } else {
+                        // Try nearby columns
+                        var found = false
+                        for offset in 1...10 {
+                            let leftCol = preferred - offset
+                            let rightCol = preferred + offset
+                            
+                            if !isColumnOccupied(rightCol, level: level, levelGroups: levelGroups, deviceColumns: deviceColumns) {
+                                finalColumn = rightCol
+                                found = true
+                                break
+                            }
+                            if leftCol >= 0 && !isColumnOccupied(leftCol, level: level, levelGroups: levelGroups, deviceColumns: deviceColumns) {
+                                finalColumn = leftCol
+                                found = true
+                                break
+                            }
+                        }
+                        if !found {
+                            // Find next available column
+                            finalColumn = (columnsUsed.max() ?? -1) + 1
+                        }
+                    }
+                } else {
+                    // No preference, use next available column
+                    finalColumn = (columnsUsed.max() ?? -1) + 1
+                }
+                
+                deviceColumns[device.id] = finalColumn
+                columnsUsed.insert(finalColumn)
+            }
+        }
+        
+        // Helper function to check if column is occupied at this level
+        func isColumnOccupied(_ column: Int, level: Int, levelGroups: [Int: [DeviceInstance]], deviceColumns: [UUID: Int]) -> Bool {
+            guard let devicesAtLevel = levelGroups[level] else { return false }
+            for device in devicesAtLevel {
+                if deviceColumns[device.id] == column {
+                    return true
+                }
+            }
+            return false
+        }
+        
+        // Now position devices based on their assigned columns
+        let halfCardWidth = finalCardWidth / 2
+        let halfCardHeight = finalCardHeight / 2
+        
+        // Find column range
+        let minColumn = deviceColumns.values.min() ?? 0
+        let maxColumn = deviceColumns.values.max() ?? 0
+        let columnRange = maxColumn - minColumn + 1
+        
+        // Calculate total width needed
+        let totalWidth = Double(columnRange) * finalCardWidth + Double(max(0, columnRange - 1)) * finalHorizontalSpacing
+        let startX = padding + (targetWidth - totalWidth) / 2 + halfCardWidth
+        
+        for (levelIndex, level) in sortedLevels.enumerated() {
+            guard let devicesInLevel = levelGroups[level] else { continue }
+            
+            let y = padding + halfCardHeight + Double(levelIndex) * (finalCardHeight + finalVerticalSpacing)
+            
+            for device in devicesInLevel {
+                if let column = deviceColumns[device.id] {
+                    let columnOffset = column - minColumn
+                    let x = startX + Double(columnOffset) * (finalCardWidth + finalHorizontalSpacing)
+                    device.posX = x
+                    device.posY = y
+                }
             }
         }
 
@@ -2442,11 +2868,14 @@ private struct CanvasSurfaceView: View {
                         }
                     }
                     .coordinateSpace(name: "canvasContent")
-                    .frame(width: geo.size.width, height: geo.size.height)
+                    .frame(
+                        width: geo.size.width * 1.5,
+                        height: geo.size.height * 1.5
+                    )
                     .scaleEffect(canvasScale, anchor: .center)
                     .frame(
-                        width: geo.size.width * max(1.0, canvasScale),
-                        height: geo.size.height * max(1.0, canvasScale)
+                        width: geo.size.width * 1.5 * canvasScale,
+                        height: geo.size.height * 1.5 * canvasScale
                     )
                     .onChange(of: canvasScale) { _, newValue in
                         // print("🔍 Canvas scale changed to: \(newValue)")
@@ -2782,25 +3211,13 @@ private struct DeviceCardView: View {
                         return
                     }
 
-                    // Approx label size; used for clamping so it stays on-screen.
-                    let cardSize = CGSize(width: 260, height: 96)
-                    let halfW = Double(cardSize.width / 2)
-                    let halfH = Double(cardSize.height / 2)
+                    // Allow free movement across large virtual canvas
+                    // No clamping - devices can be positioned anywhere for scrolling
+                    let newX = origin.x + Double(v.translation.width)
+                    let newY = origin.y + Double(v.translation.height)
 
-                    let rawX = origin.x + Double(v.translation.width)
-                    let rawY = origin.y + Double(v.translation.height)
-
-                    let clampedX = min(
-                        max(rawX, halfW),
-                        Double(canvasSize.width) - halfW
-                    )
-                    let clampedY = min(
-                        max(rawY, halfH),
-                        Double(canvasSize.height) - halfH
-                    )
-
-                    device.posX = clampedX
-                    device.posY = clampedY
+                    device.posX = newX
+                    device.posY = newY
                 }
                 .onEnded { _ in
                     dragOrigin = nil
@@ -4702,8 +5119,212 @@ private struct DeviceInspectorOverlay: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+                
+                if let device = studio.devices?.first(where: { $0.id == deviceId }) {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            exportDeviceDetailAsPDF(device: device)
+                        } label: {
+                            Label("Export PDF", systemImage: "square.and.arrow.up")
+                        }
+                        .help("Export device details as PDF")
+                    }
+                }
             }
         }
+    }
+    
+    private func exportDeviceDetailAsPDF(device: DeviceInstance) {
+        // Create printable device detail view
+        let printableView = VStack(alignment: .leading, spacing: 16) {
+            Text("Device Details: \(device.nickname)")
+                .font(.title)
+                .fontWeight(.bold)
+                .padding(.bottom, 8)
+            
+            Group {
+                Text("Basic Information")
+                    .font(.headline)
+                
+                if !device.manufacturer.isEmpty {
+                    HStack {
+                        Text("Manufacturer:")
+                            .fontWeight(.medium)
+                        Text(device.manufacturer)
+                    }
+                }
+                
+                if !device.model.isEmpty {
+                    HStack {
+                        Text("Product ID:")
+                            .fontWeight(.medium)
+                        Text(device.model)
+                    }
+                }
+                
+                HStack {
+                    Text("Category:")
+                        .fontWeight(.medium)
+                    Text(device.category.rawValue)
+                }
+                
+                if !device.serialNumber.isEmpty {
+                    HStack {
+                        Text("Serial Number:")
+                            .fontWeight(.medium)
+                        Text(device.serialNumber)
+                    }
+                }
+                
+                if !device.location.isEmpty {
+                    HStack {
+                        Text("Location:")
+                            .fontWeight(.medium)
+                        Text(device.location)
+                    }
+                }
+            }
+            .padding(.leading, 8)
+            
+            Divider()
+            
+            Group {
+                Text("I/O Configuration")
+                    .font(.headline)
+                
+                if device.audioInputsCount > 0 || device.audioOutputsCount > 0 {
+                    HStack {
+                        Text("Analog I/O:")
+                            .fontWeight(.medium)
+                        Text("\(device.audioInputsCount) inputs / \(device.audioOutputsCount) outputs")
+                    }
+                }
+                
+                if device.adatInputPortsCount > 0 || device.adatOutputPortsCount > 0 {
+                    HStack {
+                        Text("ADAT Ports:")
+                            .fontWeight(.medium)
+                        Text("\(device.adatInputPortsCount) in / \(device.adatOutputPortsCount) out")
+                    }
+                }
+                
+                if device.madiInputPortsCount > 0 || device.madiOutputPortsCount > 0 {
+                    HStack {
+                        Text("MADI Ports:")
+                            .fontWeight(.medium)
+                        Text("\(device.madiInputPortsCount) in / \(device.madiOutputPortsCount) out")
+                    }
+                }
+                
+                if !device.digitalInputs.isEmpty || !device.digitalOutputs.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Digital Formats:")
+                            .fontWeight(.medium)
+                        if !device.digitalInputs.isEmpty {
+                            Text("  Inputs: \(device.digitalInputs.map { $0.rawValue }.joined(separator: ", "))")
+                        }
+                        if !device.digitalOutputs.isEmpty {
+                            Text("  Outputs: \(device.digitalOutputs.map { $0.rawValue }.joined(separator: ", "))")
+                        }
+                    }
+                }
+                
+                if !device.computerInterfaces.isEmpty {
+                    HStack {
+                        Text("Computer Interfaces:")
+                            .fontWeight(.medium)
+                        Text(device.computerInterfaces.map { $0.rawValue }.joined(separator: ", "))
+                    }
+                }
+            }
+            .padding(.leading, 8)
+            
+            if let ports = device.ports, !ports.isEmpty {
+                Divider()
+                
+                Text("Ports")
+                    .font(.headline)
+                
+                ForEach(ports.sorted(by: portSort), id: \.id) { port in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(port.name)
+                            .fontWeight(.medium)
+                        if let channels = port.channels, !channels.isEmpty {
+                            Text(channels.sorted(by: { $0.index < $1.index })
+                                .map { $0.nameShort.isEmpty ? "\($0.index)" : $0.nameShort }
+                                .joined(separator: ", "))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.leading, 8)
+                }
+            }
+            
+            if let docs = device.docs, !docs.isEmpty {
+                Divider()
+                
+                Text("Documentation")
+                    .font(.headline)
+                
+                ForEach(docs, id: \.id) { doc in
+                    Text("• \(doc.title) (\(doc.kind.rawValue))")
+                        .padding(.leading, 8)
+                }
+            }
+        }
+        .padding()
+        
+        #if os(iOS)
+        let renderer = ImageRenderer(content: printableView)
+        renderer.scale = 2.0
+        
+        if let pdfData = renderer.pdf() {
+            let filename = "\(device.nickname.replacingOccurrences(of: " ", with: "_"))_Details.pdf"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try? pdfData.write(to: tempURL)
+            
+            let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                var presentingVC = rootVC
+                while let presented = presentingVC.presentedViewController {
+                    presentingVC = presented
+                }
+                
+                if let popover = activityVC.popoverPresentationController {
+                    popover.sourceView = presentingVC.view
+                    popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
+                    popover.permittedArrowDirections = []
+                }
+                
+                presentingVC.present(activityVC, animated: true)
+            }
+        }
+        #elseif os(macOS)
+        let renderer = ImageRenderer(content: printableView)
+        renderer.scale = 2.0
+        
+        if let pdfData = renderer.pdf() {
+            let savePanel = NSSavePanel()
+            savePanel.allowedContentTypes = [.pdf]
+            savePanel.nameFieldStringValue = "\(device.nickname.replacingOccurrences(of: " ", with: "_"))_Details.pdf"
+            
+            savePanel.begin { response in
+                if response == .OK, let url = savePanel.url {
+                    try? pdfData.write(to: url)
+                }
+            }
+        }
+        #endif
+    }
+    
+    private func portSort(_ p1: Port, _ p2: Port) -> Bool {
+        if p1.direction != p2.direction {
+            return p1.direction == .input
+        }
+        return p1.name < p2.name
     }
 }
 
@@ -5336,6 +5957,15 @@ private struct ConnectionMatrixView: View {
                 }
                 
                 ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        exportMatrixAsPDF()
+                    } label: {
+                        Label("Export PDF", systemImage: "square.and.arrow.up")
+                    }
+                    .help("Export connection matrix as PDF")
+                }
+                
+                ToolbarItem(placement: .primaryAction) {
                     if canvasScale > 1.0 {
                         Menu {
                             Button {
@@ -5469,6 +6099,148 @@ private struct ConnectionMatrixView: View {
                 .frame(width: 100, height: 60)
                 .border(Color.secondary.opacity(0.3))
         }
+    }
+    
+    private func exportMatrixAsPDF() {
+        // Create a printable version without zoom controls
+        let printableMatrix = VStack(alignment: .leading, spacing: 0) {
+            // Title
+            Text("Connection Matrix: \(studio.name)")
+                .font(.title)
+                .fontWeight(.bold)
+                .padding()
+            
+            // Matrix table
+            VStack(alignment: .leading, spacing: 0) {
+                // Header row
+                HStack(spacing: 0) {
+                    Text("From \\ To")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .frame(width: 120, height: 60, alignment: .center)
+                        .background(Color(white: 0.15).opacity(0.2))
+                        .border(Color.secondary.opacity(0.3))
+                    
+                    ForEach(studio.devices ?? [], id: \.id) { device in
+                        VStack(spacing: 2) {
+                            Text(device.nickname)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                            Text(ioSummary(for: device))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(width: 100, height: 60, alignment: .center)
+                        .background(Color(white: 0.15).opacity(0.1))
+                        .border(Color.secondary.opacity(0.3))
+                    }
+                }
+                
+                // Data rows
+                ForEach(studio.devices ?? [], id: \.id) { fromDevice in
+                    HStack(spacing: 0) {
+                        VStack(spacing: 2) {
+                            Text(fromDevice.nickname)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                            Text(ioSummary(for: fromDevice))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(width: 120, height: 60, alignment: .center)
+                        .background(Color(white: 0.15).opacity(0.1))
+                        .border(Color.secondary.opacity(0.3))
+                        
+                        ForEach(studio.devices ?? [], id: \.id) { toDevice in
+                            connectionCell(from: fromDevice, to: toDevice)
+                        }
+                    }
+                }
+            }
+            
+            // Legend
+            HStack(spacing: 20) {
+                Text("Legend:")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                
+                legendItem(color: ConnectionVisualType.analog.color, label: "Analog")
+                legendItem(color: ConnectionVisualType.digital.color, label: "Digital")
+                legendItem(color: ConnectionVisualType.midi.color, label: "MIDI")
+                legendItem(color: ConnectionVisualType.computer.color, label: "Computer")
+            }
+            .padding()
+        }
+        
+        #if os(iOS)
+        let renderer = ImageRenderer(content: printableMatrix)
+        renderer.scale = 2.0
+        
+        if let pdfData = renderer.pdf() {
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ConnectionMatrix.pdf")
+            try? pdfData.write(to: tempURL)
+            
+            let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                var presentingVC = rootVC
+                while let presented = presentingVC.presentedViewController {
+                    presentingVC = presented
+                }
+                
+                if let popover = activityVC.popoverPresentationController {
+                    popover.sourceView = presentingVC.view
+                    popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
+                    popover.permittedArrowDirections = []
+                }
+                
+                presentingVC.present(activityVC, animated: true)
+            }
+        }
+        #elseif os(macOS)
+        let renderer = ImageRenderer(content: printableMatrix)
+        renderer.scale = 2.0
+        
+        if let pdfData = renderer.pdf() {
+            let savePanel = NSSavePanel()
+            savePanel.allowedContentTypes = [.pdf]
+            savePanel.nameFieldStringValue = "ConnectionMatrix.pdf"
+            
+            savePanel.begin { response in
+                if response == .OK, let url = savePanel.url {
+                    try? pdfData.write(to: url)
+                }
+            }
+        }
+        #endif
+    }
+}
+
+extension ImageRenderer {
+    @MainActor func pdf() -> Data? {
+        let pdfData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+              let context = CGContext(consumer: consumer, mediaBox: nil, nil) else {
+            return nil
+        }
+        
+        render { size, renderer in
+            var mediaBox = CGRect(origin: .zero, size: size)
+            context.beginPage(mediaBox: &mediaBox)
+            renderer(context)
+            context.endPage()
+        }
+        
+        context.closePDF()
+        
+        return pdfData as Data
     }
 }
 

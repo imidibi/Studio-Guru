@@ -317,6 +317,7 @@ struct StudioCanvasView: View {
                 // One-time migration: fix computer interface port types without breaking connections
                 fixComputerInterfacePortTypes(in: studio)
                 connectionsStore.load(studioId: sid)
+                connectionsStore.cleanupOrphanedConnections(studio: studio)
             }
         }
         .onChange(of: selectedStudioId) { _, newValue in
@@ -327,6 +328,7 @@ struct StudioCanvasView: View {
                 // Fix computer interface port types when switching studios
                 fixComputerInterfacePortTypes(in: studio)
                 connectionsStore.load(studioId: sid)
+                connectionsStore.cleanupOrphanedConnections(studio: studio)
             }
         }
     }
@@ -1786,11 +1788,34 @@ struct StudioCanvasView: View {
             Rectangle()
                 .fill(Color(white: 0.95))
             
-            // Draw connection lines
+            // Draw connection lines with proper colors
             let links = connectionsStore.links(for: studio.id)
             ForEach(links, id: \.id) { link in
                 if let fromDevice = devices.first(where: { $0.id == link.fromDeviceId }),
-                   let toDevice = devices.first(where: { $0.id == link.toDeviceId }) {
+                   let toDevice = devices.first(where: { $0.id == link.toDeviceId }),
+                   let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id) {
+                    
+                    // Determine connection color based on connection type
+                    let connectionColor: Color = {
+                        // Get the first edge to determine connection type
+                        guard let firstEdge = bundle.edges.first,
+                              let device = devices.first(where: { $0.id == firstEdge.from.deviceId }) else {
+                            return ConnectionVisualType.unknown.color
+                        }
+                        
+                        // Check for regular ports first
+                        if let port = device.ports?.first(where: { $0.id == firstEdge.from.portId }) {
+                            return ConnectionVisualType.from(portType: port.type).color
+                        }
+                        
+                        // Check for computer interface (virtual port)
+                        if !device.computerInterfaceCounts.isEmpty {
+                            return ConnectionVisualType.computer.color
+                        }
+                        
+                        return ConnectionVisualType.unknown.color
+                    }()
+                    
                     Path { path in
                         let from = CGPoint(
                             x: fromDevice.posX + offsetX,
@@ -1803,7 +1828,7 @@ struct StudioCanvasView: View {
                         path.move(to: from)
                         path.addLine(to: to)
                     }
-                    .stroke(Color.blue, lineWidth: 2)
+                    .stroke(connectionColor, lineWidth: 2)
                 }
             }
             
@@ -1820,11 +1845,10 @@ struct StudioCanvasView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     
-                    if let ports = device.ports, !ports.isEmpty {
-                        Text("\(ports.reduce(0) { $0 + ($1.channels?.count ?? 0) }) ch")
-                            .font(.system(size: 8))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(ioSummary(from: device.ports))
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
                 .frame(width: 240, height: 80)
                 .padding(8)
@@ -1839,7 +1863,7 @@ struct StudioCanvasView: View {
         }
         .frame(width: canvasWidth, height: canvasHeight)
         
-        // Create full printable view with title
+        // Create full printable view with title and legend
         let fullView = VStack(spacing: 0) {
             Text("Studio Canvas: \(studio.name)")
                 .font(.title)
@@ -1849,6 +1873,62 @@ struct StudioCanvasView: View {
                 .background(Color.white)
             
             printableCanvas
+            
+            // Legend
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 20) {
+                    Text("Legend:")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ConnectionVisualType.analog.color)
+                            .frame(width: 12, height: 12)
+                        Text("Analog")
+                            .font(.caption)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ConnectionVisualType.digital.color)
+                            .frame(width: 12, height: 12)
+                        Text("Digital (ADAT/MADI/S/PDIF)")
+                            .font(.caption)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ConnectionVisualType.midi.color)
+                            .frame(width: 12, height: 12)
+                        Text("MIDI")
+                            .font(.caption)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ConnectionVisualType.computer.color)
+                            .frame(width: 12, height: 12)
+                        Text("Computer")
+                            .font(.caption)
+                    }
+                }
+                HStack(spacing: 8) {
+                    Text("WC")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.2))
+                        .cornerRadius(3)
+                    Text("= Word Clock (sync only, not counted in I/O)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white)
         }
         
         #if os(iOS)
@@ -5820,20 +5900,27 @@ private struct ConnectionMatrixView: View {
             
             // Analyze connection types and channel count
             var typeCounts: [ConnectionVisualType: Int] = [:]
-            var uniqueChannels: Set<String> = []  // Track unique from.channelId
+            var uniqueChannels: Set<String> = []  // Track unique from.channelId (audio only)
+            var hasWordClock = false
             
             for edge in bundle.edges {
-                // Count unique channels (avoid counting duplicates)
-                uniqueChannels.insert(edge.from.channelId.uuidString)
-                
                 if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
                    let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
                     let visualType = ConnectionVisualType.from(portType: port.type)
                     typeCounts[visualType, default: 0] += 1
+                    
+                    // Word clock is sync only - don't count as audio channel
+                    if port.type == .wordClockIn || port.type == .wordClockOut {
+                        hasWordClock = true
+                    } else {
+                        // Count unique audio channels (avoid counting duplicates)
+                        uniqueChannels.insert(edge.from.channelId.uuidString)
+                    }
                 } else if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
                           !device.computerInterfaceCounts.isEmpty {
                     // Computer interface virtual port
                     typeCounts[.computer, default: 0] += 1
+                    uniqueChannels.insert(edge.from.channelId.uuidString)
                 }
             }
             
@@ -5842,7 +5929,8 @@ private struct ConnectionMatrixView: View {
             let channelCount = uniqueChannels.isEmpty ? bundle.edges.count : uniqueChannels.count
             map[key] = ConnectionInfo(
                 types: types.isEmpty ? [.unknown] : types,
-                channelCount: channelCount
+                channelCount: channelCount,
+                hasWordClock: hasWordClock
             )
         }
         
@@ -5941,11 +6029,25 @@ private struct ConnectionMatrixView: View {
                 // Color legend at bottom
                 Divider()
                 
-                HStack(spacing: 24) {
-                    legendItem(color: .blue, label: "Analog")
-                    legendItem(color: .green, label: "Digital (ADAT/MADI/S/PDIF)")
-                    legendItem(color: .purple, label: "MIDI")
-                    legendItem(color: .orange, label: "Computer (USB/Thunderbolt/Ethernet)")
+                VStack(spacing: 8) {
+                    HStack(spacing: 24) {
+                        legendItem(color: .blue, label: "Analog")
+                        legendItem(color: .green, label: "Digital (ADAT/MADI/S/PDIF)")
+                        legendItem(color: .purple, label: "MIDI")
+                        legendItem(color: .orange, label: "Computer (USB/Thunderbolt/Ethernet)")
+                    }
+                    HStack {
+                        Text("WC")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.2))
+                            .cornerRadius(3)
+                        Text("= Word Clock (sync only, not counted in I/O)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding()
                 .background(Color.secondary.opacity(0.1))
@@ -6078,10 +6180,21 @@ private struct ConnectionMatrixView: View {
                     }
                 }
                 
-                // Channel count
-                Text("\(info.channelCount)ch")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                // Channel count (audio only) and word clock indicator
+                if info.channelCount > 0 {
+                    Text("\(info.channelCount)ch")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if info.hasWordClock {
+                    Text("WC")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.2))
+                        .cornerRadius(3)
+                }
             }
             .frame(width: 100, height: 60)
             .background(info.types.first?.color.opacity(0.15) ?? Color.clear)
@@ -6165,15 +6278,29 @@ private struct ConnectionMatrixView: View {
             }
             
             // Legend
-            HStack(spacing: 20) {
-                Text("Legend:")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                
-                legendItem(color: ConnectionVisualType.analog.color, label: "Analog")
-                legendItem(color: ConnectionVisualType.digital.color, label: "Digital")
-                legendItem(color: ConnectionVisualType.midi.color, label: "MIDI")
-                legendItem(color: ConnectionVisualType.computer.color, label: "Computer")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 20) {
+                    Text("Legend:")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    
+                    legendItem(color: ConnectionVisualType.analog.color, label: "Analog")
+                    legendItem(color: ConnectionVisualType.digital.color, label: "Digital")
+                    legendItem(color: ConnectionVisualType.midi.color, label: "MIDI")
+                    legendItem(color: ConnectionVisualType.computer.color, label: "Computer")
+                }
+                HStack(spacing: 8) {
+                    Text("WC")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.2))
+                        .cornerRadius(3)
+                    Text("= Word Clock (sync only, not counted in I/O)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding()
         }
@@ -6247,6 +6374,7 @@ extension ImageRenderer {
 private struct ConnectionInfo {
     let types: [ConnectionVisualType]
     let channelCount: Int
+    let hasWordClock: Bool
 }
 
 // MARK: - Help View

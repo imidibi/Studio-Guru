@@ -226,7 +226,25 @@ final class ConnectionsStore: ObservableObject {
 
         let removed = (studioBundles.removeValue(forKey: key) != nil)
         bundlesByStudio[studioId] = studioBundles
-        if removed { persist(studioId: studioId) }
+        
+        if removed {
+            // Delete directly from SwiftData instead of full re-persist
+            if let context = modelContext {
+                let descriptor = FetchDescriptor<ConnectionBundleModel>(
+                    predicate: #Predicate { $0.id == linkId && $0.studioId == studioId }
+                )
+                if let bundleToDelete = try? context.fetch(descriptor).first {
+                    context.delete(bundleToDelete)
+                    try? context.save()
+                }
+            } else {
+                // Fallback to UserDefaults
+                persistToUserDefaults(studioId: studioId)
+            }
+            
+            // Force UI update
+            objectWillChange.send()
+        }
         return removed
     }
 
@@ -420,6 +438,53 @@ final class ConnectionsStore: ObservableObject {
         }
         
         bundlesByStudio[studioId] = bundles
+    }
+    
+    /// Clean up orphaned connections that reference non-existent devices
+    func cleanupOrphanedConnections(studio: Studio) {
+        let studioId = studio.id
+        guard var studioBundles = bundlesByStudio[studioId] else { return }
+        
+        let deviceIds = Set(studio.devices?.map { $0.id } ?? [])
+        var hasChanges = false
+        
+        // Check each bundle
+        var bundlesToRemove: [String] = []
+        for (key, var bundle) in studioBundles {
+            // Remove bundle if either device doesn't exist
+            if !deviceIds.contains(bundle.fromDeviceId) || !deviceIds.contains(bundle.toDeviceId) {
+                bundlesToRemove.append(key)
+                hasChanges = true
+                continue
+            }
+            
+            // Remove edges that reference non-existent devices
+            let originalEdgeCount = bundle.edges.count
+            bundle.edges.removeAll { edge in
+                !deviceIds.contains(edge.from.deviceId) || !deviceIds.contains(edge.to.deviceId)
+            }
+            
+            if bundle.edges.count != originalEdgeCount {
+                hasChanges = true
+                studioBundles[key] = bundle
+            }
+            
+            // Remove bundle if it has no edges left
+            if bundle.edges.isEmpty {
+                bundlesToRemove.append(key)
+            }
+        }
+        
+        // Remove empty or orphaned bundles
+        for key in bundlesToRemove {
+            studioBundles.removeValue(forKey: key)
+        }
+        
+        if hasChanges {
+            bundlesByStudio[studioId] = studioBundles
+            persist(studioId: studioId)
+            objectWillChange.send()
+        }
     }
     
     private func loadFromUserDefaults(studioId: UUID) {

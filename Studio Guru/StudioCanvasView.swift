@@ -2383,10 +2383,25 @@ struct StudioCanvasView: View {
 
         for device in studio.devices ?? [] {
             deviceIds.insert(device.id)
+            
+            // Add regular ports
             for port in device.ports ?? [] {
                 portIds.insert(port.id)
                 for channel in port.channels ?? [] {
                     channelIds.insert(channel.id)
+                }
+            }
+            
+            // Add virtual computer interface ports/channels (stable UUIDs)
+            let counts = device.computerInterfaceCounts
+            for iface in counts.keys {
+                let n = max(0, counts[iface] ?? 0)
+                if n == 0 { continue }
+                for i in 1...n {
+                    let pid = stableUUID("computerPort|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                    let cid = stableUUID("computerCh|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                    portIds.insert(pid)
+                    channelIds.insert(cid)
                 }
             }
         }
@@ -2398,13 +2413,21 @@ struct StudioCanvasView: View {
         for bundle in bundles {
             for edge in bundle.edges {
                 // Validate all UUIDs exist in the studio
-                guard deviceIds.contains(edge.from.deviceId),
-                    deviceIds.contains(edge.to.deviceId),
-                    portIds.contains(edge.from.portId),
-                    portIds.contains(edge.to.portId),
-                    channelIds.contains(edge.from.channelId),
-                    channelIds.contains(edge.to.channelId)
-                else {
+                let fromDeviceValid = deviceIds.contains(edge.from.deviceId)
+                let toDeviceValid = deviceIds.contains(edge.to.deviceId)
+                let fromPortValid = portIds.contains(edge.from.portId)
+                let toPortValid = portIds.contains(edge.to.portId)
+                let fromChannelValid = channelIds.contains(edge.from.channelId)
+                let toChannelValid = channelIds.contains(edge.to.channelId)
+                
+                guard fromDeviceValid, toDeviceValid, fromPortValid, toPortValid, fromChannelValid, toChannelValid else {
+                    print("⚠️ Skipping invalid connection:")
+                    if !fromDeviceValid { print("  - fromDevice ID not found: \(edge.from.deviceId)") }
+                    if !toDeviceValid { print("  - toDevice ID not found: \(edge.to.deviceId)") }
+                    if !fromPortValid { print("  - fromPort ID not found: \(edge.from.portId)") }
+                    if !toPortValid { print("  - toPort ID not found: \(edge.to.portId)") }
+                    if !fromChannelValid { print("  - fromChannel ID not found: \(edge.from.channelId)") }
+                    if !toChannelValid { print("  - toChannel ID not found: \(edge.to.channelId)") }
                     invalidCount += 1
                     continue
                 }
@@ -2428,6 +2451,11 @@ struct StudioCanvasView: View {
             }
         }
 
+        // Log summary
+        print("✅ syncConnectionsToSwiftData complete:")
+        print("   Valid connections: \(validCount)")
+        print("   Invalid connections: \(invalidCount)")
+        
         // Save to persist the connections
         try? modelContext.save()
     }
@@ -2482,6 +2510,8 @@ struct StudioCanvasView: View {
             var deviceMap: [UUID: DeviceInstance] = [:]
             var portMap: [UUID: Port] = [:]
             var channelMap: [UUID: Channel] = [:]
+            var computerPortIdMap: [UUID: UUID] = [:]  // old port UUID -> new port UUID
+            var computerChannelIdMap: [UUID: UUID] = [:]  // old channel UUID -> new channel UUID
 
             for exportableDevice in exportable.devices {
                 let device = DeviceInstance(
@@ -2595,31 +2625,92 @@ struct StudioCanvasView: View {
                 studio.devices?.append(device)
                 // Map old device UUID to new device
                 deviceMap[exportableDevice.id] = device
+                
+                // Map virtual computer interface ports/channels (stable UUIDs based on device ID)
+                // The exported connections reference the OLD device UUIDs in their stable UUID generation
+                // We need to map those to the NEW device's computer interface UUIDs
+                let oldDeviceId = exportableDevice.id
+                let newDeviceId = device.id
+                let computerInterfaces = exportableDevice.computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) }
+                let counts = device.computerInterfaceCounts
+                
+                for iface in computerInterfaces {
+                    let count = counts[iface] ?? 0
+                    if count == 0 { continue }
+                    
+                    for i in 1...count {
+                        // Generate UUIDs using OLD device ID (as they were in the export)
+                        let oldPortId = stableUUID("computerPort|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                        let oldChannelId = stableUUID("computerCh|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                        
+                        // Generate UUIDs using NEW device ID (as they will be in the import)
+                        let newPortId = stableUUID("computerPort|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                        let newChannelId = stableUUID("computerCh|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                        
+                        // Store the mapping
+                        computerPortIdMap[oldPortId] = newPortId
+                        computerChannelIdMap[oldChannelId] = newChannelId
+                    }
+                }
             }
 
             // Import connections with UUID remapping
             for exportableConnection in exportable.connections {
-                // Look up the new device, port, and channel UUIDs
-                let fromDevice = deviceMap[exportableConnection.fromDeviceId]
-                let toDevice = deviceMap[exportableConnection.toDeviceId]
-                let fromPort = portMap[exportableConnection.fromPortId]
-                let toPort = portMap[exportableConnection.toPortId]
-                let fromChannel = channelMap[exportableConnection.fromChannelId]
-                let toChannel = channelMap[exportableConnection.toChannelId]
-
-                guard let fromDevice, let toDevice, let fromPort, let toPort,
-                    let fromChannel, let toChannel
-                else {
+                // Look up the new device UUIDs
+                guard let fromDevice = deviceMap[exportableConnection.fromDeviceId],
+                      let toDevice = deviceMap[exportableConnection.toDeviceId] else {
+                    continue
+                }
+                
+                // Look up port and channel UUIDs (check regular ports first, then computer interface maps)
+                let fromPortId: UUID
+                let toPortId: UUID
+                let fromChannelId: UUID
+                let toChannelId: UUID
+                
+                // From port - check regular port first, then computer interface map
+                if let port = portMap[exportableConnection.fromPortId] {
+                    fromPortId = port.id
+                } else if let mappedPortId = computerPortIdMap[exportableConnection.fromPortId] {
+                    fromPortId = mappedPortId
+                } else {
+                    continue
+                }
+                
+                // To port - check regular port first, then computer interface map
+                if let port = portMap[exportableConnection.toPortId] {
+                    toPortId = port.id
+                } else if let mappedPortId = computerPortIdMap[exportableConnection.toPortId] {
+                    toPortId = mappedPortId
+                } else {
+                    continue
+                }
+                
+                // From channel - check regular channel first, then computer interface map
+                if let channel = channelMap[exportableConnection.fromChannelId] {
+                    fromChannelId = channel.id
+                } else if let mappedChannelId = computerChannelIdMap[exportableConnection.fromChannelId] {
+                    fromChannelId = mappedChannelId
+                } else {
+                    continue
+                }
+                
+                // To channel - check regular channel first, then computer interface map
+                if let channel = channelMap[exportableConnection.toChannelId] {
+                    toChannelId = channel.id
+                } else if let mappedChannelId = computerChannelIdMap[exportableConnection.toChannelId] {
+                    toChannelId = mappedChannelId
+                } else {
                     continue
                 }
 
                 let connection = Connection(
                     fromDeviceId: fromDevice.id,
-                    fromPortId: fromPort.id,
-                    fromChannelId: fromChannel.id,
+                    fromPortId: fromPortId,
+                    fromChannelId: fromChannelId,
                     toDeviceId: toDevice.id,
-                    toPortId: toPort.id,
-                    toChannelId: toChannel.id,
+                    toPortId: toPortId,
+                    toChannelId: toChannelId,
                     cable: CableType(rawValue: exportableConnection.cableRaw)
                         ?? .other,
                     label: exportableConnection.label,

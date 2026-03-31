@@ -2486,7 +2486,8 @@ struct StudioCanvasView: View {
         
         // Calculate total width needed
         let totalWidth = Double(columnRange) * finalCardWidth + Double(max(0, columnRange - 1)) * finalHorizontalSpacing
-        let startX = padding + (targetWidth - totalWidth) / 2 + halfCardWidth
+        // Center horizontally if it fits, otherwise start from left edge with padding
+        let startX = max(padding + halfCardWidth, padding + (targetWidth - totalWidth) / 2 + halfCardWidth)
         
         for (levelIndex, level) in sortedLevels.enumerated() {
             guard let devicesInLevel = levelGroups[level] else { continue }

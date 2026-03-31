@@ -1634,11 +1634,34 @@ struct StudioCanvasView: View {
 
     private func duplicateStudio(from source: Studio) {
         let copy = Studio(name: "\(source.name) Copy")
+        
+        // Map old device UUIDs to new devices
+        var deviceMap: [UUID: DeviceInstance] = [:]
+        var portMap: [UUID: Port] = [:]
+        var channelMap: [UUID: Channel] = [:]
+        var computerPortIdMap: [UUID: UUID] = [:]
+        var computerChannelIdMap: [UUID: UUID] = [:]
+        
+        // Copy devices with all properties
         for d in source.devices ?? [] {
             let newDevice = DeviceInstance(
                 manufacturer: d.manufacturer,
                 model: d.model,
                 nickname: d.nickname,
+                category: d.category,
+                serialNumber: d.serialNumber,
+                location: d.location,
+                audioInputsCount: d.audioInputsCount,
+                audioOutputsCount: d.audioOutputsCount,
+                adatInputPortsCount: d.adatInputPortsCount,
+                adatOutputPortsCount: d.adatOutputPortsCount,
+                madiInputPortsCount: d.madiInputPortsCount,
+                madiOutputPortsCount: d.madiOutputPortsCount,
+                ethernetPortsCount: d.ethernetPortsCount,
+                sampleRate: d.sampleRate,
+                digitalInputs: d.digitalInputs,
+                digitalOutputs: d.digitalOutputs,
+                computerInterfaces: d.computerInterfaces,
                 posX: d.posX + 30,
                 posY: d.posY + 30,
                 scale: d.scale,
@@ -1646,40 +1669,158 @@ struct StudioCanvasView: View {
             )
             newDevice.frontImagePath = d.frontImagePath
             newDevice.rearImagePath = d.rearImagePath
+            newDevice.supportPageURLString = d.supportPageURLString
+            newDevice.downloadsPageURLString = d.downloadsPageURLString
 
+            // Copy ports
             for p in d.ports ?? [] {
                 let newPort = Port(
                     name: p.name,
                     type: p.type,
                     direction: p.direction
                 )
+                
+                // Copy channels
                 for ch in p.channels ?? [] {
+                    let newChannel = Channel(
+                        index: ch.index,
+                        nameLong: ch.nameLong,
+                        nameShort: ch.nameShort,
+                        signal: ch.signal,
+                        grouping: ch.grouping
+                    )
                     if newPort.channels == nil {
                         newPort.channels = []
                     }
-                    newPort.channels?.append(
-                        Channel(
-                            index: ch.index,
-                            nameLong: ch.nameLong,
-                            nameShort: ch.nameShort,
-                            signal: ch.signal,
-                            grouping: ch.grouping
-                        )
-                    )
+                    newPort.channels?.append(newChannel)
+                    channelMap[ch.id] = newChannel
                 }
+                
                 if newDevice.ports == nil {
                     newDevice.ports = []
                 }
                 newDevice.ports?.append(newPort)
+                portMap[p.id] = newPort
+            }
+            
+            // Copy docs
+            for doc in d.docs ?? [] {
+                let newDoc: DocLink
+                if let bookmarkData = doc.localBookmarkData {
+                    newDoc = DocLink(title: doc.title, kind: doc.kind, bookmarkData: bookmarkData)
+                } else if let urlString = doc.urlString, let url = URL(string: urlString) {
+                    newDoc = DocLink(title: doc.title, kind: doc.kind, url: url)
+                } else {
+                    continue
+                }
+                if newDevice.docs == nil {
+                    newDevice.docs = []
+                }
+                newDevice.docs?.append(newDoc)
             }
 
             if copy.devices == nil {
                 copy.devices = []
             }
             copy.devices?.append(newDevice)
+            deviceMap[d.id] = newDevice
+            
+            // Map virtual computer interface ports/channels
+            let oldDeviceId = d.id
+            let newDeviceId = newDevice.id
+            let counts = newDevice.computerInterfaceCounts
+            
+            for iface in d.computerInterfaces {
+                let count = counts[iface] ?? 0
+                if count == 0 { continue }
+                
+                for i in 1...count {
+                    let oldPortId = stableUUID("computerPort|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    let oldChannelId = stableUUID("computerCh|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    let newPortId = stableUUID("computerPort|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    let newChannelId = stableUUID("computerCh|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    
+                    computerPortIdMap[oldPortId] = newPortId
+                    computerChannelIdMap[oldChannelId] = newChannelId
+                }
+            }
+        }
+        
+        // Copy connections from ConnectionsStore
+        let sourceLinks = connectionsStore.links(for: source.id)
+        for link in sourceLinks {
+            guard let bundle = connectionsStore.bundle(for: source.id, linkId: link.id) else { continue }
+            
+            // Map each edge to the new device/port/channel IDs
+            for edge in bundle.edges {
+                guard let fromDevice = deviceMap[edge.from.deviceId],
+                      let toDevice = deviceMap[edge.to.deviceId] else {
+                    continue
+                }
+                
+                // Map port and channel IDs (check regular first, then computer interface maps)
+                let fromPortId: UUID
+                let toPortId: UUID
+                let fromChannelId: UUID
+                let toChannelId: UUID
+                
+                if let port = portMap[edge.from.portId] {
+                    fromPortId = port.id
+                } else if let mappedPortId = computerPortIdMap[edge.from.portId] {
+                    fromPortId = mappedPortId
+                } else {
+                    continue
+                }
+                
+                if let port = portMap[edge.to.portId] {
+                    toPortId = port.id
+                } else if let mappedPortId = computerPortIdMap[edge.to.portId] {
+                    toPortId = mappedPortId
+                } else {
+                    continue
+                }
+                
+                if let channel = channelMap[edge.from.channelId] {
+                    fromChannelId = channel.id
+                } else if let mappedChannelId = computerChannelIdMap[edge.from.channelId] {
+                    fromChannelId = mappedChannelId
+                } else {
+                    continue
+                }
+                
+                if let channel = channelMap[edge.to.channelId] {
+                    toChannelId = channel.id
+                } else if let mappedChannelId = computerChannelIdMap[edge.to.channelId] {
+                    toChannelId = mappedChannelId
+                } else {
+                    continue
+                }
+                
+                // Create connection in SwiftData
+                let connection = Connection(
+                    fromDeviceId: fromDevice.id,
+                    fromPortId: fromPortId,
+                    fromChannelId: fromChannelId,
+                    toDeviceId: toDevice.id,
+                    toPortId: toPortId,
+                    toChannelId: toChannelId,
+                    cable: .other,
+                    label: edge.fromName,
+                    notes: nil
+                )
+                if copy.connections == nil {
+                    copy.connections = []
+                }
+                copy.connections?.append(connection)
+            }
         }
 
         modelContext.insert(copy)
+        try? modelContext.save()
+        
+        // Rebuild ConnectionsStore from the copied connections
+        connectionsStore.rebuildFromConnections(studio: copy)
+        
         selectedStudioId = copy.id
     }
 
@@ -4022,11 +4163,14 @@ private struct ConnectionLineRow: View {
                 )
                 // IMPORTANT: give the line a full-size layout box so macOS can attach a context menu
                 // while hit-testing still remains constrained to the stroked curve via ConnectionLineView.contentShape.
+                // On iOS, skip this frame modifier to prevent visual glitch during long press gesture.
+                #if os(macOS)
                 .frame(
                     maxWidth: .infinity,
                     maxHeight: .infinity,
                     alignment: .topLeading
                 )
+                #endif
                 // Double-click (macOS) / double-tap (iOS) to delete
                 .highPriorityGesture(
                     TapGesture(count: 2)
@@ -4037,10 +4181,11 @@ private struct ConnectionLineRow: View {
                     onSelect()
                 }
                 // Long-press on iPad/iPhone to delete (we use the same confirm flow via onDelete())
-                .onLongPressGesture {
+                .onLongPressGesture(minimumDuration: 0.5) {
                     onDelete()
                 }
-                // Right-click on macOS / long-press menu on iOS (kept for discoverability)
+                // Right-click on macOS (context menu causes visual glitch with long press on iOS)
+                #if os(macOS)
                 .contextMenu {
                     Button(role: .destructive) {
                         onDelete()
@@ -4048,6 +4193,7 @@ private struct ConnectionLineRow: View {
                         Label("Delete Connection", systemImage: "trash")
                     }
                 }
+                #endif
             }
         }
     }

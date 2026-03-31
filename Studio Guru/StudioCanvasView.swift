@@ -3292,7 +3292,7 @@ private struct DeviceCardView: View {
             // Handle is visually anchored to the card corner.
             // We compute the drag line start point using device position directly.
             DeviceConnectionHandle(deviceId: device.id)
-                .offset(x: 18, y: -12)
+                .offset(x: 6, y: -6)
                 .background(
                     GeometryReader { proxy in
                         // Get position in the ZStack's local coordinate space
@@ -4359,11 +4359,11 @@ private struct DeviceConnectionHandle: View {
 
     var body: some View {
         Image(systemName: "arrow.up.arrow.down")
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: 8, weight: .semibold))
             .foregroundStyle(Color.accentColor.opacity(0.8))
-            .padding(8)
+            .padding(4)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: 3)
                     .fill(Color.accentColor.opacity(0.15))
             )
             .contentShape(Rectangle())

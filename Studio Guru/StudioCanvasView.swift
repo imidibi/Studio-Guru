@@ -3149,7 +3149,6 @@ private struct CanvasSurfaceView: View {
     @State private var connectionHandleTips: [UUID: CGPoint] = [:]
     @State private var canvasScale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
-    @State private var isPanEnabled: Bool = false
 
     private var links: [ConnectionLinkSummary] {
         connectionsStore.links(for: studio.id)
@@ -3157,114 +3156,63 @@ private struct CanvasSurfaceView: View {
 
     var body: some View {
         GeometryReader { geo in
-            ZStack {
-                ScrollView([.horizontal, .vertical]) {
-                    ZStack {
-                        Rectangle().fill(background)
+            ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                ZStack {
+                    Rectangle().fill(background)
 
-                        ForEach(links, id: \.id) { link in
-                            linkRow(link)
-                        }
+                    ForEach(links, id: \.id) { link in
+                        linkRow(link)
+                    }
 
-                        ForEach(studio.devices ?? [], id: \.id) { d in
-                            deviceCard(d, canvasSize: geo.size)
-                        }
+                    ForEach(studio.devices ?? [], id: \.id) { d in
+                        deviceCard(d, canvasSize: geo.size)
+                    }
 
-                        if let temp = activeConnectionDrag {
-                            ConnectionLineView(
-                                from: temp.start,
-                                to: temp.location,
-                                isSelected: true
-                            )
-                            .allowsHitTesting(false)
-                            .zIndex(10)
-                        }
-                    }
-                    .coordinateSpace(name: "canvasContent")
-                    .frame(
-                        width: geo.size.width * 1.5,
-                        height: geo.size.height * 1.5
-                    )
-                    .scaleEffect(canvasScale, anchor: .center)
-                    .frame(
-                        width: geo.size.width * 1.5 * canvasScale,
-                        height: geo.size.height * 1.5 * canvasScale
-                    )
-                    .onChange(of: canvasScale) { _, newValue in
-                        // print("🔍 Canvas scale changed to: \(newValue)")
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if !isPanEnabled {
-                            selection.selection = nil
-                        }
-                    }
-                    .preference(
-                        key: CanvasSizePreferenceKey.self,
-                        value: geo.size
-                    )
-                    .coordinateSpace(name: "canvas")
-                    .onPreferenceChange(ConnectionHandleTipPreferenceKey.self) {
-                        connectionHandleTips = $0
+                    if let temp = activeConnectionDrag {
+                        ConnectionLineView(
+                            from: temp.start,
+                            to: temp.location,
+                            isSelected: true
+                        )
+                        .allowsHitTesting(false)
+                        .zIndex(10)
                     }
                 }
-                .scrollDisabled(!isPanEnabled)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            if !isPanEnabled {
-                                canvasScale = lastScale * value
-                            }
-                        }
-                        .onEnded { value in
-                            if !isPanEnabled {
-                                // Clamp scale between 0.5x and 3x
-                                canvasScale = min(
-                                    max(lastScale * value, 0.5),
-                                    3.0
-                                )
-                                lastScale = canvasScale
-
-                                // Auto-enable pan mode when zoomed in
-                                if canvasScale > 1.0 {
-                                    isPanEnabled = true
-                                }
-                            }
-                        }
+                .coordinateSpace(name: "canvasContent")
+                .frame(
+                    width: max(geo.size.width * 1.5, geo.size.width),
+                    height: max(geo.size.height * 1.5, geo.size.height)
                 )
-
-                // Pan mode toggle button - shown when zoomed
-                if canvasScale > 1.0 {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Button(action: {
-                                isPanEnabled.toggle()
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(
-                                        systemName: isPanEnabled
-                                            ? "hand.draw.fill"
-                                            : "magnifyingglass"
-                                    )
-                                    Text(
-                                        isPanEnabled ? "Pan Mode" : "Zoom Mode"
-                                    )
-                                }
-                                .font(.caption)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(
-                                    .ultraThickMaterial,
-                                    in: RoundedRectangle(cornerRadius: 8)
-                                )
-                            }
-                            .padding()
-                        }
-                        Spacer()
-                    }
+                .scaleEffect(canvasScale)
+                .frame(
+                    width: max(geo.size.width * 1.5, geo.size.width) * canvasScale,
+                    height: max(geo.size.height * 1.5, geo.size.height) * canvasScale
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selection.selection = nil
+                }
+                .preference(
+                    key: CanvasSizePreferenceKey.self,
+                    value: geo.size
+                )
+                .coordinateSpace(name: "canvas")
+                .onPreferenceChange(ConnectionHandleTipPreferenceKey.self) {
+                    connectionHandleTips = $0
                 }
             }
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        let newScale = lastScale * value
+                        canvasScale = min(max(newScale, 0.5), 3.0)
+                    }
+                    .onEnded { value in
+                        let newScale = lastScale * value
+                        canvasScale = min(max(newScale, 0.5), 3.0)
+                        lastScale = canvasScale
+                    }
+            )
         }
     }
 
@@ -4313,15 +4261,117 @@ private struct ConnectionLineView: View {
         return isSelected ? baseColor : baseColor.opacity(0.7)
     }
 
-    // Linear gradient for multi-type connections
-    private var lineGradient: LinearGradient? {
-        guard !isSelected && connectionTypes.count > 1 else { return nil }
-        let colors = connectionTypes.map { $0.color.opacity(0.7) }
-        return LinearGradient(
-            gradient: Gradient(colors: colors),
-            startPoint: .leading,
-            endPoint: .trailing
-        )
+    // Calculate perpendicular offset for parallel lines
+    private func offsetForLine(at index: Int, total: Int) -> CGFloat {
+        let spacing: CGFloat = 6.0  // Space between parallel lines
+        if total == 1 { return 0 }
+        if total == 2 {
+            return index == 0 ? -spacing / 2 : spacing / 2
+        }
+        // For 3+ lines, distribute evenly
+        let totalWidth = spacing * CGFloat(total - 1)
+        return CGFloat(index) * spacing - totalWidth / 2
+    }
+    
+    // Create path offset perpendicular to the line
+    private func offsetPath(by offset: CGFloat) -> Path {
+        guard offset != 0 else { return path }
+        
+        var p = Path()
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let distance = sqrt(dx * dx + dy * dy)
+        
+        // Calculate perpendicular offset direction
+        let perpX = -dy / distance * offset
+        let perpY = dx / distance * offset
+        
+        let offsetFrom = CGPoint(x: from.x + perpX, y: from.y + perpY)
+        let offsetTo = CGPoint(x: to.x + perpX, y: to.y + perpY)
+        
+        let straightLength: CGFloat = 15.0
+        
+        if distance < straightLength * 2 {
+            p.move(to: offsetFrom)
+            p.addLine(to: offsetTo)
+        } else {
+            let normalizedDx = dx / distance
+            let normalizedDy = dy / distance
+            
+            let fromStraightEnd = CGPoint(
+                x: offsetFrom.x + normalizedDx * straightLength,
+                y: offsetFrom.y + normalizedDy * straightLength
+            )
+            
+            let toStraightStart = CGPoint(
+                x: offsetTo.x - normalizedDx * straightLength,
+                y: offsetTo.y - normalizedDy * straightLength
+            )
+            
+            p.move(to: offsetFrom)
+            p.addLine(to: fromStraightEnd)
+            
+            let curveDx = toStraightStart.x - fromStraightEnd.x
+            let curveDy = toStraightStart.y - fromStraightEnd.y
+            let c1 = CGPoint(
+                x: fromStraightEnd.x + curveDx * 0.35,
+                y: fromStraightEnd.y + curveDy * 0.35
+            )
+            let c2 = CGPoint(
+                x: fromStraightEnd.x + curveDx * 0.65,
+                y: fromStraightEnd.y + curveDy * 0.65
+            )
+            
+            p.addCurve(to: toStraightStart, control1: c1, control2: c2)
+            p.addLine(to: offsetTo)
+        }
+        
+        return p
+    }
+    
+    // Create arrowheads offset perpendicular to the line
+    private func offsetArrowheads(by offset: CGFloat, isBidirectional: Bool) -> Path {
+        guard offset != 0 else { return arrowheads() }
+        
+        var arrows = Path()
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let distance = sqrt(dx * dx + dy * dy)
+        
+        // Calculate perpendicular offset
+        let perpX = -dy / distance * offset
+        let perpY = dx / distance * offset
+        
+        let offsetFrom = CGPoint(x: from.x + perpX, y: from.y + perpY)
+        let offsetTo = CGPoint(x: to.x + perpX, y: to.y + perpY)
+        
+        if isBidirectional {
+            let normalizedDx = dx / distance
+            let normalizedDy = dy / distance
+            
+            let point1 = CGPoint(
+                x: offsetFrom.x + normalizedDx * distance * 0.35,
+                y: offsetFrom.y + normalizedDy * distance * 0.35
+            )
+            let angle1 = atan2(dy, dx) + .pi
+            arrows.addPath(makeArrow(at: point1, angle: angle1))
+            
+            let point2 = CGPoint(
+                x: offsetFrom.x + normalizedDx * distance * 0.65,
+                y: offsetFrom.y + normalizedDy * distance * 0.65
+            )
+            let angle2 = atan2(dy, dx)
+            arrows.addPath(makeArrow(at: point2, angle: angle2))
+        } else {
+            let midPoint = CGPoint(
+                x: offsetFrom.x + (offsetTo.x - offsetFrom.x) * 0.5,
+                y: offsetFrom.y + (offsetTo.y - offsetFrom.y) * 0.5
+            )
+            let angle = atan2(dy, dx)
+            arrows.addPath(makeArrow(at: midPoint, angle: angle))
+        }
+        
+        return arrows
     }
 
     // Check if connection type is bidirectional (USB, Thunderbolt, Ethernet)
@@ -4452,17 +4502,32 @@ private struct ConnectionLineView: View {
                     style: StrokeStyle(lineWidth: 18, lineCap: .round)
                 )
 
-            // Visible line (gradient if multiple types, solid color otherwise)
-            if let gradient = lineGradient {
-                path
-                    .stroke(
-                        gradient,
-                        style: StrokeStyle(
-                            lineWidth: isSelected ? lineWidth + 1 : lineWidth,
-                            lineCap: .round
+            // Draw separate parallel lines for multiple connection types
+            if connectionTypes.count > 1 {
+                ForEach(Array(connectionTypes.enumerated()), id: \.offset) { index, type in
+                    let offset = offsetForLine(at: index, total: connectionTypes.count)
+                    offsetPath(by: offset)
+                        .stroke(
+                            type.color.opacity(isSelected ? 1.0 : 0.7),
+                            style: StrokeStyle(
+                                lineWidth: isSelected ? lineWidth + 1 : lineWidth,
+                                lineCap: .round
+                            )
                         )
-                    )
+                    
+                    // Draw arrowheads for this line
+                    offsetArrowheads(by: offset, isBidirectional: type == .computer)
+                        .stroke(
+                            type.color.opacity(isSelected ? 1.0 : 0.7),
+                            style: StrokeStyle(
+                                lineWidth: 1.5,
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
+                        )
+                }
             } else {
+                // Single connection type - draw one line
                 path
                     .stroke(
                         lineColor,
@@ -4471,18 +4536,18 @@ private struct ConnectionLineView: View {
                             lineCap: .round
                         )
                     )
-            }
-
-            // Arrowhead(s) showing signal direction
-            arrowheads()
-                .stroke(
-                    lineColor,
-                    style: StrokeStyle(
-                        lineWidth: 1.5,
-                        lineCap: .round,
-                        lineJoin: .round
+                
+                // Arrowhead(s) showing signal direction
+                arrowheads()
+                    .stroke(
+                        lineColor,
+                        style: StrokeStyle(
+                            lineWidth: 1.5,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
                     )
-                )
+            }
         }
         // IMPORTANT: hit-test only the stroked curve, not the whole rectangular area.
         .contentShape(

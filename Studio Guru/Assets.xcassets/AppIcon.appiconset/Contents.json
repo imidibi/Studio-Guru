@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "Studi Guru Icon2.png",
+      "filename" : "studioguru image square.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "Studi Guru Icon2 1.png",
+      "filename" : "studioguru image square 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -25,7 +25,7 @@
           "value" : "tinted"
         }
       ],
-      "filename" : "Studi Guru Icon2 2.png",
+      "filename" : "studioguru image square 1.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

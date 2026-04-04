@@ -4599,9 +4599,11 @@ extension DeviceInstance {
         case .keyboard: return "pianokeys"
         case .midiDevice: return "pianokeys.inverse"
         case .mixer: return "dial.medium"
+        case .monitor: return "speaker.wave.2"
         case .multi: return "square.stack.3d.up"
         case .patchbay: return "square.grid.3x3"
         case .preamp: return "waveform.circle"
+        case .synth: return "waveform.and.person.filled"
         case .usbHub: return "hub"
         case .usbExpander: return "rectangle.connected.to.line.below"
         case .other: return "shippingbox"
@@ -6362,12 +6364,22 @@ private struct ConnectionMatrixView: View {
                 }
                 
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        exportMatrixAsPDF()
+                    Menu {
+                        Button {
+                            exportMatrixAsPDF()
+                        } label: {
+                            Label("Export as PDF", systemImage: "doc.fill")
+                        }
+                        
+                        Button {
+                            exportMatrixAsSpreadsheet()
+                        } label: {
+                            Label("Export as Spreadsheet", systemImage: "tablecells")
+                        }
                     } label: {
-                        Label("Export PDF", systemImage: "square.and.arrow.up")
+                        Label("Export", systemImage: "square.and.arrow.up")
                     }
-                    .help("Export connection matrix as PDF")
+                    .help("Export connection matrix")
                 }
                 
                 ToolbarItem(placement: .primaryAction) {
@@ -6650,6 +6662,160 @@ private struct ConnectionMatrixView: View {
             }
         }
         #endif
+    }
+    
+    private func exportMatrixAsSpreadsheet() {
+        // Create HTML table with inline styles for maximum Excel compatibility
+        var html = """
+        <html xmlns:x="urn:schemas-microsoft-com:office:excel">
+        <head>
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+            <meta name="ProgId" content="Excel.Sheet">
+        </head>
+        <body>
+            <h1 style="font-family: Arial, sans-serif; font-size: 24px; margin: 20px 0;">Connection Matrix: \(studio.name)</h1>
+            <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; font-family: Arial, sans-serif;">
+                <tr>
+                    <th style="background-color: #d0d0d0; font-weight: bold; text-align: center; padding: 12px; border: 1px solid #999;">From \\ To</th>
+        """
+        
+        // Column headers
+        for device in studio.devices ?? [] {
+            let ioSummaryText = ioSummary(for: device)
+            html += """
+                    <th style="background-color: #e8e8e8; font-weight: bold; text-align: center; padding: 12px; border: 1px solid #999; min-width: 150px;">\(device.nickname.htmlEscaped)<br><span style="font-size: 11px; color: #666; font-weight: normal;">\(ioSummaryText.htmlEscaped)</span></th>
+            """
+        }
+        html += "</tr>\n"
+        
+        // Data rows
+        for fromDevice in studio.devices ?? [] {
+            let fromIOSummary = ioSummary(for: fromDevice)
+            html += """
+                <tr>
+                    <td style="background-color: #f0f0f0; font-weight: bold; text-align: left; padding: 12px; border: 1px solid #999;">\(fromDevice.nickname.htmlEscaped)<br><span style="font-size: 11px; color: #666; font-weight: normal;">\(fromIOSummary.htmlEscaped)</span></td>
+            """
+            
+            for toDevice in studio.devices ?? [] {
+                let key = "\(fromDevice.id)_\(toDevice.id)"
+                
+                if let info = connectionMap[key] {
+                    // Has connection - use inline styles for colors
+                    let primaryType = info.types.first ?? .unknown
+                    let (bgColor, textColor): (String, String)
+                    switch primaryType {
+                    case .analog: 
+                        bgColor = "#bbdefb"  // Light blue
+                        textColor = "#0d47a1"  // Dark blue
+                    case .digital: 
+                        bgColor = "#c8e6c9"  // Light green
+                        textColor = "#1b5e20"  // Dark green
+                    case .midi: 
+                        bgColor = "#e1bee7"  // Light purple
+                        textColor = "#4a148c"  // Dark purple
+                    case .computer: 
+                        bgColor = "#ffe0b2"  // Light orange
+                        textColor = "#e65100"  // Dark orange
+                    case .unknown:
+                        bgColor = "#f5f5f5"
+                        textColor = "#666666"
+                    }
+                    
+                    let typeNames = info.types.map { type -> String in
+                        switch type {
+                        case .analog: return "Analog"
+                        case .digital: return "Digital"
+                        case .midi: return "MIDI"
+                        case .computer: return "Computer"
+                        case .unknown: return "Unknown"
+                        }
+                    }.joined(separator: " + ")
+                    
+                    var cellContent = "<b>\(typeNames)</b>"
+                    if info.channelCount > 0 {
+                        cellContent += "<br>\(info.channelCount) ch"
+                    }
+                    if info.hasWordClock {
+                        cellContent += "<br><span style=\"background-color: #ff9800; color: white; padding: 2px 6px; font-weight: bold; font-size: 10px;\">WC</span>"
+                    }
+                    
+                    html += "<td style=\"background-color: \(bgColor); color: \(textColor); text-align: center; padding: 12px; border: 1px solid #999;\">\(cellContent)</td>"
+                } else if fromDevice.id == toDevice.id {
+                    // Diagonal - same device
+                    html += "<td style=\"background-color: #f9f9f9; text-align: center; padding: 12px; border: 1px solid #999;\">—</td>"
+                } else {
+                    // No connection
+                    html += "<td style=\"background-color: white; text-align: center; padding: 12px; border: 1px solid #999;\"></td>"
+                }
+            }
+            html += "</tr>\n"
+        }
+        
+        html += """
+            </table>
+            
+            <br><br>
+            <table border="0" cellpadding="8" style="font-family: Arial, sans-serif;">
+                <tr><td colspan="4" style="font-weight: bold; font-size: 14px;">Legend:</td></tr>
+                <tr>
+                    <td style="background-color: #bbdefb; color: #0d47a1; padding: 8px 12px; font-weight: bold;">Analog</td>
+                    <td style="background-color: #c8e6c9; color: #1b5e20; padding: 8px 12px; font-weight: bold;">Digital</td>
+                    <td style="background-color: #e1bee7; color: #4a148c; padding: 8px 12px; font-weight: bold;">MIDI</td>
+                    <td style="background-color: #ffe0b2; color: #e65100; padding: 8px 12px; font-weight: bold;">Computer</td>
+                </tr>
+                <tr>
+                    <td colspan="4"><span style="background-color: #ff9800; color: white; padding: 2px 6px; font-weight: bold; font-size: 10px;">WC</span> = Word Clock (sync only, not counted in I/O)</td>
+                </tr>
+            </table>
+        </body>
+        </html>
+        """
+        
+        let htmlData = Data(html.utf8)
+        
+        #if os(iOS)
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ConnectionMatrix.xls")
+        try? htmlData.write(to: tempURL)
+        
+        let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+        
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let rootVC = windowScene.windows.first?.rootViewController {
+            var presentingVC = rootVC
+            while let presented = presentingVC.presentedViewController {
+                presentingVC = presented
+            }
+            
+            if let popover = activityVC.popoverPresentationController {
+                popover.sourceView = presentingVC.view
+                popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            
+            presentingVC.present(activityVC, animated: true)
+        }
+        #elseif os(macOS)
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.html]
+        savePanel.nameFieldStringValue = "ConnectionMatrix.html"
+        
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                try? htmlData.write(to: url)
+            }
+        }
+        #endif
+    }
+}
+
+extension String {
+    var htmlEscaped: String {
+        return self
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
     }
 }
 

@@ -43,60 +43,64 @@ private enum GuruSource: String, CaseIterable, Identifiable {
 // NOTE: must be NON-private because StudioCanvasView presents it in a sheet.
 struct GuruHomeView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var selectedSource: GuruSource = .vocalLead
     @State private var selectedProcess: GuruProcess = .compressor
 
     var body: some View {
-        NavigationStack {
-            NavigationSplitView {
-                List {
-                    Section("Processors") {
-                        ForEach(GuruProcess.allCases) { p in
-                            HStack {
-                                Label(p.rawValue, systemImage: p.symbol)
-                                Spacer()
-                                if selectedProcess == p {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.secondary)
-                                }
+        NavigationSplitView {
+            List {
+                Section("Processors") {
+                    ForEach(GuruProcess.allCases) { p in
+                        HStack {
+                            Label(p.rawValue, systemImage: p.symbol)
+                            Spacer()
+                            if selectedProcess == p {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.secondary)
                             }
-                            .contentShape(Rectangle())
-                            .onTapGesture { selectedProcess = p }
-                            .listRowBackground(
-                                selectedProcess == p ? Color.accentColor.opacity(0.12) : Color.clear
-                            )
                         }
-                    }
-                }
-                .navigationTitle("Guru")
-            } detail: {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        GroupBox("Source") {
-                            Picker("Source", selection: $selectedSource) {
-                                ForEach(GuruSource.allCases) { s in
-                                    Text(s.rawValue).tag(s)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .padding(8)
-                        }
-
-                        GuruPluginPanel(source: selectedSource, process: selectedProcess)
-                    }
-                    .padding(16)
-                }
-                .navigationTitle("Guru")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectedProcess = p }
+                        .listRowBackground(
+                            selectedProcess == p ? Color.accentColor.opacity(0.12) : Color.clear
+                        )
                     }
                 }
             }
+            .navigationTitle("Guru")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    GroupBox("Source") {
+                        Picker("Source", selection: $selectedSource) {
+                            ForEach(GuruSource.allCases) { s in
+                                Text(s.rawValue).tag(s)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(8)
+                    }
+
+                    GuruPluginPanel(source: selectedSource, process: selectedProcess)
+                }
+                .padding(horizontalSizeClass == .compact ? 12 : 16)
+            }
+            .navigationTitle(selectedProcess.rawValue)
         }
+        .navigationSplitViewStyle(.balanced)
+        #if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #else
         .frame(minWidth: 820, idealWidth: 980, maxWidth: .infinity,
                minHeight: 680, idealHeight: 820, maxHeight: .infinity)
+        #endif
     }
 }
 
@@ -150,13 +154,14 @@ private struct CompressorPreset {
 private struct CompressorPluginView: View {
     let source: GuruSource
     private var preset: CompressorPreset { .forSource(source) }
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HeaderRow(title: "Compressor", source: source.rawValue)
 
             ControlsPanel {
-                HStack(spacing: 14) {
+                HStack(spacing: horizontalSizeClass == .compact ? 8 : 14) {
                     GuruKnob(title: "Ratio", value01: ratio01(preset.ratio), valueText: String(format: "%.1f:1", preset.ratio))
                     GuruKnob(title: "Attack", value01: log01(preset.attackMs, min: 0.1, max: 100), valueText: "\(Int(preset.attackMs)) ms")
                     GuruKnob(title: "Release", value01: log01(preset.releaseMs, min: 10, max: 500), valueText: "\(Int(preset.releaseMs)) ms")
@@ -223,6 +228,7 @@ private struct HeaderRow: View {
 
 private struct ControlsPanel<Content: View>: View {
     @ViewBuilder var content: () -> Content
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         RoundedRectangle(cornerRadius: 16)
@@ -231,10 +237,10 @@ private struct ControlsPanel<Content: View>: View {
                 VStack(alignment: .leading, spacing: 12) {
                     content()
                 }
-                .padding(14)
+                .padding(horizontalSizeClass == .compact ? 12 : 14)
             )
-            // Fixed height so knobs never jump
-            .frame(height: 320)
+            // Fixed height so knobs never jump - smaller on compact devices
+            .frame(height: horizontalSizeClass == .compact ? 280 : 320)
     }
 }
 
@@ -287,6 +293,7 @@ private struct EQPreset {
 private struct EQPluginView: View {
     let source: GuruSource
     private var preset: EQPreset { .forSource(source) }
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -302,7 +309,7 @@ private struct EQPluginView: View {
                     Spacer()
                 }
 
-                HStack(spacing: 14) {
+                HStack(spacing: horizontalSizeClass == .compact ? 8 : 14) {
                     GuruKnob(title: "HPF", value01: hz01(preset.hpfHz, min: 20, max: 250), valueText: "\(Int(preset.hpfHz)) Hz")
                     GuruKnob(title: "Low", value01: db01(preset.lowShelfDb, min: -6, max: 6), valueText: fmtDb(preset.lowShelfDb))
                     GuruKnob(title: "Mud", value01: db01(preset.mudCutDb, min: -6, max: 6), valueText: fmtDb(preset.mudCutDb))
@@ -399,6 +406,7 @@ private struct ReverbPreset {
 private struct ReverbPluginView: View {
     let source: GuruSource
     @State private var type: ReverbType = .plate
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var preset: ReverbPreset { .forSource(source) }
 
@@ -419,7 +427,7 @@ private struct ReverbPluginView: View {
                     .pickerStyle(.segmented)
                 }
 
-                HStack(spacing: 14) {
+                HStack(spacing: horizontalSizeClass == .compact ? 8 : 14) {
                     GuruKnob(title: "Mix", value01: clamp01(preset.mixPct / 40.0), valueText: "\(Int(preset.mixPct))%")
                     GuruKnob(title: "Decay", value01: clamp01((preset.decayS - 0.3) / 4.7), valueText: String(format: "%.1f s", preset.decayS))
                     GuruKnob(title: "PreDelay", value01: log01(preset.preDelayMs, min: 0.0 + 1.0, max: 120), valueText: "\(Int(preset.preDelayMs)) ms")
@@ -506,6 +514,7 @@ private struct DelayPluginView: View {
     let source: GuruSource
 
     @State private var mode: DelayMode = .eighth
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var preset: DelayPreset { .forSource(source) }
 
@@ -526,7 +535,7 @@ private struct DelayPluginView: View {
                     .pickerStyle(.segmented)
                 }
 
-                HStack(spacing: 14) {
+                HStack(spacing: horizontalSizeClass == .compact ? 8 : 14) {
                     GuruKnob(title: "Time", value01: log01(preset.timeMs, min: 40, max: 900), valueText: "\(Int(preset.timeMs)) ms")
                     GuruKnob(title: "Feedback", value01: clamp01(preset.feedbackPct / 95.0), valueText: "\(Int(preset.feedbackPct))%")
                     GuruKnob(title: "Mix", value01: clamp01(preset.mixPct / 50.0), valueText: "\(Int(preset.mixPct))%")

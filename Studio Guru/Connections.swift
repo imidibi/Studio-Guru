@@ -293,6 +293,17 @@ final class ConnectionsStore: ObservableObject {
         conflictForDestinationInput(studioId: studioId, destination: input) != nil
     }
 
+    func isOutputUsed(studioId: UUID, output: IOEndpointRef) -> Bool {
+        guard output.direction == .output else { return false }
+        guard let studioBundles = bundlesByStudio[studioId] else { return false }
+        for (_, bundle) in studioBundles {
+            if bundle.edges.contains(where: { $0.from == output }) {
+                return true
+            }
+        }
+        return false
+    }
+
     func replaceEdge(
         studioId: UUID,
         fromDeviceId: UUID,
@@ -1396,10 +1407,16 @@ fileprivate struct EndpointRowView: View {
     }
 
     private var isInputUsedElsewhere: Bool {
-        guard direction == .input else { return false }
-        let used = store.isInputUsed(studioId: studioId, input: endpoint)
-        if !used { return false }
-        return !bundle.edges.contains(where: { $0.to == endpoint })
+        if direction == .input {
+            let used = store.isInputUsed(studioId: studioId, input: endpoint)
+            if !used { return false }
+            return !bundle.edges.contains(where: { $0.to == endpoint })
+        } else if direction == .output {
+            let used = store.isOutputUsed(studioId: studioId, output: endpoint)
+            if !used { return false }
+            return !bundle.edges.contains(where: { $0.from == endpoint })
+        }
+        return false
     }
 
     var body: some View {

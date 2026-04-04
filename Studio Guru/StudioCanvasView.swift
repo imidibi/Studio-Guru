@@ -264,6 +264,9 @@ struct StudioCanvasView: View {
         ) { result in
             handleImportResult(result)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowHelp"))) { _ in
+            isShowingHelp = true
+        }
         .onAppear {
             // Set up model context for ConnectionsStore (enables iCloud sync)
             connectionsStore.setModelContext(modelContext)
@@ -358,6 +361,17 @@ struct StudioCanvasView: View {
                 .help("Create a new studio")
             }
 
+            // Help button - always available, even without a studio
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    isShowingHelp = true
+                } label: {
+                    Label("Help", systemImage: "questionmark.circle")
+                }
+                .help("How to use Studio Guru")
+                .keyboardShortcut("?", modifiers: .command)
+            }
+            
             if let studio = currentStudio {
                 ToolbarItem(placement: .navigation) {
                     Button {
@@ -393,15 +407,6 @@ struct StudioCanvasView: View {
                         Label("Connection Matrix", systemImage: "tablecells")
                     }
                     .help("View connections in spreadsheet format")
-                }
-                
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        isShowingHelp = true
-                    } label: {
-                        Label("Help", systemImage: "questionmark.circle")
-                    }
-                    .help("How to use Studio Guru")
                 }
                 
                 ToolbarItem(placement: .navigation) {
@@ -1825,11 +1830,22 @@ struct StudioCanvasView: View {
     }
 
     private func exportStudio(_ studio: Studio) {
-        // First, sync connections from ConnectionsStore to SwiftData
+        // First, clean up any orphaned connections in ConnectionsStore
+        connectionsStore.cleanupOrphanedConnections(studio: studio)
+        
+        // Then sync connections from ConnectionsStore to SwiftData
         syncConnectionsToSwiftData(studio: studio)
+
+        // Log export statistics
+        print("📤 Exporting studio '\(studio.name)':")
+        print("   Devices: \(studio.devices?.count ?? 0)")
+        print("   Connections in SwiftData: \(studio.connections?.count ?? 0)")
 
         // Create exportable representation
         let exportable = ExportableStudio(from: studio)
+        
+        print("   Connections in exportable: \(exportable.connections.count)")
+        print("   Devices in exportable: \(exportable.devices.count)")
 
         // Create document
         exportDocument = StudioDocument(exportableStudio: exportable)
@@ -2563,13 +2579,26 @@ struct StudioCanvasView: View {
                 let toChannelValid = channelIds.contains(edge.to.channelId)
                 
                 guard fromDeviceValid, toDeviceValid, fromPortValid, toPortValid, fromChannelValid, toChannelValid else {
-                    print("⚠️ Skipping invalid connection:")
+                    print("⚠️ Skipping invalid connection from bundle: \(bundle.fromDeviceId) -> \(bundle.toDeviceId)")
                     if !fromDeviceValid { print("  - fromDevice ID not found: \(edge.from.deviceId)") }
                     if !toDeviceValid { print("  - toDevice ID not found: \(edge.to.deviceId)") }
-                    if !fromPortValid { print("  - fromPort ID not found: \(edge.from.portId)") }
-                    if !toPortValid { print("  - toPort ID not found: \(edge.to.portId)") }
-                    if !fromChannelValid { print("  - fromChannel ID not found: \(edge.from.channelId)") }
-                    if !toChannelValid { print("  - toChannel ID not found: \(edge.to.channelId)") }
+                    if !fromPortValid { 
+                        print("  - fromPort ID not found: \(edge.from.portId)")
+                        print("    Available port IDs: \(portIds.prefix(5))")
+                    }
+                    if !toPortValid { 
+                        print("  - toPort ID not found: \(edge.to.portId)")
+                        print("    Available port IDs: \(portIds.prefix(5))")
+                    }
+                    if !fromChannelValid { 
+                        print("  - fromChannel ID not found: \(edge.from.channelId)")
+                        print("    Available channel IDs: \(channelIds.prefix(5))")
+                    }
+                    if !toChannelValid { 
+                        print("  - toChannel ID not found: \(edge.to.channelId)")
+                        print("    Available channel IDs: \(channelIds.prefix(5))")
+                    }
+                    print("  - Edge direction: \(edge.from.direction.rawValue) -> \(edge.to.direction.rawValue)")
                     invalidCount += 1
                     continue
                 }
@@ -2595,8 +2624,12 @@ struct StudioCanvasView: View {
 
         // Log summary
         print("✅ syncConnectionsToSwiftData complete:")
+        print("   Bundles processed: \(bundles.count)")
         print("   Valid connections: \(validCount)")
         print("   Invalid connections: \(invalidCount)")
+        if validCount > 0 {
+            print("   ℹ️ Sample connection: \(studio.connections?.first?.label ?? "no label")")
+        }
         
         // Save to persist the connections
         try? modelContext.save()
@@ -2868,8 +2901,22 @@ struct StudioCanvasView: View {
             modelContext.insert(studio)
             try modelContext.save()
 
+            // Log import statistics
+            print("✅ Studio import complete:")
+            print("   Devices imported: \(studio.devices?.count ?? 0)")
+            print("   Connections imported: \(studio.connections?.count ?? 0)")
+            
             // Rebuild ConnectionsStore from the imported connections
             connectionsStore.rebuildFromConnections(studio: studio)
+            
+            // Verify the rebuild worked
+            let rebuiltBundles = connectionsStore.links(for: studio.id)
+            print("   ConnectionsStore bundles after rebuild: \(rebuiltBundles.count)")
+            for link in rebuiltBundles {
+                if let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id) {
+                    print("   Bundle: \(bundle.fromDeviceId) -> \(bundle.toDeviceId), edges: \(bundle.edges.count)")
+                }
+            }
 
             // Select the imported studio
             selectedStudioId = studio.id
@@ -6852,14 +6899,15 @@ private struct HelpView: View {
     @Environment(\.dismiss) private var dismiss
     
     private let helpItems: [(String, String)] = [
-        ("1", "Add your devices and their manuals"),
-        ("2", "Drag connections between devices"),
-        ("3", "Click on the connections to define the details"),
-        ("4", "Click on a device to review it, edit or delete"),
-        ("5", "Long click on a device to see all its connection details"),
-        ("6", "Hold or right click a connection to delete it"),
-        ("7", "Press auto-arrange to tidy up the screen or drag devices manually"),
-        ("8", "Select Matrix to view a structured from→to diagram")
+        ("1", "Create your first studio and name it"),
+        ("2", "Add your devices and their manuals"),
+        ("3", "Drag connections between devices"),
+        ("4", "Click on the connections to define the details"),
+        ("5", "Click on a device to review it, edit or delete"),
+        ("6", "Long click on a device to see all its connection details"),
+        ("7", "Hold or right click a connection to delete it"),
+        ("8", "Press auto-arrange to tidy up the screen or drag devices manually"),
+        ("9", "Select Matrix to view a structured from→to diagram")
     ]
     
     var body: some View {

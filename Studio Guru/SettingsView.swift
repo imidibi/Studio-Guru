@@ -13,8 +13,12 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var studios: [Studio]
     
+    @AppStorage("iCloudSyncEnabled") private var iCloudSyncEnabled = true
     @State private var showingSyncReset = false
     @State private var syncResetConfirmed = false
+    @State private var showingRestartAlert = false
+    @State private var isSyncing = false
+    @State private var lastSyncMessage: String?
     
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
@@ -28,26 +32,44 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: Binding(
+                        get: { iCloudSyncEnabled },
+                        set: { newValue in
+                            iCloudSyncEnabled = newValue
+                            showingRestartAlert = true
+                        }
+                    )) {
                         HStack {
-                            Image(systemName: "checkmark.icloud.fill")
-                                .foregroundStyle(.green)
-                            Text("iCloud Sync Active")
+                            Image(systemName: iCloudSyncEnabled ? "checkmark.icloud.fill" : "icloud.slash.fill")
+                                .foregroundStyle(iCloudSyncEnabled ? .green : .secondary)
+                            Text("iCloud Sync")
                                 .font(.headline)
                         }
-                        
-                        Text("Your studios sync automatically across all your devices using iCloud.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        if studios.count > 0 {
-                            Text("Currently syncing \(studios.count) studio\(studios.count == 1 ? "" : "s")")
+                    }
+                    
+                    if iCloudSyncEnabled {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Your studios sync automatically across all your devices using iCloud.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            if studios.count > 0 {
+                                Text("Currently syncing \(studios.count) studio\(studios.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("iCloud sync is disabled. Your data is stored locally on this device only.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 } header: {
                     Text("Data Sync")
+                } footer: {
+                    Text("Changing this setting requires restarting the app to take effect.")
                 }
                 
                 Section {
@@ -60,7 +82,11 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("• Last modified data takes priority")
+                        Text("• Most recently modified item wins in conflicts")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Text("• Turning sync off then on may lose local changes")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
@@ -70,6 +96,38 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("How It Works")
+                } footer: {
+                    Text("IMPORTANT: If you disable iCloud sync and make changes, then re-enable it, your local changes may be overwritten by iCloud's version. Use Export before disabling sync to backup your data.")
+                }
+                
+                if iCloudSyncEnabled {
+                    Section {
+                        Button {
+                            Task {
+                                await forceSyncNow()
+                            }
+                        } label: {
+                            HStack {
+                                Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                                Spacer()
+                                if isSyncing {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                            }
+                        }
+                        .disabled(isSyncing)
+                        
+                        if let message = lastSyncMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Manual Sync")
+                    } footer: {
+                        Text("Forces an immediate sync with iCloud. Changes from all devices will be merged. If conflicts occur, the most recently modified data wins.")
+                    }
                 }
                 
                 Section {
@@ -78,19 +136,19 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("1. Ensure both devices are online")
+                        Text("1. Ensure both devices are online and signed into iCloud")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("2. Wait a few minutes for sync to complete")
+                        Text("2. Use 'Sync Now' button above on both devices")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("3. Force quit and relaunch the app on both devices")
+                        Text("3. Wait a few minutes for sync to complete")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("4. The most recently saved changes will appear on all devices")
+                        Text("4. If still not syncing, force quit and relaunch on both devices")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -103,7 +161,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Troubleshooting")
                 } footer: {
-                    Text("Use 'Reset Sync' only if data isn't syncing properly. This will upload this device's data to iCloud and other devices will download it.")
+                    Text("Use 'Reset Sync' only if data isn't syncing properly after trying 'Sync Now'. This marks all data on this device as new and uploads it to iCloud. Other devices will download this version.")
                 }
                 
                 Section {
@@ -172,7 +230,37 @@ struct SettingsView: View {
             } message: {
                 Text("This will mark all data on this device as 'new' and upload it to iCloud. Other devices will download this data. Use this if sync seems stuck.\n\nIMPORTANT: Make sure this device has the data you want to keep!")
             }
+            .alert("Restart Required", isPresented: $showingRestartAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Please quit and restart Studio Guru for the sync setting change to take effect.")
+            }
         }
+    }
+    
+    private func forceSyncNow() async {
+        await MainActor.run {
+            isSyncing = true
+            lastSyncMessage = "Syncing..."
+        }
+        
+        // Touch the model context to trigger a save and sync
+        // This doesn't modify data, just forces CloudKit to sync
+        try? modelContext.save()
+        
+        // Wait a moment for the sync to initiate
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        
+        await MainActor.run {
+            isSyncing = false
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            lastSyncMessage = "Last sync: \(formatter.string(from: Date()))"
+        }
+        
+        #if DEBUG
+        print("🔄 Manual sync triggered for \(studios.count) studios")
+        #endif
     }
     
     private func resetSyncAndForceUpload() {

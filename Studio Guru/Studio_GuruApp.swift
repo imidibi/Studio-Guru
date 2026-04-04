@@ -23,10 +23,13 @@ struct Studio_GuruApp: App {
             EndpointNameModel.self
         ])
         
+        // Check user preference for iCloud sync
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
+        
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: .automatic
+            cloudKitDatabase: iCloudSyncEnabled ? .automatic : .none
         )
 
         do {
@@ -34,9 +37,10 @@ struct Studio_GuruApp: App {
             
             // Log sync activity for debugging
             #if DEBUG
-            // print("📱 SwiftData container initialized with CloudKit sync")
-            // print("📱 Container URL: \(container.configurations.first?.url.path ?? "unknown")")
-            // print("📱 CloudKit database: \(modelConfiguration.cloudKitDatabase)")
+            print("📱 SwiftData container initialized")
+            print("📱 iCloud Sync: \(iCloudSyncEnabled ? "Enabled" : "Disabled")")
+            print("📱 Container URL: \(container.configurations.first?.url.path ?? "unknown")")
+            print("📱 CloudKit database: \(modelConfiguration.cloudKitDatabase)")
             #endif
             
             return container
@@ -86,5 +90,14 @@ struct Studio_GuruApp: App {
             StudioCanvasView()
         }
         .modelContainer(sharedModelContainer)
+        .commands {
+            CommandGroup(replacing: .help) {
+                Button("Studio Guru Help") {
+                    // Post notification to show help
+                    NotificationCenter.default.post(name: NSNotification.Name("ShowHelp"), object: nil)
+                }
+                .keyboardShortcut("?", modifiers: .command)
+            }
+        }
     }
 }

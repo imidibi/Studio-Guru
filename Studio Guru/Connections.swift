@@ -451,33 +451,73 @@ final class ConnectionsStore: ObservableObject {
         bundlesByStudio[studioId] = bundles
     }
     
-    /// Clean up orphaned connections that reference non-existent devices
+    /// Clean up orphaned connections that reference non-existent devices, ports, or channels
     func cleanupOrphanedConnections(studio: Studio) {
         let studioId = studio.id
         guard var studioBundles = bundlesByStudio[studioId] else { return }
         
+        // Build lookup sets for all valid IDs
         let deviceIds = Set(studio.devices?.map { $0.id } ?? [])
-        var hasChanges = false
+        var portIds = Set<UUID>()
+        var channelIds = Set<UUID>()
         
-        // Check each bundle
+        for device in studio.devices ?? [] {
+            // Add regular ports and channels
+            for port in device.ports ?? [] {
+                portIds.insert(port.id)
+                for channel in port.channels ?? [] {
+                    channelIds.insert(channel.id)
+                }
+            }
+            
+            // Add virtual computer interface ports/channels (stable UUIDs)
+            let counts = device.computerInterfaceCounts
+            for (iface, count) in counts where count > 0 {
+                for i in 1...count {
+                    let pid = stableUUID("computerPort|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                    let cid = stableUUID("computerCh|\(device.id.uuidString)|\(iface.rawValue)|\(i)")
+                    portIds.insert(pid)
+                    channelIds.insert(cid)
+                }
+            }
+        }
+        
+        var hasChanges = false
         var bundlesToRemove: [String] = []
+        var totalEdgesRemoved = 0
+        
         for (key, var bundle) in studioBundles {
             // Remove bundle if either device doesn't exist
             if !deviceIds.contains(bundle.fromDeviceId) || !deviceIds.contains(bundle.toDeviceId) {
+                print("🧹 Removing bundle for non-existent devices: \(bundle.fromDeviceId) -> \(bundle.toDeviceId)")
                 bundlesToRemove.append(key)
                 hasChanges = true
                 continue
             }
             
-            // Remove edges that reference non-existent devices
+            // Remove edges with invalid references
             let originalEdgeCount = bundle.edges.count
             bundle.edges.removeAll { edge in
-                !deviceIds.contains(edge.from.deviceId) || !deviceIds.contains(edge.to.deviceId)
+                let deviceValid = deviceIds.contains(edge.from.deviceId) && deviceIds.contains(edge.to.deviceId)
+                let portValid = portIds.contains(edge.from.portId) && portIds.contains(edge.to.portId)
+                let channelValid = channelIds.contains(edge.from.channelId) && channelIds.contains(edge.to.channelId)
+                
+                if !deviceValid || !portValid || !channelValid {
+                    print("🧹 Removing invalid edge: \(edge.from.deviceId)[\(edge.from.portId)] -> \(edge.to.deviceId)[\(edge.to.portId)]")
+                    if !deviceValid { print("   - Invalid device reference") }
+                    if !portValid { print("   - Invalid port reference") }
+                    if !channelValid { print("   - Invalid channel reference") }
+                    return true
+                }
+                return false
             }
             
-            if bundle.edges.count != originalEdgeCount {
+            let edgesRemoved = originalEdgeCount - bundle.edges.count
+            if edgesRemoved > 0 {
+                totalEdgesRemoved += edgesRemoved
                 hasChanges = true
                 studioBundles[key] = bundle
+                print("🧹 Cleaned \(edgesRemoved) invalid edge(s) from bundle")
             }
             
             // Remove bundle if it has no edges left
@@ -495,6 +535,9 @@ final class ConnectionsStore: ObservableObject {
             bundlesByStudio[studioId] = studioBundles
             persist(studioId: studioId)
             objectWillChange.send()
+            print("✅ Cleanup complete: Removed \(totalEdgesRemoved) invalid edge(s), \(bundlesToRemove.count) empty bundle(s)")
+        } else {
+            print("✅ Cleanup complete: No orphaned connections found")
         }
     }
     

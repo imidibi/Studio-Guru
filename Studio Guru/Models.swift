@@ -47,13 +47,14 @@ enum DeviceCategory: String, Codable, CaseIterable {
     case keyboard = "Keyboard"
     case midiDevice = "MIDI Device"
     case mixer = "Mixer"
-    case monitor = "Monitor"
+    case monitor = "Studio Monitor"
     case multi = "Multi"
     case patchbay = "Patchbay"
     case preamp = "Preamp"
     case synth = "Synth"
     case usbHub = "USB Hub"
     case usbExpander = "USB Expander"
+    case videoMonitor = "Video Monitor"
     case other = "Other"
 }
 
@@ -427,19 +428,44 @@ final class DocLink {
 // MARK: - Export/Import Data Structures
 
 /// Codable representation of a studio for export/import
-struct ExportableStudio: Codable, Sendable {
+struct ExportableStudio: Sendable {
     let name: String
     let devices: [ExportableDevice]
     let connections: [ExportableConnection]
     let exportDate: Date
     let appVersion: String
-    
+
     init(from studio: Studio) {
         self.name = studio.name
         self.devices = (studio.devices ?? []).map { ExportableDevice(from: $0) }
         self.connections = (studio.connections ?? []).map { ExportableConnection(from: $0) }
         self.exportDate = Date()
         self.appVersion = "1.0"
+    }
+}
+
+// Manual Codable conformance to avoid Swift 6 concurrency warnings
+extension ExportableStudio: Codable {
+    enum CodingKeys: String, CodingKey {
+        case name, devices, connections, exportDate, appVersion
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        devices = try container.decode([ExportableDevice].self, forKey: .devices)
+        connections = try container.decode([ExportableConnection].self, forKey: .connections)
+        exportDate = try container.decode(Date.self, forKey: .exportDate)
+        appVersion = try container.decode(String.self, forKey: .appVersion)
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(devices, forKey: .devices)
+        try container.encode(connections, forKey: .connections)
+        try container.encode(exportDate, forKey: .exportDate)
+        try container.encode(appVersion, forKey: .appVersion)
     }
 }
 

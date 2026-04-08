@@ -489,7 +489,9 @@ final class ConnectionsStore: ObservableObject {
         for (key, var bundle) in studioBundles {
             // Remove bundle if either device doesn't exist
             if !deviceIds.contains(bundle.fromDeviceId) || !deviceIds.contains(bundle.toDeviceId) {
+                #if DEBUG
                 print("🧹 Removing bundle for non-existent devices: \(bundle.fromDeviceId) -> \(bundle.toDeviceId)")
+                #endif
                 bundlesToRemove.append(key)
                 hasChanges = true
                 continue
@@ -503,10 +505,12 @@ final class ConnectionsStore: ObservableObject {
                 let channelValid = channelIds.contains(edge.from.channelId) && channelIds.contains(edge.to.channelId)
                 
                 if !deviceValid || !portValid || !channelValid {
+                    #if DEBUG
                     print("🧹 Removing invalid edge: \(edge.from.deviceId)[\(edge.from.portId)] -> \(edge.to.deviceId)[\(edge.to.portId)]")
                     if !deviceValid { print("   - Invalid device reference") }
                     if !portValid { print("   - Invalid port reference") }
                     if !channelValid { print("   - Invalid channel reference") }
+                    #endif
                     return true
                 }
                 return false
@@ -517,7 +521,9 @@ final class ConnectionsStore: ObservableObject {
                 totalEdgesRemoved += edgesRemoved
                 hasChanges = true
                 studioBundles[key] = bundle
+                #if DEBUG
                 print("🧹 Cleaned \(edgesRemoved) invalid edge(s) from bundle")
+                #endif
             }
             
             // Remove bundle if it has no edges left
@@ -535,9 +541,13 @@ final class ConnectionsStore: ObservableObject {
             bundlesByStudio[studioId] = studioBundles
             persist(studioId: studioId)
             objectWillChange.send()
+            #if DEBUG
             print("✅ Cleanup complete: Removed \(totalEdgesRemoved) invalid edge(s), \(bundlesToRemove.count) empty bundle(s)")
+            #endif
         } else {
+            #if DEBUG
             print("✅ Cleanup complete: No orphaned connections found")
+            #endif
         }
     }
     

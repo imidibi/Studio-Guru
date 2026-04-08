@@ -58,6 +58,10 @@ struct StudioCanvasView: View {
     // Help
     @State private var isShowingHelp: Bool = false
 
+    // Export canvas alert
+    @State private var isShowingExportCanvasAlert: Bool = false
+    @State private var isExportingCanvas: Bool = false
+
     // Selection (devices/connections)
     @StateObject private var selectionState = SelectionState()
     // Connections (persisted in UserDefaults)
@@ -195,6 +199,30 @@ struct StudioCanvasView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(exportResultMessage)
+        }
+        .alert("Cannot Export Canvas", isPresented: $isShowingExportCanvasAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("No devices to export. Add devices to your studio before exporting the canvas.")
+        }
+        .overlay {
+            if isExportingCanvas {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Preparing Export...")
+                            .font(.headline)
+                    }
+                    .padding(32)
+                    .background(Color(UIColor.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(radius: 10)
+                }
+            }
         }
         .alert(
             "Studio Name Conflict",
@@ -395,7 +423,7 @@ struct StudioCanvasView: View {
                     Button {
                         exportCanvasAsPDF(studio: studio)
                     } label: {
-                        Label("Export Canvas", systemImage: "photo")
+                        Label("Export Canvas", systemImage: "arrow.down.doc.fill")
                     }
                     .help("Export studio canvas as PDF")
                 }
@@ -531,6 +559,7 @@ struct StudioCanvasView: View {
                 )
             ) { item in
                 inspectorSheetContent(item: item)
+                    .presentationDetents([.medium, .large])
             }
             .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm)
         {
@@ -1836,16 +1865,20 @@ struct StudioCanvasView: View {
         // Then sync connections from ConnectionsStore to SwiftData
         syncConnectionsToSwiftData(studio: studio)
 
+        #if DEBUG
         // Log export statistics
         print("📤 Exporting studio '\(studio.name)':")
         print("   Devices: \(studio.devices?.count ?? 0)")
         print("   Connections in SwiftData: \(studio.connections?.count ?? 0)")
+        #endif
 
         // Create exportable representation
         let exportable = ExportableStudio(from: studio)
         
+        #if DEBUG
         print("   Connections in exportable: \(exportable.connections.count)")
         print("   Devices in exportable: \(exportable.devices.count)")
+        #endif
 
         // Create document
         exportDocument = StudioDocument(exportableStudio: exportable)
@@ -1892,9 +1925,11 @@ struct StudioCanvasView: View {
                             $0.name == expectedName
                         }) {
                             if port.type != correctPortType {
+                                #if DEBUG
                                 print(
                                     "    ✅ FIXING port '\(expectedName)' from \(port.type.rawValue) to \(correctPortType.rawValue)"
                                 )
+                                #endif
                                 port.typeRaw = correctPortType.rawValue
                             }
                         }
@@ -1908,9 +1943,11 @@ struct StudioCanvasView: View {
                     let expectedType: PortType =
                         port.direction == .input ? .midiIn : .midiOut
                     if port.type != expectedType {
+                        #if DEBUG
                         print(
                             "  ✅ FIXING MIDI port '\(port.name)' from \(port.type.rawValue) to \(expectedType.rawValue)"
                         )
+                        #endif
                         port.typeRaw = expectedType.rawValue
                     }
                 }
@@ -1919,7 +1956,13 @@ struct StudioCanvasView: View {
     }
     
     private func exportCanvasAsPDF(studio: Studio) {
-        guard let devices = studio.devices, !devices.isEmpty else { return }
+        guard let devices = studio.devices, !devices.isEmpty else {
+            isShowingExportCanvasAlert = true
+            return
+        }
+        
+        // Show loading indicator
+        isExportingCanvas = true
         
         // Calculate bounds of all devices
         var minX = Double.infinity
@@ -2089,30 +2132,41 @@ struct StudioCanvasView: View {
         }
         
         #if os(iOS)
+        // Create renderer and generate PDF (must happen on main thread for SwiftUI)
         let renderer = ImageRenderer(content: fullView)
         renderer.scale = 2.0
         
-        if let pdfData = renderer.pdf() {
-            let filename = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.pdf"
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-            try? pdfData.write(to: tempURL)
-            
-            let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
-            
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let rootVC = windowScene.windows.first?.rootViewController {
-                var presentingVC = rootVC
-                while let presented = presentingVC.presentedViewController {
-                    presentingVC = presented
-                }
+        // Defer actual work slightly to allow loading indicator to show
+        DispatchQueue.main.async { [self] in
+            if let pdfData = renderer.pdf() {
+                let filename = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.pdf"
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+                try? pdfData.write(to: tempURL)
                 
-                if let popover = activityVC.popoverPresentationController {
-                    popover.sourceView = presentingVC.view
-                    popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
-                    popover.permittedArrowDirections = []
-                }
+                // Hide loading indicator
+                self.isExportingCanvas = false
                 
-                presentingVC.present(activityVC, animated: true)
+                // Present share sheet
+                let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController {
+                    var presentingVC = rootVC
+                    while let presented = presentingVC.presentedViewController {
+                        presentingVC = presented
+                    }
+                    
+                    if let popover = activityVC.popoverPresentationController {
+                        popover.sourceView = presentingVC.view
+                        popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
+                        popover.permittedArrowDirections = []
+                    }
+                    
+                    presentingVC.present(activityVC, animated: true)
+                }
+            } else {
+                // Hide loading indicator on failure
+                self.isExportingCanvas = false
             }
         }
         #elseif os(macOS)
@@ -2374,7 +2428,7 @@ struct StudioCanvasView: View {
         var columnsUsed: Set<Int> = []
         
         // Process levels from top to bottom, assigning columns
-        for (levelIndex, level) in sortedLevels.enumerated() {
+        for (_, level) in sortedLevels.enumerated() {
             guard let devicesInLevel = levelGroups[level] else { continue }
             
             for device in devicesInLevel {
@@ -2502,8 +2556,11 @@ struct StudioCanvasView: View {
         
         // Calculate total width needed
         let totalWidth = Double(columnRange) * finalCardWidth + Double(max(0, columnRange - 1)) * finalHorizontalSpacing
-        // Center horizontally if it fits, otherwise start from left edge with padding
-        let startX = max(padding + halfCardWidth, padding + (targetWidth - totalWidth) / 2 + halfCardWidth)
+        
+        // Always center the layout horizontally within the viewport
+        // Use a generous default viewport width if canvasSize is not reliable
+        let effectiveViewportWidth = max(canvasSize.width, 1024)
+        let startX = padding + halfCardWidth + (effectiveViewportWidth - totalWidth - padding * 2) / 2
         
         for (levelIndex, level) in sortedLevels.enumerated() {
             guard let devicesInLevel = levelGroups[level] else { continue }
@@ -2579,6 +2636,7 @@ struct StudioCanvasView: View {
                 let toChannelValid = channelIds.contains(edge.to.channelId)
                 
                 guard fromDeviceValid, toDeviceValid, fromPortValid, toPortValid, fromChannelValid, toChannelValid else {
+                    #if DEBUG
                     print("⚠️ Skipping invalid connection from bundle: \(bundle.fromDeviceId) -> \(bundle.toDeviceId)")
                     if !fromDeviceValid { print("  - fromDevice ID not found: \(edge.from.deviceId)") }
                     if !toDeviceValid { print("  - toDevice ID not found: \(edge.to.deviceId)") }
@@ -2599,6 +2657,7 @@ struct StudioCanvasView: View {
                         print("    Available channel IDs: \(channelIds.prefix(5))")
                     }
                     print("  - Edge direction: \(edge.from.direction.rawValue) -> \(edge.to.direction.rawValue)")
+                    #endif
                     invalidCount += 1
                     continue
                 }
@@ -2622,6 +2681,7 @@ struct StudioCanvasView: View {
             }
         }
 
+        #if DEBUG
         // Log summary
         print("✅ syncConnectionsToSwiftData complete:")
         print("   Bundles processed: \(bundles.count)")
@@ -2630,6 +2690,7 @@ struct StudioCanvasView: View {
         if validCount > 0 {
             print("   ℹ️ Sample connection: \(studio.connections?.first?.label ?? "no label")")
         }
+        #endif
         
         // Save to persist the connections
         try? modelContext.save()
@@ -2901,14 +2962,17 @@ struct StudioCanvasView: View {
             modelContext.insert(studio)
             try modelContext.save()
 
+            #if DEBUG
             // Log import statistics
             print("✅ Studio import complete:")
             print("   Devices imported: \(studio.devices?.count ?? 0)")
             print("   Connections imported: \(studio.connections?.count ?? 0)")
+            #endif
             
             // Rebuild ConnectionsStore from the imported connections
             connectionsStore.rebuildFromConnections(studio: studio)
             
+            #if DEBUG
             // Verify the rebuild worked
             let rebuiltBundles = connectionsStore.links(for: studio.id)
             print("   ConnectionsStore bundles after rebuild: \(rebuiltBundles.count)")
@@ -2917,6 +2981,7 @@ struct StudioCanvasView: View {
                     print("   Bundle: \(bundle.fromDeviceId) -> \(bundle.toDeviceId), edges: \(bundle.edges.count)")
                 }
             }
+            #endif
 
             // Select the imported studio
             selectedStudioId = studio.id
@@ -3196,6 +3261,7 @@ private struct CanvasSurfaceView: View {
     @State private var connectionHandleTips: [UUID: CGPoint] = [:]
     @State private var canvasScale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var lastKnownWidth: CGFloat = 0
 
     private var links: [ConnectionLinkSummary] {
         connectionsStore.links(for: studio.id)
@@ -3203,6 +3269,14 @@ private struct CanvasSurfaceView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let _ = {
+                // Detect significant size changes (rotation) and reset scale immediately
+                if lastKnownWidth > 0 && abs(geo.size.width - lastKnownWidth) > 100 {
+                    canvasScale = 1.0
+                    lastScale = 1.0
+                }
+                lastKnownWidth = geo.size.width
+            }()
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
                 ZStack {
                     Rectangle().fill(background)
@@ -3225,6 +3299,7 @@ private struct CanvasSurfaceView: View {
                         .zIndex(10)
                     }
                 }
+                .drawingGroup()
                 .coordinateSpace(name: "canvasContent")
                 .frame(
                     width: max(geo.size.width * 1.5, geo.size.width),
@@ -3260,6 +3335,15 @@ private struct CanvasSurfaceView: View {
                         lastScale = canvasScale
                     }
             )
+            .onChange(of: geo.size) { oldSize, newSize in
+                // Reset scale on significant geometry changes (like rotation)
+                // to prevent distortion and hangs
+                if abs(oldSize.width - newSize.width) > 100 || abs(oldSize.height - newSize.height) > 100 {
+                    // Reset immediately without animation to prevent visual distortion
+                    canvasScale = 1.0
+                    lastScale = 1.0
+                }
+            }
         }
     }
 
@@ -3798,6 +3882,7 @@ private struct InspectorPanel: View {
                         }
                     }
                     .formStyle(.grouped)
+                    .scrollIndicators(.visible)
                     .fileImporter(
                         isPresented: $isImportingManual,
                         allowedContentTypes: [.pdf],
@@ -4653,6 +4738,7 @@ extension DeviceInstance {
         case .synth: return "waveform.and.person.filled"
         case .usbHub: return "hub"
         case .usbExpander: return "rectangle.connected.to.line.below"
+        case .videoMonitor: return "tv"
         case .other: return "shippingbox"
         }
     }
@@ -4997,6 +5083,7 @@ private struct DeviceEditorSheet: View {
                 .onChange(of: madiOutputPorts) { _, _ in
                     syncCountBasedDigitalFormats()
                 }
+                .scrollIndicators(.visible)
                 .frame(
                     minWidth: 560,
                     idealWidth: 640,
@@ -5192,6 +5279,7 @@ private struct DeviceEditorSheet: View {
                         }
                     }
                 }
+                .scrollIndicators(.visible)
                 .onAppear { syncCountBasedDigitalFormats() }
                 .onChange(of: adatInputPorts) { _, _ in
                     syncCountBasedDigitalFormats()
@@ -6235,9 +6323,32 @@ private struct ConnectionMatrixView: View {
     @State private var canvasScale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var isPanEnabled: Bool = false
+    @State private var lastKnownWidth: CGFloat = 0
     
     private var links: [ConnectionLinkSummary] {
         connectionsStore.links(for: studio.id)
+    }
+    
+    // Devices that are actually used as sources in connections
+    private var fromDevices: [DeviceInstance] {
+        // Get all device IDs that appear as "from" in actual connections
+        let fromDeviceIds = Set(links.map { $0.fromDeviceId })
+        
+        return (studio.devices ?? []).filter { device in
+            // Only include if this device is actually a source in at least one connection
+            fromDeviceIds.contains(device.id)
+        }.sorted { $0.nickname.localizedCaseInsensitiveCompare($1.nickname) == .orderedAscending }
+    }
+    
+    // Devices that are actually used as destinations in connections
+    private var toDevices: [DeviceInstance] {
+        // Get all device IDs that appear as "to" in actual connections
+        let toDeviceIds = Set(links.map { $0.toDeviceId })
+        
+        return (studio.devices ?? []).filter { device in
+            // Only include if this device is actually a destination in at least one connection
+            toDeviceIds.contains(device.id)
+        }.sorted { $0.nickname.localizedCaseInsensitiveCompare($1.nickname) == .orderedAscending }
     }
     
     // Build a map of device pairs to their connection info
@@ -6290,79 +6401,87 @@ private struct ConnectionMatrixView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Main scrollable matrix with zoom support
-                ScrollView([.horizontal, .vertical]) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Header row
-                        HStack(spacing: 0) {
-                            // Top-left corner cell
-                            Text("From \\ To")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .frame(width: 120, height: 60, alignment: .center)
-                                .background(Color(white: 0.15).opacity(0.2))
-                                .border(Color.secondary.opacity(0.3))
-                            
-                            // Column headers (destination devices)
-                            ForEach(studio.devices ?? [], id: \.id) { device in
-                                VStack(spacing: 2) {
-                                    Text(device.nickname)
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                        .lineLimit(1)
-                                    Text(ioSummary(for: device))
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.center)
-                                }
-                                .frame(width: 100, height: 60, alignment: .center)
-                                .background(Color(white: 0.15).opacity(0.1))
-                                .border(Color.secondary.opacity(0.3))
-                            }
-                        }
-                        
-                        // Data rows
-                        ForEach(studio.devices ?? [], id: \.id) { fromDevice in
-                            HStack(spacing: 0) {
-                                // Row header (source device)
-                                VStack(spacing: 2) {
-                                    Text(fromDevice.nickname)
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                        .lineLimit(1)
-                                    Text(ioSummary(for: fromDevice))
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.center)
-                                }
-                                .frame(width: 120, height: 60, alignment: .center)
-                                .background(Color(white: 0.15).opacity(0.1))
-                                .border(Color.secondary.opacity(0.3))
-                                
-                                // Connection cells
-                                ForEach(studio.devices ?? [], id: \.id) { toDevice in
-                                    connectionCell(from: fromDevice, to: toDevice)
-                                }
-                            }
-                        }
-                    }
-                    .padding()
-                    .scaleEffect(canvasScale, anchor: .center)
+        GeometryReader { geo in
+            let _ = {
+                // Detect significant size changes (rotation) and reset scale immediately
+                if lastKnownWidth > 0 && abs(geo.size.width - lastKnownWidth) > 100 {
+                    canvasScale = 1.0
+                    lastScale = 1.0
+                    isPanEnabled = false
                 }
-                .scrollDisabled(!isPanEnabled)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            if !isPanEnabled {
+                lastKnownWidth = geo.size.width
+            }()
+            NavigationStack {
+                VStack(spacing: 0) {
+                    // Main scrollable matrix with zoom support
+                    ScrollView([.horizontal, .vertical]) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Header row
+                            HStack(spacing: 0) {
+                                // Top-left corner cell
+                                Text("From \\ To")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .frame(width: 120, height: 60, alignment: .center)
+                                    .background(Color(white: 0.15).opacity(0.2))
+                                    .border(Color.secondary.opacity(0.3))
+                                
+                                // Column headers (destination devices)
+                                ForEach(toDevices, id: \.id) { device in
+                                    VStack(spacing: 2) {
+                                        Text(device.nickname)
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .lineLimit(1)
+                                        Text(ioSummary(for: device))
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                    }
+                                    .frame(width: 100, height: 60, alignment: .center)
+                                    .background(Color(white: 0.15).opacity(0.1))
+                                    .border(Color.secondary.opacity(0.3))
+                                }
+                            }
+                            
+                            // Data rows
+                            ForEach(fromDevices, id: \.id) { fromDevice in
+                                HStack(spacing: 0) {
+                                    // Row header (source device)
+                                    VStack(spacing: 2) {
+                                        Text(fromDevice.nickname)
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .lineLimit(1)
+                                        Text(ioSummary(for: fromDevice))
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                    }
+                                    .frame(width: 120, height: 60, alignment: .center)
+                                    .background(Color(white: 0.15).opacity(0.1))
+                                    .border(Color.secondary.opacity(0.3))
+                                    
+                                    // Connection cells
+                                    ForEach(toDevices, id: \.id) { toDevice in
+                                        connectionCell(from: fromDevice, to: toDevice)
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .drawingGroup()
+                        .scaleEffect(canvasScale, anchor: .center)
+                    }
+                    .scrollDisabled(!isPanEnabled)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
                                 canvasScale = lastScale * value
                             }
-                        }
-                        .onEnded { value in
-                            if !isPanEnabled {
+                            .onEnded { value in
                                 // Clamp scale between 0.5x and 5x
                                 canvasScale = min(
                                     max(lastScale * value, 0.5),
@@ -6370,13 +6489,24 @@ private struct ConnectionMatrixView: View {
                                 )
                                 lastScale = canvasScale
                                 
-                                // Auto-enable pan mode when zoomed in
-                                if canvasScale > 1.0 {
+                                // Auto-enable pan mode when zoomed in significantly
+                                if canvasScale > 1.2 {
                                     isPanEnabled = true
+                                } else if canvasScale <= 1.0 {
+                                    isPanEnabled = false
                                 }
                             }
+                    )
+                    .onChange(of: geo.size) { oldSize, newSize in
+                        // Reset scale on significant geometry changes (like rotation)
+                        // to prevent distortion and hangs
+                        if abs(oldSize.width - newSize.width) > 100 || abs(oldSize.height - newSize.height) > 100 {
+                            // Reset immediately without animation to prevent visual distortion
+                            canvasScale = 1.0
+                            lastScale = 1.0
+                            isPanEnabled = false
                         }
-                )
+                    }
                 
                 // Color legend at bottom
                 Divider()
@@ -6456,6 +6586,7 @@ private struct ConnectionMatrixView: View {
                     }
                 }
             }
+        }
         }
     }
     
@@ -6596,7 +6727,7 @@ private struct ConnectionMatrixView: View {
                         .background(Color(white: 0.15).opacity(0.2))
                         .border(Color.secondary.opacity(0.3))
                     
-                    ForEach(studio.devices ?? [], id: \.id) { device in
+                    ForEach(toDevices, id: \.id) { device in
                         VStack(spacing: 2) {
                             Text(device.nickname)
                                 .font(.caption)
@@ -6615,7 +6746,7 @@ private struct ConnectionMatrixView: View {
                 }
                 
                 // Data rows
-                ForEach(studio.devices ?? [], id: \.id) { fromDevice in
+                ForEach(fromDevices, id: \.id) { fromDevice in
                     HStack(spacing: 0) {
                         VStack(spacing: 2) {
                             Text(fromDevice.nickname)
@@ -6632,7 +6763,7 @@ private struct ConnectionMatrixView: View {
                         .background(Color(white: 0.15).opacity(0.1))
                         .border(Color.secondary.opacity(0.3))
                         
-                        ForEach(studio.devices ?? [], id: \.id) { toDevice in
+                        ForEach(toDevices, id: \.id) { toDevice in
                             connectionCell(from: fromDevice, to: toDevice)
                         }
                     }
@@ -6727,7 +6858,7 @@ private struct ConnectionMatrixView: View {
         """
         
         // Column headers
-        for device in studio.devices ?? [] {
+        for device in toDevices {
             let ioSummaryText = ioSummary(for: device)
             html += """
                     <th style="background-color: #e8e8e8; font-weight: bold; text-align: center; padding: 12px; border: 1px solid #999; min-width: 150px;">\(device.nickname.htmlEscaped)<br><span style="font-size: 11px; color: #666; font-weight: normal;">\(ioSummaryText.htmlEscaped)</span></th>
@@ -6736,14 +6867,14 @@ private struct ConnectionMatrixView: View {
         html += "</tr>\n"
         
         // Data rows
-        for fromDevice in studio.devices ?? [] {
+        for fromDevice in fromDevices {
             let fromIOSummary = ioSummary(for: fromDevice)
             html += """
                 <tr>
                     <td style="background-color: #f0f0f0; font-weight: bold; text-align: left; padding: 12px; border: 1px solid #999;">\(fromDevice.nickname.htmlEscaped)<br><span style="font-size: 11px; color: #666; font-weight: normal;">\(fromIOSummary.htmlEscaped)</span></td>
             """
             
-            for toDevice in studio.devices ?? [] {
+            for toDevice in toDevices {
                 let key = "\(fromDevice.id)_\(toDevice.id)"
                 
                 if let info = connectionMap[key] {
@@ -6907,7 +7038,8 @@ private struct HelpView: View {
         ("6", "Long click on a device to see all its connection details"),
         ("7", "Hold or right click a connection to delete it"),
         ("8", "Press auto-arrange to tidy up the screen or drag devices manually"),
-        ("9", "Select Matrix to view a structured from→to diagram")
+        ("9", "Use pinch gesture to zoom or expand device canvas as needed"),
+        ("10", "Select Matrix to view a structured from→to diagram")
     ]
     
     var body: some View {

@@ -48,9 +48,7 @@ struct Studio_GuruApp: App {
             // Log the error for debugging with details
             print("❌ Failed to create ModelContainer: \(error)")
             print("❌ Error type: \(type(of: error))")
-            if let swiftDataError = error as? any Error {
-                print("❌ Error description: \(swiftDataError.localizedDescription)")
-            }
+            print("❌ Error description: \(error.localizedDescription)")
             
             #if DEBUG
             // In debug, try to create without CloudKit to help diagnose

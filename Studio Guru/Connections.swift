@@ -242,8 +242,7 @@ final class ConnectionsStore: ObservableObject {
                 persistToUserDefaults(studioId: studioId)
             }
             
-            // Force UI update
-            objectWillChange.send()
+            // objectWillChange.send() not needed - @Published handles this automatically
         }
         return removed
     }
@@ -540,7 +539,7 @@ final class ConnectionsStore: ObservableObject {
         if hasChanges {
             bundlesByStudio[studioId] = studioBundles
             persist(studioId: studioId)
-            objectWillChange.send()
+            // objectWillChange.send() not needed - @Published handles this automatically
             #if DEBUG
             print("✅ Cleanup complete: Removed \(totalEdgesRemoved) invalid edge(s), \(bundlesToRemove.count) empty bundle(s)")
             #endif

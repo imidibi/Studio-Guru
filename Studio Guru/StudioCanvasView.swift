@@ -342,24 +342,37 @@ struct StudioCanvasView: View {
             if selectedStudioId == nil {
                 selectedStudioId = studios.first?.id
             }
+            
+            // Defer state-modifying operations to avoid "Modifying state during view update" warning
             if let sid = selectedStudioId,
                 let studio = studios.first(where: { $0.id == sid })
             {
-                // One-time migration: fix computer interface port types without breaking connections
-                fixComputerInterfacePortTypes(in: studio)
-                connectionsStore.load(studioId: sid)
-                connectionsStore.cleanupOrphanedConnections(studio: studio)
+                let capturedStudio = studio
+                let capturedSid = sid
+                Task.detached { @MainActor [weak connectionsStore] in
+                    guard let connectionsStore else { return }
+                    // One-time migration: fix computer interface port types without breaking connections
+                    fixComputerInterfacePortTypes(in: capturedStudio)
+                    connectionsStore.load(studioId: capturedSid)
+                    connectionsStore.cleanupOrphanedConnections(studio: capturedStudio)
+                }
             }
         }
         .onChange(of: selectedStudioId) { _, newValue in
-            selectionState.selection = nil
+            // Defer state-modifying operations to avoid "Modifying state during view update" warning  
             if let sid = newValue,
                 let studio = studios.first(where: { $0.id == sid })
             {
-                // Fix computer interface port types when switching studios
-                fixComputerInterfacePortTypes(in: studio)
-                connectionsStore.load(studioId: sid)
-                connectionsStore.cleanupOrphanedConnections(studio: studio)
+                let capturedStudio = studio
+                let capturedSid = sid
+                Task.detached { @MainActor [weak selectionState, weak connectionsStore] in
+                    guard let selectionState, let connectionsStore else { return }
+                    selectionState.selection = nil
+                    // Fix computer interface port types when switching studios
+                    fixComputerInterfacePortTypes(in: capturedStudio)
+                    connectionsStore.load(studioId: capturedSid)
+                    connectionsStore.cleanupOrphanedConnections(studio: capturedStudio)
+                }
             }
         }
     }
@@ -1995,40 +2008,65 @@ struct StudioCanvasView: View {
                    let toDevice = devices.first(where: { $0.id == link.toDeviceId }),
                    let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id) {
                     
-                    // Determine connection color based on connection type
-                    let connectionColor: Color = {
-                        // Get the first edge to determine connection type
-                        guard let firstEdge = bundle.edges.first,
-                              let device = devices.first(where: { $0.id == firstEdge.from.deviceId }) else {
-                            return ConnectionVisualType.unknown.color
+                    // Determine all connection types for this link (for parallel lines)
+                    let connectionTypes: [ConnectionVisualType] = {
+                        var typeCounts: [ConnectionVisualType: Int] = [:]
+                        
+                        for edge in bundle.edges {
+                            if let device = devices.first(where: { $0.id == edge.from.deviceId }) {
+                                // Check for regular ports first
+                                if let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
+                                    let type = ConnectionVisualType.from(portType: port.type)
+                                    typeCounts[type, default: 0] += 1
+                                } else if !device.computerInterfaceCounts.isEmpty {
+                                    // Computer interface (virtual port)
+                                    typeCounts[.computer, default: 0] += 1
+                                }
+                            }
                         }
                         
-                        // Check for regular ports first
-                        if let port = device.ports?.first(where: { $0.id == firstEdge.from.portId }) {
-                            return ConnectionVisualType.from(portType: port.type).color
-                        }
-                        
-                        // Check for computer interface (virtual port)
-                        if !device.computerInterfaceCounts.isEmpty {
-                            return ConnectionVisualType.computer.color
-                        }
-                        
-                        return ConnectionVisualType.unknown.color
+                        let sortedTypes = typeCounts.sorted { $0.value > $1.value }.map { $0.key }
+                        return sortedTypes.isEmpty ? [.unknown] : sortedTypes
                     }()
                     
-                    Path { path in
-                        let from = CGPoint(
-                            x: fromDevice.posX + offsetX,
-                            y: fromDevice.posY + offsetY
-                        )
-                        let to = CGPoint(
-                            x: toDevice.posX + offsetX,
-                            y: toDevice.posY + offsetY
-                        )
-                        path.move(to: from)
-                        path.addLine(to: to)
+                    // Draw parallel lines if multiple connection types exist
+                    ForEach(Array(connectionTypes.enumerated()), id: \.offset) { index, type in
+                        let offset = {
+                            let spacing: CGFloat = 6.0
+                            let total = connectionTypes.count
+                            if total == 1 { return CGFloat(0) }
+                            if total == 2 {
+                                return index == 0 ? -spacing / 2 : spacing / 2
+                            }
+                            let totalWidth = spacing * CGFloat(total - 1)
+                            return CGFloat(index) * spacing - totalWidth / 2
+                        }()
+                        
+                        Path { path in
+                            let from = CGPoint(
+                                x: fromDevice.posX + offsetX,
+                                y: fromDevice.posY + offsetY
+                            )
+                            let to = CGPoint(
+                                x: toDevice.posX + offsetX,
+                                y: toDevice.posY + offsetY
+                            )
+                            
+                            let dx = to.x - from.x
+                            let dy = to.y - from.y
+                            let distance = sqrt(dx * dx + dy * dy)
+                            
+                            let perpX = -dy / distance * offset
+                            let perpY = dx / distance * offset
+                            
+                            let offsetFrom = CGPoint(x: from.x + perpX, y: from.y + perpY)
+                            let offsetTo = CGPoint(x: to.x + perpX, y: to.y + perpY)
+                            
+                            path.move(to: offsetFrom)
+                            path.addLine(to: offsetTo)
+                        }
+                        .stroke(type.color, lineWidth: 2)
                     }
-                    .stroke(connectionColor, lineWidth: 2)
                 }
             }
             
@@ -3269,17 +3307,20 @@ private struct CanvasSurfaceView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let _ = {
-                // Detect significant size changes (rotation) and reset scale immediately
-                if lastKnownWidth > 0 && abs(geo.size.width - lastKnownWidth) > 100 {
-                    canvasScale = 1.0
-                    lastScale = 1.0
-                }
-                lastKnownWidth = geo.size.width
-            }()
+            let canvasBounds = calculateCanvasBounds(devices: studio.devices ?? [], viewport: geo.size)
+            
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
                 ZStack {
-                    Rectangle().fill(background)
+                    Rectangle()
+                        .fill(background)
+                        .overlay(
+                            Rectangle()
+                                .strokeBorder(
+                                    Color.primary.opacity(0.1),
+                                    lineWidth: 2,
+                                    antialiased: true
+                                )
+                        )
 
                     ForEach(links, id: \.id) { link in
                         linkRow(link)
@@ -3301,14 +3342,11 @@ private struct CanvasSurfaceView: View {
                 }
                 .drawingGroup()
                 .coordinateSpace(name: "canvasContent")
-                .frame(
-                    width: max(geo.size.width * 1.5, geo.size.width),
-                    height: max(geo.size.height * 1.5, geo.size.height)
-                )
+                .frame(width: canvasBounds.width, height: canvasBounds.height)
                 .scaleEffect(canvasScale)
                 .frame(
-                    width: max(geo.size.width * 1.5, geo.size.width) * canvasScale,
-                    height: max(geo.size.height * 1.5, geo.size.height) * canvasScale
+                    width: canvasBounds.width * canvasScale,
+                    height: canvasBounds.height * canvasScale
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -3342,6 +3380,7 @@ private struct CanvasSurfaceView: View {
                     // Reset immediately without animation to prevent visual distortion
                     canvasScale = 1.0
                     lastScale = 1.0
+                    lastKnownWidth = newSize.width
                 }
             }
         }
@@ -3385,36 +3424,80 @@ private struct CanvasSurfaceView: View {
             onExplode: { onExplodeDevice(d) },
             dragOrigin: $dragOrigin,
             beginDragIfNeeded: { device in
-                if dragOrigin?.id != device.id {
-                    dragOrigin = (device.id, device.posX, device.posY)
+                DispatchQueue.main.async {
+                    if dragOrigin?.id != device.id {
+                        dragOrigin = (device.id, device.posX, device.posY)
+                    }
                 }
             },
             onBeginConnectionDrag: { device, startPoint in
-                activeConnectionDrag = (
-                    fromId: device.id, start: startPoint, location: startPoint
-                )
-                hoveredConnectionTargetId = nil
+                DispatchQueue.main.async {
+                    activeConnectionDrag = (
+                        fromId: device.id, start: startPoint, location: startPoint
+                    )
+                    hoveredConnectionTargetId = nil
+                }
             },
             onUpdateConnectionDrag: { fromDevice, point in
-                guard activeConnectionDrag != nil else { return }
-                activeConnectionDrag!.location = point
+                DispatchQueue.main.async {
+                    guard activeConnectionDrag != nil else { return }
+                    activeConnectionDrag!.location = point
 
-                // Determine which device card (if any) the drag is currently over.
-                let target = deviceId(at: point, excluding: fromDevice.id)
-                hoveredConnectionTargetId = target
+                    // Determine which device card (if any) the drag is currently over.
+                    let target = deviceId(at: point, excluding: fromDevice.id)
+                    hoveredConnectionTargetId = target
+                }
             },
             onEndConnectionDrag: {
-                if let drag = activeConnectionDrag,
-                    let targetId = hoveredConnectionTargetId
-                {
-                    connectionsStore.ensureLinkSummary(
-                        studioId: studio.id,
-                        fromId: drag.fromId,
-                        toId: targetId
-                    )
+                DispatchQueue.main.async {
+                    if let drag = activeConnectionDrag,
+                        let targetId = hoveredConnectionTargetId
+                    {
+                        connectionsStore.ensureLinkSummary(
+                            studioId: studio.id,
+                            fromId: drag.fromId,
+                            toId: targetId
+                        )
+                    }
+                    hoveredConnectionTargetId = nil
+                    activeConnectionDrag = nil
                 }
-                hoveredConnectionTargetId = nil
-                activeConnectionDrag = nil
+            },
+            onEndDeviceDrag: {
+                let capturedStudio = studio
+                Task.detached { @MainActor in
+                    guard let devices = capturedStudio.devices, !devices.isEmpty else { return }
+                    
+                    let cardWidth: CGFloat = 260
+                    let cardHeight: CGFloat = 96
+                    let padding: CGFloat = 100
+                    
+                    var minX = CGFloat.infinity
+                    var minY = CGFloat.infinity
+                    
+                    for device in devices {
+                        minX = min(minX, CGFloat(device.posX) - cardWidth / 2)
+                        minY = min(minY, CGFloat(device.posY) - cardHeight / 2)
+                    }
+                    
+                    let targetMin = padding
+                    var shiftX: Double = 0
+                    var shiftY: Double = 0
+                    
+                    if minX < targetMin {
+                        shiftX = Double(targetMin - minX)
+                    }
+                    if minY < targetMin {
+                        shiftY = Double(targetMin - minY)
+                    }
+                    
+                    if shiftX != 0 || shiftY != 0 {
+                        for device in devices {
+                            device.posX += shiftX
+                            device.posY += shiftY
+                        }
+                    }
+                }
             }
         )
         .environmentObject(selection)
@@ -3453,6 +3536,86 @@ private struct CanvasSurfaceView: View {
         }
         return nil
     }
+    
+    // Calculate canvas bounds - PURE FUNCTION, no state modification
+    private func calculateCanvasBounds(devices: [DeviceInstance], viewport: CGSize) -> CGSize {
+        guard !devices.isEmpty else {
+            return viewport
+        }
+        
+        let cardWidth: CGFloat = 260
+        let cardHeight: CGFloat = 96
+        let padding: CGFloat = 100
+        
+        var minX = CGFloat.infinity
+        var minY = CGFloat.infinity
+        var maxX = -CGFloat.infinity
+        var maxY = -CGFloat.infinity
+        
+        for device in devices {
+            let x = CGFloat(device.posX)
+            let y = CGFloat(device.posY)
+            
+            minX = min(minX, x - cardWidth / 2)
+            minY = min(minY, y - cardHeight / 2)
+            maxX = max(maxX, x + cardWidth / 2)
+            maxY = max(maxY, y + cardHeight / 2)
+        }
+        
+        // If devices have negative coordinates, extend canvas WITHOUT modifying positions
+        if minX < 0 {
+            maxX += abs(minX)
+            minX = 0
+        }
+        if minY < 0 {
+            maxY += abs(minY)
+            minY = 0
+        }
+        
+        let contentWidth = (maxX - minX) + padding * 2
+        let contentHeight = (maxY - minY) + padding * 2
+        
+        let canvasWidth = max(contentWidth, viewport.width)
+        let canvasHeight = max(contentHeight, viewport.height)
+        
+        return CGSize(width: canvasWidth, height: canvasHeight)
+    }
+    
+    // Normalize device coordinates so they're all positive
+    // Call this ONLY when drag ends
+    private func normalizeDeviceCoordinates() {
+        guard let devices = studio.devices, !devices.isEmpty else { return }
+        
+        let cardWidth: CGFloat = 260
+        let cardHeight: CGFloat = 96
+        let padding: CGFloat = 100
+        
+        var minX = CGFloat.infinity
+        var minY = CGFloat.infinity
+        
+        for device in devices {
+            minX = min(minX, CGFloat(device.posX) - cardWidth / 2)
+            minY = min(minY, CGFloat(device.posY) - cardHeight / 2)
+        }
+        
+        let targetMin = padding
+        var shiftX: Double = 0
+        var shiftY: Double = 0
+        
+        if minX < targetMin {
+            shiftX = Double(targetMin - minX)
+        }
+        if minY < targetMin {
+            shiftY = Double(targetMin - minY)
+        }
+        
+        if shiftX != 0 || shiftY != 0 {
+            for device in devices {
+                device.posX += shiftX
+                device.posY += shiftY
+            }
+        }
+    }
 }
 // MARK: - Device Card (extracted to reduce SwiftUI type-check complexity)
 
@@ -3474,6 +3637,7 @@ private struct DeviceCardView: View {
     let onBeginConnectionDrag: (DeviceInstance, CGPoint) -> Void
     let onUpdateConnectionDrag: (DeviceInstance, CGPoint) -> Void
     let onEndConnectionDrag: () -> Void
+    let onEndDeviceDrag: () -> Void
 
     @EnvironmentObject var selection: SelectionState
     @State private var isDraggingConnection: Bool = false
@@ -3613,6 +3777,7 @@ private struct DeviceCardView: View {
                 }
                 .onEnded { _ in
                     dragOrigin = nil
+                    onEndDeviceDrag()
                 }
         )
     }
@@ -6402,15 +6567,6 @@ private struct ConnectionMatrixView: View {
     
     var body: some View {
         GeometryReader { geo in
-            let _ = {
-                // Detect significant size changes (rotation) and reset scale immediately
-                if lastKnownWidth > 0 && abs(geo.size.width - lastKnownWidth) > 100 {
-                    canvasScale = 1.0
-                    lastScale = 1.0
-                    isPanEnabled = false
-                }
-                lastKnownWidth = geo.size.width
-            }()
             NavigationStack {
                 VStack(spacing: 0) {
                     // Main scrollable matrix with zoom support
@@ -6505,6 +6661,7 @@ private struct ConnectionMatrixView: View {
                             canvasScale = 1.0
                             lastScale = 1.0
                             isPanEnabled = false
+                            lastKnownWidth = newSize.width
                         }
                     }
                 
@@ -7087,6 +7244,40 @@ private struct HelpView: View {
                                 Spacer()
                             }
                         }
+                    }
+                    
+                    Divider()
+                    
+                    // Working with the canvas
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Working with the canvas")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("The canvas in Studio Guru Pro is designed to accommodate studios of any size with unlimited devices. A light grey border shows the current canvas bounds.")
+                                .font(.body)
+                            
+                            Text("When you drag a device beyond the canvas edge, the canvas automatically expands to accommodate it when you release the device. This works in all directions:")
+                                .font(.body)
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                    Text("Moving devices **right or down** provides the smoothest experience - you'll see the canvas stretch in real-time as you drag")
+                                }
+                                
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                    Text("Moving devices **left or up** still works perfectly, though devices may temporarily move off-screen during the drag. The canvas will automatically expand and reposition everything when you release the device")
+                                }
+                            }
+                            .font(.body)
+                            
+                            Text("This ensures your devices always remain within the canvas bounds while giving you complete freedom to arrange your studio layout.")
+                                .font(.body)
+                        }
+                        .foregroundStyle(.secondary)
                     }
                     
                     Divider()

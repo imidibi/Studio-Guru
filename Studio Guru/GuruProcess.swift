@@ -49,58 +49,79 @@ struct GuruHomeView: View {
     @State private var selectedProcess: GuruProcess = .compressor
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                Section("Processors") {
-                    ForEach(GuruProcess.allCases) { p in
-                        HStack {
-                            Label(p.rawValue, systemImage: p.symbol)
-                            Spacer()
-                            if selectedProcess == p {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.secondary)
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Compact processor selector at top
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(GuruProcess.allCases) { p in
+                            Button {
+                                selectedProcess = p
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: p.symbol)
+                                    Text(p.rawValue)
+                                        .fontWeight(selectedProcess == p ? .semibold : .regular)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(
+                                    selectedProcess == p ? 
+                                        Color.accentColor : 
+                                        Color.secondary.opacity(0.15)
+                                )
+                                .foregroundStyle(
+                                    selectedProcess == p ? 
+                                        Color.white : 
+                                        Color.primary
+                                )
+                                .cornerRadius(8)
                             }
+                            .buttonStyle(.plain)
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectedProcess = p }
-                        .listRowBackground(
-                            selectedProcess == p ? Color.accentColor.opacity(0.12) : Color.clear
-                        )
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                #if os(iOS)
+                .background(Color(UIColor.systemGroupedBackground))
+                #else
+                .background(Color(NSColor.controlBackgroundColor))
+                #endif
+                
+                Divider()
+                
+                // Main content area
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Source selector
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Source")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                            
+                            Picker("Source", selection: $selectedSource) {
+                                ForEach(GuruSource.allCases) { s in
+                                    Text(s.rawValue).tag(s)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        
+                        // Plugin settings
+                        GuruPluginPanel(source: selectedSource, process: selectedProcess)
+                    }
+                    .padding(20)
                 }
             }
             .navigationTitle("Guru")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
             }
-        } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("Source") {
-                        Picker("Source", selection: $selectedSource) {
-                            ForEach(GuruSource.allCases) { s in
-                                Text(s.rawValue).tag(s)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(8)
-                    }
-
-                    GuruPluginPanel(source: selectedSource, process: selectedProcess)
-                }
-                .padding(horizontalSizeClass == .compact ? 12 : 16)
-            }
-            .navigationTitle(selectedProcess.rawValue)
         }
-        .navigationSplitViewStyle(.balanced)
-        #if os(iOS)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        #else
-        .frame(minWidth: 820, idealWidth: 980, maxWidth: .infinity,
-               minHeight: 680, idealHeight: 820, maxHeight: .infinity)
-        #endif
     }
 }
 

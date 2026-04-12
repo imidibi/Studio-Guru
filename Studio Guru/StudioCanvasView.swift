@@ -106,6 +106,14 @@ struct StudioCanvasView: View {
     @State private var draftComputerInterfaceCounts: [ComputerInterface: Int] =
         [:]
     @State private var deviceEditorError: String? = nil
+    
+    // Draft manual for device editor
+    @State private var draftManualURL: URL? = nil
+    @State private var isSelectingManualForDraft: Bool = false
+    
+    // Auto-arrange undo
+    @State private var savedDevicePositions: [UUID: (x: Double, y: Double)] = [:]
+    @State private var canUndoAutoArrange: Bool = false
 
     // Delete device confirm
     @State private var isShowingDeleteDeviceConfirm: Bool = false
@@ -127,6 +135,7 @@ struct StudioCanvasView: View {
     // Device inspector overlay
     @State private var presentedInspectorDeviceId: UUID? = nil
     @State private var suppressInspectorUntil: Date? = nil
+    @State private var inspectorDetent: PresentationDetent = .large
 
     // When saving from the device editor we often set selection to the saved device.
     // That should NOT immediately pop the inspector overlay.
@@ -391,7 +400,7 @@ struct StudioCanvasView: View {
             }
         }
         .toolbar {
-            // Left side: New Studio + Duplicate
+            // Left side: New Studio + Help
             ToolbarItem(placement: .navigation) {
                 Button {
                     newStudioNameDraft = "My Studio"
@@ -449,19 +458,20 @@ struct StudioCanvasView: View {
                     }
                     .help("View connections in spreadsheet format")
                 }
-                
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        isShowingGuru = true
-                    } label: {
-                        Label("Guru", systemImage: "lightbulb")
-                    }
-                    .help("Quick setup suggestions for common devices")
+            }
+            
+            // Guru is available even without a studio selected in the list
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    isShowingGuru = true
+                } label: {
+                    Label("Guru", systemImage: "lightbulb")
                 }
+                .help("Quick setup suggestions for common devices")
             }
 
             // Right side: Import, Export, Delete, Settings
-            ToolbarItem(placement: .automatic) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     isShowingImportPicker = true
                 } label: {
@@ -471,7 +481,7 @@ struct StudioCanvasView: View {
             }
 
             if let studio = currentStudio {
-                ToolbarItem(placement: .automatic) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         exportStudio(studio)
                     } label: {
@@ -480,7 +490,7 @@ struct StudioCanvasView: View {
                     .help("Export this studio to share with others")
                 }
 
-                ToolbarItem(placement: .automatic) {
+                ToolbarItem(placement: .primaryAction) {
                     Button(role: .destructive) {
                         studioIdPendingDelete = studio.id
                         isShowingDeleteStudioConfirm = true
@@ -494,7 +504,7 @@ struct StudioCanvasView: View {
                 }
             }
 
-            ToolbarItem(placement: .automatic) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     isShowingSettings = true
                 } label: {
@@ -551,6 +561,7 @@ struct StudioCanvasView: View {
 
                 if case .device(let id) = sel {
                     presentedInspectorDeviceId = id
+                    inspectorDetent = .large  // Always open at large size
                 } else {
                     presentedInspectorDeviceId = nil
                 }
@@ -572,7 +583,7 @@ struct StudioCanvasView: View {
                 )
             ) { item in
                 inspectorSheetContent(item: item)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.large, .medium], selection: $inspectorDetent)
             }
             .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm)
         {
@@ -611,45 +622,74 @@ struct StudioCanvasView: View {
     }
 
     private func studioDetailBase(for studio: Studio) -> some View {
-        VStack(spacing: 0) {
-            DetailHeader(
-                studio: studio,
-                onCreateDevice: { beginCreateDevice() },
-                onShowLegend: { isShowingConnectionLegend = true }
-            )
-            .padding(.horizontal)
-            .padding(.vertical, 10)
+        ZStack {
+            VStack(spacing: 0) {
+                DetailHeader(
+                    studio: studio,
+                    onCreateDevice: { beginCreateDevice() },
+                    onShowLegend: { isShowingConnectionLegend = true }
+                )
+                .padding(.horizontal)
+                .padding(.vertical, 10)
 
-            Divider()
+                Divider()
 
-            DetailCanvas(
-                studio: studio,
-                background: canvasBackground,
-                connectionsStore: connectionsStore,
-                isExplosionEnabled: isExplosionReady,
-                onSelectLink: { link in
-                    selectionState.selection = .connection(link.id)
-                    connectionEditorLinkId = link.id
-                    isShowingConnectionsEditor = true
-                },
-                onRequestDeleteLink: { link in
-                    connectionEditorLinkId = link.id
-                    isShowingDeleteConnectionConfirm = true
-                },
-                onExplodeDevice: { device in
-                    if suppressExplosionReopen { return }
-                    if let until = explosionCooldownUntil, Date() < until {
-                        return
+                DetailCanvas(
+                    studio: studio,
+                    background: canvasBackground,
+                    connectionsStore: connectionsStore,
+                    isExplosionEnabled: isExplosionReady,
+                    onSelectLink: { link in
+                        selectionState.selection = .connection(link.id)
+                        connectionEditorLinkId = link.id
+                        isShowingConnectionsEditor = true
+                    },
+                    onRequestDeleteLink: { link in
+                        connectionEditorLinkId = link.id
+                        isShowingDeleteConnectionConfirm = true
+                    },
+                    onExplodeDevice: { device in
+                        if suppressExplosionReopen { return }
+                        if let until = explosionCooldownUntil, Date() < until {
+                            return
+                        }
+                        if isShowingConnectionExplosion { return }
+                        explosionDeviceId = device.id
+                        explosionDeviceSnapshot = device
+                        isShowingConnectionExplosion = true
+                    },
+                    onClearAutoArrangeUndo: {
+                        canUndoAutoArrange = false
+                        savedDevicePositions.removeAll()
+                    },
+                    canvasSize: $canvasSize
+                )
+                .environmentObject(selectionState)
+            }
+            
+            // Floating undo button
+            if canUndoAutoArrange {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            undoAutoArrange(in: studio)
+                        } label: {
+                            Label("Undo Auto-Arrange", systemImage: "arrow.uturn.backward.circle.fill")
+                                .font(.title2)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        .padding(20)
                     }
-                    if isShowingConnectionExplosion { return }
-                    explosionDeviceId = device.id
-                    explosionDeviceSnapshot = device
-                    isShowingConnectionExplosion = true
-                },
-                canvasSize: $canvasSize
-            )
-            .environmentObject(selectionState)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.3), value: canUndoAutoArrange)
     }
 
     private var isExplosionReady: Bool {
@@ -872,6 +912,8 @@ struct StudioCanvasView: View {
                 digitalOutputs: $draftDigitalOutputs,
                 computerInterfaceCounts: $draftComputerInterfaceCounts,
                 errorMessage: $deviceEditorError,
+                manualURL: $draftManualURL,
+                isSelectingManual: $isSelectingManualForDraft,
                 onCancel: { isShowingDeviceEditor = false },
                 onSave: { saveDeviceEdits(into: studio) }
             )
@@ -907,6 +949,7 @@ struct StudioCanvasView: View {
         draftDigitalInputs = []
         draftDigitalOutputs = []
         draftComputerInterfaceCounts = [:]
+        draftManualURL = nil
 
         isShowingDeviceEditor = true
     }
@@ -1084,6 +1127,29 @@ struct StudioCanvasView: View {
             computerInterfaceCounts: device.computerInterfaceCounts,
             sampleRate: draftSampleRate
         )
+        
+        // Handle manual PDF if one was selected
+        if let pickedURL = draftManualURL {
+            do {
+                let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
+                    pickedURL: pickedURL,
+                    deviceId: device.id
+                )
+                
+                let doc = DocLink(
+                    title: storedURL.lastPathComponent,
+                    kind: .manual,
+                    bookmarkData: bookmarkData
+                )
+                if device.docs == nil {
+                    device.docs = []
+                }
+                device.docs?.append(doc)
+            } catch {
+                print("Manual import failed during device save: \(error)")
+                // Don't fail the entire save operation if manual import fails
+            }
+        }
 
         // Keep selection for highlighting, but do not pop the inspector immediately after saving.
         suppressNextInspectorPresentation = true
@@ -2227,6 +2293,13 @@ struct StudioCanvasView: View {
 
     private func autoArrangeDevices(in studio: Studio) {
         guard !(studio.devices?.isEmpty ?? true) else { return }
+        
+        // Save current positions for undo
+        savedDevicePositions.removeAll()
+        for device in studio.devices ?? [] {
+            savedDevicePositions[device.id] = (x: device.posX, y: device.posY)
+        }
+        canUndoAutoArrange = true
 
         // Get connections from the connection store (not SwiftData)
         let links = connectionsStore.links(for: studio.id)
@@ -2247,6 +2320,27 @@ struct StudioCanvasView: View {
         for link in links {
             outgoing[link.fromDeviceId, default: []].insert(link.toDeviceId)
             incoming[link.toDeviceId, default: []].insert(link.fromDeviceId)
+        }
+        
+        // Identify unconnected devices (no incoming or outgoing connections)
+        var unconnectedDevices: [DeviceInstance] = []
+        var connectedDevices: [DeviceInstance] = []
+        
+        for device in studio.devices ?? [] {
+            let hasConnections = !(outgoing[device.id]?.isEmpty ?? true) || !(incoming[device.id]?.isEmpty ?? true)
+            if hasConnections {
+                connectedDevices.append(device)
+            } else {
+                unconnectedDevices.append(device)
+            }
+        }
+        
+        // Sort unconnected devices by category and name for consistent ordering
+        unconnectedDevices.sort { d1, d2 in
+            if d1.category != d2.category {
+                return d1.category.rawValue < d2.category.rawValue
+            }
+            return d1.nickname < d2.nickname
         }
 
         // SIGNAL FLOW LAYOUT
@@ -2587,19 +2681,21 @@ struct StudioCanvasView: View {
         let halfCardWidth = finalCardWidth / 2
         let halfCardHeight = finalCardHeight / 2
         
-        // Find column range
+        // Find column range for connected devices
         let minColumn = deviceColumns.values.min() ?? 0
         let maxColumn = deviceColumns.values.max() ?? 0
-        let columnRange = maxColumn - minColumn + 1
+        let columnRange = max(1, maxColumn - minColumn + 1)
         
-        // Calculate total width needed
+        // Calculate total width needed for connected devices
         let totalWidth = Double(columnRange) * finalCardWidth + Double(max(0, columnRange - 1)) * finalHorizontalSpacing
         
-        // Always center the layout horizontally within the viewport
-        // Use a generous default viewport width if canvasSize is not reliable
+        // IMPORTANT: Ensure startX is always visible (never negative or off-left edge)
+        // Center if it fits, otherwise start from padding
         let effectiveViewportWidth = max(canvasSize.width, 1024)
-        let startX = padding + halfCardWidth + (effectiveViewportWidth - totalWidth - padding * 2) / 2
+        let centeredStartX = (effectiveViewportWidth - totalWidth) / 2
+        let startX = max(padding + halfCardWidth, centeredStartX)
         
+        // Position connected devices
         for (levelIndex, level) in sortedLevels.enumerated() {
             guard let devicesInLevel = levelGroups[level] else { continue }
             
@@ -2614,9 +2710,39 @@ struct StudioCanvasView: View {
                 }
             }
         }
+        
+        // Position unconnected devices in a vertical column on the right side
+        if !unconnectedDevices.isEmpty {
+            // Place unconnected devices to the right of the connected layout
+            let rightEdgeOfConnected = startX + Double(columnRange - 1) * (finalCardWidth + finalHorizontalSpacing) + halfCardWidth
+            let unconnectedX = rightEdgeOfConnected + finalHorizontalSpacing * 1.5 // Extra spacing to separate
+            
+            let unconnectedSpacing: Double = 40 // Closer vertical spacing for unconnected devices
+            
+            for (index, device) in unconnectedDevices.enumerated() {
+                device.posX = unconnectedX
+                device.posY = padding + halfCardHeight + Double(index) * (finalCardHeight + unconnectedSpacing)
+            }
+        }
 
         // Save changes
         try? modelContext.save()
+    }
+    
+    private func undoAutoArrange(in studio: Studio) {
+        guard !savedDevicePositions.isEmpty else { return }
+        
+        // Restore saved positions
+        for device in studio.devices ?? [] {
+            if let savedPos = savedDevicePositions[device.id] {
+                device.posX = savedPos.x
+                device.posY = savedPos.y
+            }
+        }
+        
+        // Clear saved positions and hide undo button
+        savedDevicePositions.removeAll()
+        canUndoAutoArrange = false
     }
 
     private func syncConnectionsToSwiftData(studio: Studio) {
@@ -3141,6 +3267,7 @@ private struct DetailCanvas: View {
     let onSelectLink: (ConnectionLinkSummary) -> Void
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
     let onExplodeDevice: (DeviceInstance) -> Void
+    let onClearAutoArrangeUndo: () -> Void
     @EnvironmentObject var selectionState: SelectionState
     @Binding var canvasSize: CGSize
 
@@ -3158,7 +3285,8 @@ private struct DetailCanvas: View {
             onSelectLink: onSelectLink,
             onRequestDeleteLink: onRequestDeleteLink,
             onExplodeDevice: onExplodeDevice,
-            isExplosionEnabled: isExplosionEnabled
+            isExplosionEnabled: isExplosionEnabled,
+            onClearAutoArrangeUndo: onClearAutoArrangeUndo
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
@@ -3290,6 +3418,7 @@ private struct CanvasSurfaceView: View {
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
     let onExplodeDevice: (DeviceInstance) -> Void
     let isExplosionEnabled: Bool
+    let onClearAutoArrangeUndo: () -> Void
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -3427,6 +3556,8 @@ private struct CanvasSurfaceView: View {
                 DispatchQueue.main.async {
                     if dragOrigin?.id != device.id {
                         dragOrigin = (device.id, device.posX, device.posY)
+                        // Clear undo when user manually moves a device
+                        onClearAutoArrangeUndo()
                     }
                 }
             },
@@ -4939,6 +5070,9 @@ private struct DeviceEditorSheet: View {
     @Binding var computerInterfaceCounts: [ComputerInterface: Int]
 
     @Binding var errorMessage: String?
+    
+    @Binding var manualURL: URL?
+    @Binding var isSelectingManual: Bool
 
     let onCancel: () -> Void
     let onSave: () -> Void
@@ -5063,6 +5197,39 @@ private struct DeviceEditorSheet: View {
                                     )
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .padding(8)
+                        }
+                        
+                        GroupBox("Manual") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if let url = manualURL {
+                                    HStack {
+                                        Image(systemName: "doc.richtext.fill")
+                                            .foregroundStyle(.blue)
+                                        Text(url.lastPathComponent)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Button(role: .destructive) {
+                                            manualURL = nil
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                    .padding(.vertical, 4)
+                                } else {
+                                    Text("No manual attached")
+                                        .foregroundStyle(.secondary)
+                                        .font(.caption)
+                                }
+                                
+                                Button {
+                                    isSelectingManual = true
+                                } label: {
+                                    Label("Add PDF Manual", systemImage: "doc.badge.plus")
                                 }
                             }
                             .padding(8)
@@ -5272,6 +5439,18 @@ private struct DeviceEditorSheet: View {
                         }
                     }
                 }
+                .fileImporter(
+                    isPresented: $isSelectingManual,
+                    allowedContentTypes: [.pdf],
+                    allowsMultipleSelection: false
+                ) { result in
+                    guard case .success(let urls) = result,
+                          let pickedURL = urls.first
+                    else { return }
+                    
+                    // Store the URL - it will be processed when saving
+                    manualURL = pickedURL
+                }
             #else
                 Form {
                     Section("Basics") {
@@ -5302,6 +5481,34 @@ private struct DeviceEditorSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                    }
+                    
+                    Section("Manual") {
+                        if let url = manualURL {
+                            HStack {
+                                Image(systemName: "doc.richtext.fill")
+                                    .foregroundStyle(.blue)
+                                Text(url.lastPathComponent)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button(role: .destructive) {
+                                    manualURL = nil
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Text("No manual attached")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                        
+                        Button {
+                            isSelectingManual = true
+                        } label: {
+                            Label("Add PDF Manual", systemImage: "doc.badge.plus")
+                        }
                     }
 
                     Section("Analog I/O") {
@@ -5472,6 +5679,18 @@ private struct DeviceEditorSheet: View {
                             dismiss()
                         }
                     }
+                }
+                .fileImporter(
+                    isPresented: $isSelectingManual,
+                    allowedContentTypes: [.pdf],
+                    allowsMultipleSelection: false
+                ) { result in
+                    guard case .success(let urls) = result,
+                          let pickedURL = urls.first
+                    else { return }
+                    
+                    // Store the URL - it will be processed when saving
+                    manualURL = pickedURL
                 }
             #endif
         }

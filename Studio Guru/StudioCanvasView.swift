@@ -146,6 +146,10 @@ struct StudioCanvasView: View {
     @State private var connectionPendingDelete: Connection? = nil
 
     var body: some View {
+        mainContent
+    }
+    
+    private var mainContent: some View {
         NavigationSplitView {
             StudiosList(
                 studios: studiosSortedByName,
@@ -227,7 +231,11 @@ struct StudioCanvasView: View {
                             .font(.headline)
                     }
                     .padding(32)
-                    .background(Color(UIColor.systemBackground))
+                    #if os(iOS)
+                    .background(Color(uiColor: .systemBackground))
+                    #else
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    #endif
                     .cornerRadius(12)
                     .shadow(radius: 10)
                 }

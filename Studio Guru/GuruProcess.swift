@@ -115,7 +115,9 @@ struct GuruHomeView: View {
                 }
             }
             .navigationTitle("Guru")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

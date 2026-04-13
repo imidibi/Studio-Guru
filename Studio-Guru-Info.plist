@@ -29,5 +29,24 @@
 			</dict>
 		</dict>
 	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>studioguru</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Studio Guru Studio File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.studioguru.studio</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

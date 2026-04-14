@@ -7248,12 +7248,29 @@ private struct ConnectionMatrixView: View {
     }
     
     private func exportMatrixAsSpreadsheet() {
-        // Create HTML table with inline styles for maximum Excel compatibility
+        // Create HTML table with proper Excel XML namespace for compatibility
         var html = """
-        <html xmlns:x="urn:schemas-microsoft-com:office:excel">
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
         <head>
             <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
             <meta name="ProgId" content="Excel.Sheet">
+            <meta name="Generator" content="Studio Guru">
+            <!--[if gte mso 9]>
+            <xml>
+                <x:ExcelWorkbook>
+                    <x:ExcelWorksheets>
+                        <x:ExcelWorksheet>
+                            <x:Name>Connection Matrix</x:Name>
+                            <x:WorksheetOptions>
+                                <x:Print>
+                                    <x:ValidPrinterInfo/>
+                                </x:Print>
+                            </x:WorksheetOptions>
+                        </x:ExcelWorksheet>
+                    </x:ExcelWorksheets>
+                </x:ExcelWorkbook>
+            </xml>
+            <![endif]-->
         </head>
         <body>
             <h1 style="font-family: Arial, sans-serif; font-size: 24px; margin: 20px 0;">Connection Matrix: \(studio.name)</h1>
@@ -7379,8 +7396,10 @@ private struct ConnectionMatrixView: View {
         }
         #elseif os(macOS)
         let savePanel = NSSavePanel()
+        // Save as .html but Excel will recognize it due to proper XML namespace
         savePanel.allowedContentTypes = [.html]
         savePanel.nameFieldStringValue = "ConnectionMatrix.html"
+        savePanel.message = "This HTML file will open directly in Excel"
         
         savePanel.begin { response in
             if response == .OK, let url = savePanel.url {

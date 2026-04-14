@@ -11,6 +11,7 @@ import SwiftData
 @main
 struct Studio_GuruApp: App {
     var sharedModelContainer: ModelContainer = {
+        // SwiftData schema - migration happens automatically when models change
         let schema = Schema([
             Studio.self,
             DeviceInstance.self,

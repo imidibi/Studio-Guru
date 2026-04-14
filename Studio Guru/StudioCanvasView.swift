@@ -1159,6 +1159,10 @@ struct StudioCanvasView: View {
             }
         }
 
+        // Mark device and studio as modified for iCloud sync
+        device.markAsModified()
+        studio.markAsModified()
+        
         // Keep selection for highlighting, but do not pop the inspector immediately after saving.
         suppressNextInspectorPresentation = true
         selectionState.selection = .device(device.id)
@@ -1173,6 +1177,7 @@ struct StudioCanvasView: View {
         }
 
         studio.devices?.remove(at: idx)
+        studio.markAsModified()
         deviceIdPendingDelete = nil
         selectionState.selection = nil
     }
@@ -1219,6 +1224,8 @@ struct StudioCanvasView: View {
             studio.devices = []
         }
         studio.devices?.append(newDevice)
+        newDevice.markAsModified()
+        studio.markAsModified()
         selectionState.selection = .device(newDevice.id)
     }
 
@@ -1937,6 +1944,7 @@ struct StudioCanvasView: View {
         }
 
         modelContext.insert(copy)
+        copy.markAsModified()
         try? modelContext.save()
         
         // Rebuild ConnectionsStore from the copied connections
@@ -2733,6 +2741,12 @@ struct StudioCanvasView: View {
             }
         }
 
+        // Mark all modified devices and studio for iCloud sync
+        for device in studio.devices ?? [] {
+            device.markAsModified()
+        }
+        studio.markAsModified()
+        
         // Save changes
         try? modelContext.save()
     }
@@ -3232,7 +3246,7 @@ private func ioSummary(from ports: [Port]?) -> String {
         parts.append("S/PDIF \(spdifin)/\(spdifout)")
     }
 
-    return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")
+    return parts.isEmpty ? "I/O: None" : parts.joined(separator: " • ")
 }
 
 // MARK: - Detail Header Subview
@@ -3246,7 +3260,13 @@ private struct DetailHeader: View {
         HStack(spacing: 12) {
             TextField(
                 "Studio Name",
-                text: .init(get: { studio.name }, set: { studio.name = $0 })
+                text: .init(
+                    get: { studio.name },
+                    set: { newValue in
+                        studio.name = newValue
+                        studio.markAsModified()
+                    }
+                )
             )
             .textFieldStyle(.roundedBorder)
             .font(.title3)
@@ -5029,6 +5049,7 @@ extension DeviceInstance {
         case .channelStrip: return "slider.horizontal.3"
         case .compressor: return "waveform"
         case .computer: return "desktopcomputer"
+        case .controlSurface: return "slider.horizontal.2.square.badge.arrow.down"
         case .digitalMixer: return "music.mic"
         case .effectsUnit: return "sparkles"
         case .equalizer: return "slider.horizontal.3"

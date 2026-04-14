@@ -190,6 +190,33 @@ struct SettingsView: View {
                     Text("Exported files can be shared via email, AirDrop, or cloud storage services.")
                 }
                 
+                if iCloudSyncEnabled && !studios.isEmpty {
+                    Section {
+                        ForEach(studios) { studio in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(studio.name)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                HStack {
+                                    Text("Last modified:")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(studio.modifiedAt, style: .relative)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("ago")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Studio Sync Status")
+                    } footer: {
+                        Text("Shows when each studio was last modified. Recent changes should sync to other devices within a few minutes.")
+                    }
+                }
+                
                 Section {
                     HStack {
                         Text("Version")
@@ -244,46 +271,76 @@ struct SettingsView: View {
             lastSyncMessage = "Syncing..."
         }
         
-        // Touch the model context to trigger a save and sync
-        // This doesn't modify data, just forces CloudKit to sync
-        try? modelContext.save()
-        
-        // Wait a moment for the sync to initiate
-        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-        
-        await MainActor.run {
-            isSyncing = false
-            let formatter = DateFormatter()
-            formatter.timeStyle = .short
-            lastSyncMessage = "Last sync: \(formatter.string(from: Date()))"
-        }
-        
         #if DEBUG
-        print("🔄 Manual sync triggered for \(studios.count) studios")
+        print("🔄 Manual sync started for \(studios.count) studios")
+        for studio in studios {
+            print("  📱 Studio: '\(studio.name)' - Modified: \(studio.modifiedAt)")
+        }
         #endif
+        
+        // Force a save to trigger CloudKit sync
+        // SwiftData automatically syncs changed records to CloudKit
+        do {
+            try modelContext.save()
+            
+            // Give CloudKit time to process the sync
+            try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+            
+            await MainActor.run {
+                isSyncing = false
+                let formatter = DateFormatter()
+                formatter.timeStyle = .short
+                lastSyncMessage = "Sync initiated at \(formatter.string(from: Date())). Changes may take a few moments to appear on other devices."
+            }
+            
+            #if DEBUG
+            print("✅ Manual sync completed successfully")
+            #endif
+        } catch {
+            await MainActor.run {
+                isSyncing = false
+                lastSyncMessage = "Sync failed: \(error.localizedDescription)"
+            }
+            
+            #if DEBUG
+            print("❌ Manual sync failed: \(error)")
+            #endif
+        }
     }
     
     private func resetSyncAndForceUpload() {
-        // Touch all studios to update their modification dates
-        // This makes CloudKit prioritize this device's data
+        #if DEBUG
+        print("🔄 Sync reset: Marking \(studios.count) studios as modified")
+        #endif
+        
+        // Mark all studios and devices as modified with current timestamp
+        // This makes CloudKit prioritize this device's data in conflicts
         for studio in studios {
-            // Update timestamp by accessing and re-setting a property
-            let currentName = studio.name
-            studio.name = currentName
+            studio.markAsModified()
             
-            // Same for devices
+            // Mark all devices in this studio as modified too
             for device in studio.devices ?? [] {
-                let currentNickname = device.nickname
-                device.nickname = currentNickname
+                device.markAsModified()
             }
+            
+            #if DEBUG
+            print("  ✏️ Updated studio '\(studio.name)' modifiedAt: \(studio.modifiedAt)")
+            #endif
         }
         
         // Save to trigger CloudKit sync
-        try? modelContext.save()
-        
-        #if DEBUG
-        print("🔄 Sync reset: Updated \(studios.count) studios to force upload to iCloud")
-        #endif
+        do {
+            try modelContext.save()
+            
+            #if DEBUG
+            print("✅ Sync reset complete - all data marked as modified and saved")
+            print("   CloudKit will now upload this device's data as the newest version")
+            #endif
+        } catch {
+            #if DEBUG
+            print("❌ Sync reset failed: \(error)")
+            #endif
+        }
     }
 }
 

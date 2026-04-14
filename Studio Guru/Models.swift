@@ -41,6 +41,7 @@ enum DeviceCategory: String, Codable, CaseIterable {
     case channelStrip = "Channel Strip"
     case compressor = "Compressor"
     case computer = "Computer"
+    case controlSurface = "Control Surface"
     case digitalMixer = "Digital Mixer"
     case effectsUnit = "Effects Unit"
     case equalizer = "Equalizer"
@@ -110,6 +111,7 @@ final class Studio {
     var id: UUID = UUID()
     var name: String = ""
     var createdAt: Date = Date()
+    var modifiedAt: Date = Date()
 
     @Relationship(deleteRule: .cascade, inverse: \DeviceInstance.studio) var devices: [DeviceInstance]? = []
     @Relationship(deleteRule: .cascade, inverse: \Connection.studio) var connections: [Connection]? = []
@@ -118,8 +120,13 @@ final class Studio {
         self.id = UUID()
         self.name = name
         self.createdAt = Date()
+        self.modifiedAt = Date()
         self.devices = []
         self.connections = []
+    }
+    
+    func markAsModified() {
+        self.modifiedAt = Date()
     }
 }
 
@@ -174,6 +181,9 @@ final class DeviceInstance {
     // Optional image paths (sandbox)
     var frontImagePath: String?
     var rearImagePath: String?
+    
+    // Modification tracking for iCloud sync
+    var modifiedAt: Date = Date()
 
     @Relationship(deleteRule: .cascade, inverse: \Port.device) var ports: [Port]? = []
     @Relationship(deleteRule: .cascade, inverse: \DocLink.device) var docs: [DocLink]? = []
@@ -237,8 +247,13 @@ final class DeviceInstance {
 
         self.frontImagePath = nil
         self.rearImagePath = nil
+        self.modifiedAt = Date()
         self.ports = []
         self.docs = []
+    }
+    
+    func markAsModified() {
+        self.modifiedAt = Date()
     }
 
     var category: DeviceCategory {

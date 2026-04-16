@@ -69,6 +69,7 @@ struct StudioCanvasView: View {
 
     @State private var isShowingConnectionsEditor: Bool = false
     @State private var connectionEditorLinkId: UUID? = nil
+    @State private var connectionEditorDirection: ArrowDirection = .forward
 
     // Canvas sizing (used to place new devices without overlap)
     @State private var canvasSize: CGSize = CGSize(width: 1200, height: 800)
@@ -650,11 +651,18 @@ struct StudioCanvasView: View {
                     onSelectLink: { link in
                         selectionState.selection = .connection(link.id)
                         connectionEditorLinkId = link.id
+                        connectionEditorDirection = .forward  // Default to forward when clicking line
                         isShowingConnectionsEditor = true
                     },
                     onRequestDeleteLink: { link in
                         connectionEditorLinkId = link.id
                         isShowingDeleteConnectionConfirm = true
+                    },
+                    onArrowTap: { link, direction in
+                        selectionState.selection = .connection(link.id)
+                        connectionEditorLinkId = link.id
+                        connectionEditorDirection = direction
+                        isShowingConnectionsEditor = true
                     },
                     onExplodeDevice: { device in
                         if suppressExplosionReopen { return }
@@ -884,10 +892,14 @@ struct StudioCanvasView: View {
             let linkId = connectionEditorLinkId,
             let bundle = connectionsStore.bundle(for: studio.id, linkId: linkId)
         {
+            // Swap from/to based on arrow direction
+            let fromDevice = connectionEditorDirection == .forward ? bundle.fromDeviceId : bundle.toDeviceId
+            let toDevice = connectionEditorDirection == .forward ? bundle.toDeviceId : bundle.fromDeviceId
+            
             ConnectionsDialogView(
                 studio: studio,
-                fromDeviceId: bundle.fromDeviceId,
-                toDeviceId: bundle.toDeviceId,
+                fromDeviceId: fromDevice,
+                toDeviceId: toDevice,
                 store: connectionsStore
             )
             .id(bundle.id)
@@ -3294,6 +3306,7 @@ private struct DetailCanvas: View {
     let isExplosionEnabled: Bool
     let onSelectLink: (ConnectionLinkSummary) -> Void
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
+    let onArrowTap: ((ConnectionLinkSummary, ArrowDirection) -> Void)?
     let onExplodeDevice: (DeviceInstance) -> Void
     let onClearAutoArrangeUndo: () -> Void
     @EnvironmentObject var selectionState: SelectionState
@@ -3312,6 +3325,7 @@ private struct DetailCanvas: View {
             connectionsStore: connectionsStore,
             onSelectLink: onSelectLink,
             onRequestDeleteLink: onRequestDeleteLink,
+            onArrowTap: onArrowTap,
             onExplodeDevice: onExplodeDevice,
             isExplosionEnabled: isExplosionEnabled,
             onClearAutoArrangeUndo: onClearAutoArrangeUndo
@@ -3444,6 +3458,7 @@ private struct CanvasSurfaceView: View {
     let connectionsStore: ConnectionsStore
     let onSelectLink: (ConnectionLinkSummary) -> Void
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
+    let onArrowTap: ((ConnectionLinkSummary, ArrowDirection) -> Void)?
     let onExplodeDevice: (DeviceInstance) -> Void
     let isExplosionEnabled: Bool
     let onClearAutoArrangeUndo: () -> Void
@@ -3552,7 +3567,10 @@ private struct CanvasSurfaceView: View {
             handleTips: connectionHandleTips,
             isSelected: isSelectedConnection(linkId: link.id),
             onSelect: { onSelectLink(link) },
-            onDelete: { onRequestDeleteLink(link) }
+            onDelete: { onRequestDeleteLink(link) },
+            onArrowTap: { direction in
+                onArrowTap?(link, direction)
+            }
         )
     }
 
@@ -4395,6 +4413,7 @@ private struct ConnectionLineRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onDelete: () -> Void
+    let onArrowTap: ((ArrowDirection) -> Void)?
 
     // Calculate connection point on device card border
     private func cardBorderPoint(
@@ -4471,7 +4490,7 @@ private struct ConnectionLineRow: View {
 
     // Analyze connections to determine connection types and total channel count
     private var connectionMetadata:
-        (types: [ConnectionVisualType], channelCount: Int)
+        (types: [ConnectionVisualType], channelCount: Int, hasForward: Bool, hasReverse: Bool)
     {
         // Get the connection bundle from ConnectionsStore (UserDefaults-based storage)
         guard
@@ -4481,21 +4500,30 @@ private struct ConnectionLineRow: View {
             )
         else {
             // print("⚠️ No bundle found for link \(link.id)")
-            return ([.unknown], 1)
+            return ([.unknown], 1, false, false)
         }
 
         // print("🔍 Analyzing bundle with \(bundle.edges.count) edges")
 
         guard !bundle.edges.isEmpty else {
             // print("⚠️ Bundle has no edges")
-            return ([.unknown], 1)
+            return ([.unknown], 1, false, false)
         }
 
-        // Count connections by type
+        // Count connections by type and track directionality
         var typeCounts: [ConnectionVisualType: Int] = [:]
         var portsNotFound = 0
+        var hasForward = false  // link.fromDeviceId -> link.toDeviceId
+        var hasReverse = false  // link.toDeviceId -> link.fromDeviceId
 
         for edge in bundle.edges {
+            // Check direction of this edge
+            if edge.from.deviceId == link.fromDeviceId {
+                hasForward = true
+            } else {
+                hasReverse = true
+            }
+            
             // Look up the port type from the source device using the edge's endpoint
             if let device = studio.devices?.first(where: {
                 $0.id == edge.from.deviceId
@@ -4541,7 +4569,7 @@ private struct ConnectionLineRow: View {
         //     "  Result: \(types.count) types, \(portsNotFound) ports not found"
         // )
 
-        return (types, totalChannels)
+        return (types, totalChannels, hasForward, hasReverse)
     }
 
     var body: some View {
@@ -4564,7 +4592,10 @@ private struct ConnectionLineRow: View {
                     to: toCenter,
                     isSelected: isSelected,
                     connectionTypes: metadata.types,
-                    channelCount: metadata.channelCount
+                    channelCount: metadata.channelCount,
+                    hasForwardConnection: metadata.hasForward,
+                    hasReverseConnection: metadata.hasReverse,
+                    onArrowTap: onArrowTap
                 )
                 // IMPORTANT: give the line a full-size layout box so macOS can attach a context menu
                 // while hit-testing still remains constrained to the stroked curve via ConnectionLineView.contentShape.
@@ -4638,12 +4669,20 @@ enum ConnectionVisualType {
     }
 }
 
+enum ArrowDirection {
+    case forward  // from -> to (left to right on canvas)
+    case reverse  // to -> from (right to left on canvas)
+}
+
 private struct ConnectionLineView: View {
     let from: CGPoint
     let to: CGPoint
     let isSelected: Bool
     var connectionTypes: [ConnectionVisualType] = [.unknown]
     var channelCount: Int = 1
+    var hasForwardConnection: Bool = false
+    var hasReverseConnection: Bool = false
+    var onArrowTap: ((ArrowDirection) -> Void)?
 
     private var path: Path {
         var p = Path()
@@ -4786,10 +4825,10 @@ private struct ConnectionLineView: View {
     }
     
     // Create arrowheads offset perpendicular to the line
-    private func offsetArrowheads(by offset: CGFloat, isBidirectional: Bool) -> Path {
+    private func offsetArrowheads(by offset: CGFloat, isBidirectional: Bool) -> [(path: Path, isActive: Bool, direction: ArrowDirection)] {
         guard offset != 0 else { return arrowheads() }
         
-        var arrows = Path()
+        var result: [(path: Path, isActive: Bool, direction: ArrowDirection)] = []
         let dx = to.x - from.x
         let dy = to.y - from.y
         let distance = sqrt(dx * dx + dy * dy)
@@ -4799,35 +4838,51 @@ private struct ConnectionLineView: View {
         let perpY = dx / distance * offset
         
         let offsetFrom = CGPoint(x: from.x + perpX, y: from.y + perpY)
-        let offsetTo = CGPoint(x: to.x + perpX, y: to.y + perpY)
+        let normalizedDx = dx / distance
+        let normalizedDy = dy / distance
         
-        if isBidirectional {
-            let normalizedDx = dx / distance
-            let normalizedDy = dy / distance
+        if !isBidirectional {
+            // Forward arrow at 35%
+            let forwardPoint = CGPoint(
+                x: offsetFrom.x + normalizedDx * distance * 0.35,
+                y: offsetFrom.y + normalizedDy * distance * 0.35
+            )
+            let forwardAngle = atan2(dy, dx)
+            var forwardPath = Path()
+            forwardPath.addPath(makeArrow(at: forwardPoint, angle: forwardAngle))
+            result.append((forwardPath, hasForwardConnection, .forward))
             
+            // Reverse arrow at 65%
+            let reversePoint = CGPoint(
+                x: offsetFrom.x + normalizedDx * distance * 0.65,
+                y: offsetFrom.y + normalizedDy * distance * 0.65
+            )
+            let reverseAngle = atan2(dy, dx) + .pi
+            var reversePath = Path()
+            reversePath.addPath(makeArrow(at: reversePoint, angle: reverseAngle))
+            result.append((reversePath, hasReverseConnection, .reverse))
+        } else {
+            // Computer connections
             let point1 = CGPoint(
                 x: offsetFrom.x + normalizedDx * distance * 0.35,
                 y: offsetFrom.y + normalizedDy * distance * 0.35
             )
-            let angle1 = atan2(dy, dx) + .pi
-            arrows.addPath(makeArrow(at: point1, angle: angle1))
+            let angle1 = atan2(dy, dx)
+            var path1 = Path()
+            path1.addPath(makeArrow(at: point1, angle: angle1))
+            result.append((path1, true, .forward))
             
             let point2 = CGPoint(
                 x: offsetFrom.x + normalizedDx * distance * 0.65,
                 y: offsetFrom.y + normalizedDy * distance * 0.65
             )
-            let angle2 = atan2(dy, dx)
-            arrows.addPath(makeArrow(at: point2, angle: angle2))
-        } else {
-            let midPoint = CGPoint(
-                x: offsetFrom.x + (offsetTo.x - offsetFrom.x) * 0.5,
-                y: offsetFrom.y + (offsetTo.y - offsetFrom.y) * 0.5
-            )
-            let angle = atan2(dy, dx)
-            arrows.addPath(makeArrow(at: midPoint, angle: angle))
+            let angle2 = atan2(dy, dx) + .pi
+            var path2 = Path()
+            path2.addPath(makeArrow(at: point2, angle: angle2))
+            result.append((path2, true, .reverse))
         }
         
-        return arrows
+        return result
     }
 
     // Check if connection type is bidirectional (USB, Thunderbolt, Ethernet)
@@ -4881,7 +4936,8 @@ private struct ConnectionLineView: View {
 
     // Create arrowhead at specified position and angle
     private func makeArrow(at point: CGPoint, angle: CGFloat) -> Path {
-        let arrowLength: CGFloat = lineWidth * 3
+        // Make arrows larger and more visible (increased from lineWidth * 3 to * 5)
+        let arrowLength: CGFloat = lineWidth * 5
 
         var arrow = Path()
         arrow.move(to: point)
@@ -4909,44 +4965,60 @@ private struct ConnectionLineView: View {
         return arrow
     }
 
-    // Generate arrowheads (one or two depending on directionality)
-    private func arrowheads() -> Path {
-        var arrows = Path()
+    // Generate arrowheads with dual-directional support
+    private func arrowheads() -> [(path: Path, isActive: Bool, direction: ArrowDirection)] {
+        var result: [(path: Path, isActive: Bool, direction: ArrowDirection)] = []
         
         let dx = to.x - from.x
         let dy = to.y - from.y
         let distance = sqrt(dx * dx + dy * dy)
+        let normalizedDx = dx / distance
+        let normalizedDy = dy / distance
 
-        if isBidirectional {
-            // Two arrows positioned along the actual line
-            // For bidirectional, place them at 35% and 65% of total distance
-            let normalizedDx = dx / distance
-            let normalizedDy = dy / distance
+        // Always render both arrows for non-computer connections
+        // Computer connections continue to use the old bidirectional rendering
+        if !isBidirectional {
+            // Forward arrow (from -> to) at 35% along the line
+            let forwardPoint = CGPoint(
+                x: from.x + normalizedDx * distance * 0.35,
+                y: from.y + normalizedDy * distance * 0.35
+            )
+            let forwardAngle = atan2(dy, dx)
+            var forwardPath = Path()
+            forwardPath.addPath(makeArrow(at: forwardPoint, angle: forwardAngle))
+            result.append((forwardPath, hasForwardConnection, .forward))
             
+            // Reverse arrow (to -> from) at 65% along the line
+            let reversePoint = CGPoint(
+                x: from.x + normalizedDx * distance * 0.65,
+                y: from.y + normalizedDy * distance * 0.65
+            )
+            let reverseAngle = atan2(dy, dx) + .pi
+            var reversePath = Path()
+            reversePath.addPath(makeArrow(at: reversePoint, angle: reverseAngle))
+            result.append((reversePath, hasReverseConnection, .reverse))
+        } else {
+            // Computer connections: use existing bidirectional rendering
             let point1 = CGPoint(
                 x: from.x + normalizedDx * distance * 0.35,
                 y: from.y + normalizedDy * distance * 0.35
             )
             let angle1 = atan2(dy, dx)
-            arrows.addPath(makeArrow(at: point1, angle: angle1))
+            var path1 = Path()
+            path1.addPath(makeArrow(at: point1, angle: angle1))
+            result.append((path1, true, .forward))
             
             let point2 = CGPoint(
                 x: from.x + normalizedDx * distance * 0.65,
                 y: from.y + normalizedDy * distance * 0.65
             )
-            let angle2 = atan2(dy, dx) + .pi  // Reverse direction
-            arrows.addPath(makeArrow(at: point2, angle: angle2))
-        } else {
-            // Single arrow at midpoint
-            let midPoint = CGPoint(
-                x: from.x + dx * 0.5,
-                y: from.y + dy * 0.5
-            )
-            let angle = atan2(dy, dx)
-            arrows.addPath(makeArrow(at: midPoint, angle: angle))
+            let angle2 = atan2(dy, dx) + .pi
+            var path2 = Path()
+            path2.addPath(makeArrow(at: point2, angle: angle2))
+            result.append((path2, true, .reverse))
         }
 
-        return arrows
+        return result
     }
 
     var body: some View {
@@ -4971,16 +5043,24 @@ private struct ConnectionLineView: View {
                             )
                         )
                     
-                    // Draw arrowheads for this line
-                    offsetArrowheads(by: offset, isBidirectional: type == .computer)
-                        .stroke(
-                            type.color.opacity(isSelected ? 1.0 : 0.7),
-                            style: StrokeStyle(
-                                lineWidth: 1.5,
-                                lineCap: .round,
-                                lineJoin: .round
+                    // Draw arrowheads with individual coloring and hit-testing
+                    ForEach(Array(offsetArrowheads(by: offset, isBidirectional: type == .computer).enumerated()), id: \.offset) { arrowIndex, arrowInfo in
+                        arrowInfo.path
+                            .stroke(
+                                arrowInfo.isActive 
+                                    ? type.color.opacity(isSelected ? 1.0 : 0.7)
+                                    : Color.secondary.opacity(0.5),
+                                style: StrokeStyle(
+                                    lineWidth: arrowInfo.isActive ? 2.0 : 1.5,
+                                    lineCap: .round,
+                                    lineJoin: .round
+                                )
                             )
-                        )
+                            .contentShape(arrowInfo.path.strokedPath(StrokeStyle(lineWidth: 20)))
+                            .onTapGesture {
+                                onArrowTap?(arrowInfo.direction)
+                            }
+                    }
                 }
             } else {
                 // Single connection type - draw one line
@@ -4993,16 +5073,24 @@ private struct ConnectionLineView: View {
                         )
                     )
                 
-                // Arrowhead(s) showing signal direction
-                arrowheads()
-                    .stroke(
-                        lineColor,
-                        style: StrokeStyle(
-                            lineWidth: 1.5,
-                            lineCap: .round,
-                            lineJoin: .round
+                // Draw arrowheads with individual coloring and hit-testing
+                ForEach(Array(arrowheads().enumerated()), id: \.offset) { index, arrowInfo in
+                    arrowInfo.path
+                        .stroke(
+                            arrowInfo.isActive 
+                                ? lineColor
+                                : Color.secondary.opacity(0.5),
+                            style: StrokeStyle(
+                                lineWidth: arrowInfo.isActive ? 2.0 : 1.5,
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
                         )
-                    )
+                        .contentShape(arrowInfo.path.strokedPath(StrokeStyle(lineWidth: 20)))
+                        .onTapGesture {
+                            onArrowTap?(arrowInfo.direction)
+                        }
+                }
             }
         }
         // IMPORTANT: hit-test only the stroked curve, not the whole rectangular area.
@@ -6744,22 +6832,32 @@ private struct ConnectionMatrixView: View {
     
     // Devices that are actually used as sources in connections
     private var fromDevices: [DeviceInstance] {
-        // Get all device IDs that appear as "from" in actual connections
-        let fromDeviceIds = Set(links.map { $0.fromDeviceId })
+        // Get all device IDs that appear as "from" by checking connectionMap keys
+        var fromDeviceIds = Set<UUID>()
+        for key in connectionMap.keys {
+            let components = key.split(separator: "_")
+            if components.count == 2, let fromId = UUID(uuidString: String(components[0])) {
+                fromDeviceIds.insert(fromId)
+            }
+        }
         
         return (studio.devices ?? []).filter { device in
-            // Only include if this device is actually a source in at least one connection
             fromDeviceIds.contains(device.id)
         }.sorted { $0.nickname.localizedCaseInsensitiveCompare($1.nickname) == .orderedAscending }
     }
     
     // Devices that are actually used as destinations in connections
     private var toDevices: [DeviceInstance] {
-        // Get all device IDs that appear as "to" in actual connections
-        let toDeviceIds = Set(links.map { $0.toDeviceId })
+        // Get all device IDs that appear as "to" by checking connectionMap keys
+        var toDeviceIds = Set<UUID>()
+        for key in connectionMap.keys {
+            let components = key.split(separator: "_")
+            if components.count == 2, let toId = UUID(uuidString: String(components[1])) {
+                toDeviceIds.insert(toId)
+            }
+        }
         
         return (studio.devices ?? []).filter { device in
-            // Only include if this device is actually a destination in at least one connection
             toDeviceIds.contains(device.id)
         }.sorted { $0.nickname.localizedCaseInsensitiveCompare($1.nickname) == .orderedAscending }
     }
@@ -6768,49 +6866,113 @@ private struct ConnectionMatrixView: View {
     private var connectionMap: [String: ConnectionInfo] {
         var map: [String: ConnectionInfo] = [:]
         
+        // First pass: build map with all connections
         for link in links {
             guard let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id),
                   !bundle.edges.isEmpty else { continue }
             
-            let key = "\(link.fromDeviceId)_\(link.toDeviceId)"
-            
-            // Analyze connection types and channel count
-            var typeCounts: [ConnectionVisualType: Int] = [:]
-            var uniqueChannels: Set<String> = []  // Track unique from.channelId (audio only)
-            var hasWordClock = false
+            // Analyze edges to separate forward and reverse connections
+            var forwardEdges: [ConnectionEdge] = []
+            var reverseEdges: [ConnectionEdge] = []
             
             for edge in bundle.edges {
-                if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
-                   let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
-                    let visualType = ConnectionVisualType.from(portType: port.type)
-                    typeCounts[visualType, default: 0] += 1
-                    
-                    // Word clock is sync only - don't count as audio channel
-                    if port.type == .wordClockIn || port.type == .wordClockOut {
-                        hasWordClock = true
-                    } else {
-                        // Count unique audio channels (avoid counting duplicates)
-                        uniqueChannels.insert(edge.from.channelId.uuidString)
-                    }
-                } else if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
-                          !device.computerInterfaceCounts.isEmpty {
-                    // Computer interface virtual port
-                    typeCounts[.computer, default: 0] += 1
-                    uniqueChannels.insert(edge.from.channelId.uuidString)
+                if edge.from.deviceId == link.fromDeviceId {
+                    forwardEdges.append(edge)
+                } else {
+                    reverseEdges.append(edge)
                 }
             }
             
-            let types = typeCounts.sorted { $0.value > $1.value }.map { $0.key }
-            // Use unique channel count if available, otherwise fall back to edge count
-            let channelCount = uniqueChannels.isEmpty ? bundle.edges.count : uniqueChannels.count
-            map[key] = ConnectionInfo(
-                types: types.isEmpty ? [.unknown] : types,
-                channelCount: channelCount,
-                hasWordClock: hasWordClock
-            )
+            // Process forward direction (link.fromDeviceId → link.toDeviceId)
+            if !forwardEdges.isEmpty {
+                let key = "\(link.fromDeviceId)_\(link.toDeviceId)"
+                var typeCounts: [ConnectionVisualType: Int] = [:]
+                var uniqueChannels: Set<String> = []
+                var hasWordClock = false
+                
+                for edge in forwardEdges {
+                    if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
+                       let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
+                        let visualType = ConnectionVisualType.from(portType: port.type)
+                        typeCounts[visualType, default: 0] += 1
+                        
+                        if port.type == .wordClockIn || port.type == .wordClockOut {
+                            hasWordClock = true
+                        } else {
+                            uniqueChannels.insert(edge.from.channelId.uuidString)
+                        }
+                    } else if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
+                              !device.computerInterfaceCounts.isEmpty {
+                        typeCounts[.computer, default: 0] += 1
+                        uniqueChannels.insert(edge.from.channelId.uuidString)
+                    }
+                }
+                
+                let types = typeCounts.sorted { $0.value > $1.value }.map { $0.key }
+                let channelCount = uniqueChannels.isEmpty ? forwardEdges.count : uniqueChannels.count
+                map[key] = ConnectionInfo(
+                    types: types.isEmpty ? [.unknown] : types,
+                    channelCount: channelCount,
+                    hasWordClock: hasWordClock,
+                    hasReverseConnection: false  // Will update in second pass
+                )
+            }
+            
+            // Process reverse direction (link.toDeviceId → link.fromDeviceId)
+            if !reverseEdges.isEmpty {
+                let reverseKey = "\(link.toDeviceId)_\(link.fromDeviceId)"
+                var typeCounts: [ConnectionVisualType: Int] = [:]
+                var uniqueChannels: Set<String> = []
+                var hasWordClock = false
+                
+                for edge in reverseEdges {
+                    if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
+                       let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
+                        let visualType = ConnectionVisualType.from(portType: port.type)
+                        typeCounts[visualType, default: 0] += 1
+                        
+                        if port.type == .wordClockIn || port.type == .wordClockOut {
+                            hasWordClock = true
+                        } else {
+                            uniqueChannels.insert(edge.from.channelId.uuidString)
+                        }
+                    } else if let device = studio.devices?.first(where: { $0.id == edge.from.deviceId }),
+                              !device.computerInterfaceCounts.isEmpty {
+                        typeCounts[.computer, default: 0] += 1
+                        uniqueChannels.insert(edge.from.channelId.uuidString)
+                    }
+                }
+                
+                let types = typeCounts.sorted { $0.value > $1.value }.map { $0.key }
+                let channelCount = uniqueChannels.isEmpty ? reverseEdges.count : uniqueChannels.count
+                map[reverseKey] = ConnectionInfo(
+                    types: types.isEmpty ? [.unknown] : types,
+                    channelCount: channelCount,
+                    hasWordClock: hasWordClock,
+                    hasReverseConnection: false  // Will update in second pass
+                )
+            }
         }
         
-        return map
+        // Second pass: mark bidirectional connections
+        var updatedMap = map
+        for (key, info) in map {
+            let components = key.split(separator: "_")
+            if components.count == 2 {
+                let reverseKey = "\(components[1])_\(components[0])"
+                if map[reverseKey] != nil {
+                    // This connection has a reverse - mark it
+                    updatedMap[key] = ConnectionInfo(
+                        types: info.types,
+                        channelCount: info.channelCount,
+                        hasWordClock: info.hasWordClock,
+                        hasReverseConnection: true
+                    )
+                }
+            }
+        }
+        
+        return updatedMap
     }
     
     var body: some View {
@@ -7084,14 +7246,28 @@ private struct ConnectionMatrixView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if info.hasWordClock {
-                    Text("WC")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.2))
-                        .cornerRadius(3)
+                
+                HStack(spacing: 4) {
+                    if info.hasWordClock {
+                        Text("WC")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.2))
+                            .cornerRadius(3)
+                    }
+                    
+                    // Bidirectional indicator
+                    if info.hasReverseConnection {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.green.opacity(0.2))
+                            .cornerRadius(3)
+                    }
                 }
             }
             .frame(width: 100, height: 60)
@@ -7446,6 +7622,7 @@ private struct ConnectionInfo {
     let types: [ConnectionVisualType]
     let channelCount: Int
     let hasWordClock: Bool
+    let hasReverseConnection: Bool  // Track if reverse direction also exists
 }
 
 // MARK: - Help View

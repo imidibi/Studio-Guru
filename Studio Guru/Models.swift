@@ -5,6 +5,7 @@
 
 import Foundation
 import SwiftData
+import SwiftUI
 
 // MARK: - Enums stored as raw strings (SwiftData-friendly)
 
@@ -177,6 +178,9 @@ final class DeviceInstance {
     var posY: Double = 200
     var scale: Double = 1.0
     var zIndex: Int = 0
+    
+    // Custom color override (optional - stored as hex string for SwiftData compatibility)
+    var customColorHex: String?
 
     // Optional image paths (sandbox)
     var frontImagePath: String?
@@ -300,6 +304,17 @@ final class DeviceInstance {
     var downloadsPageURL: URL? {
         guard let downloadsPageURLString, !downloadsPageURLString.isEmpty else { return nil }
         return URL(string: downloadsPageURLString)
+    }
+    
+    /// Custom color for this device (overrides category default)
+    var customColor: Color? {
+        get {
+            guard let hex = customColorHex else { return nil }
+            return Color(hex: hex)
+        }
+        set {
+            customColorHex = newValue?.toHex()
+        }
     }
 }
 
@@ -692,5 +707,114 @@ final class EndpointNameModel {
         self.id = id
         self.endpointKey = endpointKey
         self.name = name
+    }
+}
+
+// MARK: - Device Color Resolution
+
+extension DeviceInstance {
+    /// Get the resolved color for this device (custom color > category color > default grey)
+    func resolvedColor(categoryColors: [DeviceCategory: Color]) -> Color {
+        // Priority 1: Custom color override
+        if let customColor = self.customColor {
+            return customColor
+        }
+        
+        // Priority 2: Category default color
+        if let categoryColor = categoryColors[self.category] {
+            return categoryColor
+        }
+        
+        // Priority 3: Fallback to grey
+        return .gray
+    }
+}
+
+/// Helper to load category colors from UserDefaults
+struct CategoryColorSettings {
+    static func loadCategoryColors() -> [DeviceCategory: Color] {
+        var colors: [DeviceCategory: Color] = [:]
+        
+        for category in DeviceCategory.allCases {
+            let key = "categoryColor_\(category.rawValue.replacingOccurrences(of: " ", with: ""))"
+            if let hex = UserDefaults.standard.string(forKey: key),
+               let color = Color(hex: hex) {
+                colors[category] = color
+            } else {
+                // Use default colors if not set
+                colors[category] = defaultColorFor(category)
+            }
+        }
+        
+        return colors
+    }
+    
+    private static func defaultColorFor(_ category: DeviceCategory) -> Color {
+        switch category {
+        case .adatExpander: return Color(hex: "#9B59B6") ?? .purple
+        case .audioInterface: return Color(hex: "#3498DB") ?? .blue
+        case .busCompressor: return Color(hex: "#E74C3C") ?? .red
+        case .channelStrip: return Color(hex: "#F39C12") ?? .orange
+        case .compressor: return Color(hex: "#E67E22") ?? .orange
+        case .computer: return Color(hex: "#95A5A6") ?? .gray
+        case .controlSurface: return Color(hex: "#1ABC9C") ?? .teal
+        case .digitalMixer: return Color(hex: "#16A085") ?? .teal
+        case .effectsUnit: return Color(hex: "#8E44AD") ?? .purple
+        case .equalizer: return Color(hex: "#D35400") ?? .orange
+        case .keyboard: return Color(hex: "#C0392B") ?? .red
+        case .midiDevice: return Color(hex: "#2980B9") ?? .blue
+        case .mixer: return Color(hex: "#27AE60") ?? .green
+        case .monitor: return Color(hex: "#F1C40F") ?? .yellow
+        case .multi: return Color(hex: "#34495E") ?? .gray
+        case .patchbay: return Color(hex: "#7F8C8D") ?? .gray
+        case .preamp: return Color(hex: "#E74C3C") ?? .red
+        case .synth: return Color(hex: "#9B59B6") ?? .purple
+        case .usbHub: return Color(hex: "#BDC3C7") ?? .gray
+        case .usbExpander: return Color(hex: "#95A5A6") ?? .gray
+        case .videoMonitor: return Color(hex: "#ECF0F1") ?? .gray
+        case .other: return Color(hex: "#7F8C8D") ?? .gray
+        }
+    }
+}
+
+// MARK: - Color Extensions for Hex Conversion
+
+extension Color {
+    /// Initialize Color from hex string (supports #RRGGBB or RRGGBB format)
+    init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        guard Scanner(string: hex).scanHexInt64(&int) else { return nil }
+        
+        let r, g, b: Double
+        switch hex.count {
+        case 6: // RGB
+            r = Double((int >> 16) & 0xFF) / 255.0
+            g = Double((int >> 8) & 0xFF) / 255.0
+            b = Double(int & 0xFF) / 255.0
+        default:
+            return nil
+        }
+        
+        self.init(red: r, green: g, blue: b)
+    }
+    
+    /// Convert Color to hex string (returns #RRGGBB format)
+    func toHex() -> String? {
+        #if os(macOS)
+        guard let components = NSColor(self).cgColor.components, components.count >= 3 else {
+            return nil
+        }
+        #else
+        guard let components = UIColor(self).cgColor.components, components.count >= 3 else {
+            return nil
+        }
+        #endif
+        
+        let r = Int(components[0] * 255.0)
+        let g = Int(components[1] * 255.0)
+        let b = Int(components[2] * 255.0)
+        
+        return String(format: "#%02X%02X%02X", r, g, b)
     }
 }

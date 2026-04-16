@@ -20,12 +20,95 @@ struct SettingsView: View {
     @State private var isSyncing = false
     @State private var lastSyncMessage: String?
     
+    // Category color settings (stored as hex strings)
+    @AppStorage("categoryColor_ADATExpander") private var adatExpanderColor = "#9B59B6"
+    @AppStorage("categoryColor_AudioInterface") private var audioInterfaceColor = "#3498DB"
+    @AppStorage("categoryColor_BusCompressor") private var busCompressorColor = "#E74C3C"
+    @AppStorage("categoryColor_ChannelStrip") private var channelStripColor = "#F39C12"
+    @AppStorage("categoryColor_Compressor") private var compressorColor = "#E67E22"
+    @AppStorage("categoryColor_Computer") private var computerColor = "#95A5A6"
+    @AppStorage("categoryColor_ControlSurface") private var controlSurfaceColor = "#1ABC9C"
+    @AppStorage("categoryColor_DigitalMixer") private var digitalMixerColor = "#16A085"
+    @AppStorage("categoryColor_EffectsUnit") private var effectsUnitColor = "#8E44AD"
+    @AppStorage("categoryColor_Equalizer") private var equalizerColor = "#D35400"
+    @AppStorage("categoryColor_Keyboard") private var keyboardColor = "#C0392B"
+    @AppStorage("categoryColor_MIDIDevice") private var midiDeviceColor = "#2980B9"
+    @AppStorage("categoryColor_Mixer") private var mixerColor = "#27AE60"
+    @AppStorage("categoryColor_StudioMonitor") private var monitorColor = "#F1C40F"
+    @AppStorage("categoryColor_Multi") private var multiColor = "#34495E"
+    @AppStorage("categoryColor_Patchbay") private var patchbayColor = "#7F8C8D"
+    @AppStorage("categoryColor_Preamp") private var preampColor = "#E74C3C"
+    @AppStorage("categoryColor_Synth") private var synthColor = "#9B59B6"
+    @AppStorage("categoryColor_USBHub") private var usbHubColor = "#BDC3C7"
+    @AppStorage("categoryColor_USBExpander") private var usbExpanderColor = "#95A5A6"
+    @AppStorage("categoryColor_VideoMonitor") private var videoMonitorColor = "#ECF0F1"
+    @AppStorage("categoryColor_Other") private var otherColor = "#7F8C8D"
+    
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
     }
     
     private var buildNumber: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+    }
+    
+    /// Get color for a category
+    private func colorFor(_ category: DeviceCategory) -> Color {
+        let hex: String
+        switch category {
+        case .adatExpander: hex = adatExpanderColor
+        case .audioInterface: hex = audioInterfaceColor
+        case .busCompressor: hex = busCompressorColor
+        case .channelStrip: hex = channelStripColor
+        case .compressor: hex = compressorColor
+        case .computer: hex = computerColor
+        case .controlSurface: hex = controlSurfaceColor
+        case .digitalMixer: hex = digitalMixerColor
+        case .effectsUnit: hex = effectsUnitColor
+        case .equalizer: hex = equalizerColor
+        case .keyboard: hex = keyboardColor
+        case .midiDevice: hex = midiDeviceColor
+        case .mixer: hex = mixerColor
+        case .monitor: hex = monitorColor
+        case .multi: hex = multiColor
+        case .patchbay: hex = patchbayColor
+        case .preamp: hex = preampColor
+        case .synth: hex = synthColor
+        case .usbHub: hex = usbHubColor
+        case .usbExpander: hex = usbExpanderColor
+        case .videoMonitor: hex = videoMonitorColor
+        case .other: hex = otherColor
+        }
+        return Color(hex: hex) ?? .gray
+    }
+    
+    /// Set color for a category
+    private func setColor(_ color: Color, for category: DeviceCategory) {
+        guard let hex = color.toHex() else { return }
+        switch category {
+        case .adatExpander: adatExpanderColor = hex
+        case .audioInterface: audioInterfaceColor = hex
+        case .busCompressor: busCompressorColor = hex
+        case .channelStrip: channelStripColor = hex
+        case .compressor: compressorColor = hex
+        case .computer: computerColor = hex
+        case .controlSurface: controlSurfaceColor = hex
+        case .digitalMixer: digitalMixerColor = hex
+        case .effectsUnit: effectsUnitColor = hex
+        case .equalizer: equalizerColor = hex
+        case .keyboard: keyboardColor = hex
+        case .midiDevice: midiDeviceColor = hex
+        case .mixer: mixerColor = hex
+        case .monitor: monitorColor = hex
+        case .multi: multiColor = hex
+        case .patchbay: patchbayColor = hex
+        case .preamp: preampColor = hex
+        case .synth: synthColor = hex
+        case .usbHub: usbHubColor = hex
+        case .usbExpander: usbExpanderColor = hex
+        case .videoMonitor: videoMonitorColor = hex
+        case .other: otherColor = hex
+        }
     }
     
     var body: some View {
@@ -215,6 +298,25 @@ struct SettingsView: View {
                     } footer: {
                         Text("Shows when each studio was last modified. Recent changes should sync to other devices within a few minutes.")
                     }
+                }
+                
+                Section {
+                    ForEach(DeviceCategory.allCases, id: \.self) { category in
+                        HStack {
+                            Text(category.rawValue)
+                                .font(.caption)
+                            Spacer()
+                            ColorPicker("", selection: Binding(
+                                get: { colorFor(category) },
+                                set: { setColor($0, for: category) }
+                            ))
+                            .labelsHidden()
+                        }
+                    }
+                } header: {
+                    Text("Device Category Colors")
+                } footer: {
+                    Text("Set default colors for each device category. Individual devices can override these in the device editor.")
                 }
                 
                 Section {

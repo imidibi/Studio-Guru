@@ -88,6 +88,7 @@ struct StudioCanvasView: View {
     @State private var draftCategory: DeviceCategory = .other
     @State private var draftSerialNumber: String = ""
     @State private var draftLocation: String = ""
+    @State private var draftCustomColor: Color? = nil
 
     @State private var draftSupportPageURL: String = ""
     @State private var draftDownloadsPageURL: String = ""
@@ -919,6 +920,7 @@ struct StudioCanvasView: View {
                 category: $draftCategory,
                 serialNumber: $draftSerialNumber,
                 location: $draftLocation,
+                customColor: $draftCustomColor,
                 supportPageURL: $draftSupportPageURL,
                 downloadsPageURL: $draftDownloadsPageURL,
                 audioInputs: $draftAudioInputs,
@@ -985,6 +987,7 @@ struct StudioCanvasView: View {
         draftCategory = d.category
         draftSerialNumber = d.serialNumber
         draftLocation = d.location
+        draftCustomColor = d.customColor
 
         draftSupportPageURL = d.supportPageURLString ?? ""
         draftDownloadsPageURL = d.downloadsPageURLString ?? ""
@@ -1117,6 +1120,7 @@ struct StudioCanvasView: View {
         device.category = draftCategory
         device.serialNumber = serialNumber
         device.location = location
+        device.customColor = draftCustomColor
 
         device.supportPageURLString = supportURL.isEmpty ? nil : supportURL
         device.downloadsPageURLString =
@@ -3821,15 +3825,24 @@ private struct DeviceCardView: View {
     
     @Environment(\.colorScheme) private var colorScheme
     
+    private var deviceColor: Color {
+        let categoryColors = CategoryColorSettings.loadCategoryColors()
+        return device.resolvedColor(categoryColors: categoryColors)
+    }
+    
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 12)
             .fill(colorScheme == .dark ? Color(white: 0.25) : Color(white: 0.85))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(deviceColor.opacity(0.1))
+            )
     }
     
     private var cardBorder: some View {
         RoundedRectangle(cornerRadius: 12)
-            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.25),
-                    lineWidth: isSelected ? 3 : 1)
+            .stroke(isSelected ? Color.accentColor : deviceColor.opacity(0.6),
+                    lineWidth: isSelected ? 3 : 2)
     }
 
     var body: some View {
@@ -3837,7 +3850,7 @@ private struct DeviceCardView: View {
             HStack(spacing: 8) {
                 Image(systemName: iconName)
                     .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(deviceColor)
                 Text(device.nickname)
                     .font(.headline)
             }
@@ -3853,7 +3866,7 @@ private struct DeviceCardView: View {
         .overlay(alignment: .topTrailing) {
             // Handle is visually anchored to the card corner.
             // We compute the drag line start point using device position directly.
-            DeviceConnectionHandle(deviceId: device.id)
+            DeviceConnectionHandle(deviceId: device.id, color: deviceColor)
                 .offset(x: 6, y: -6)
                 .background(
                     GeometryReader { proxy in
@@ -5112,15 +5125,16 @@ private struct Triangle: Shape {
 
 private struct DeviceConnectionHandle: View {
     let deviceId: UUID
+    var color: Color = .accentColor
 
     var body: some View {
         Image(systemName: "arrow.up.arrow.down")
             .font(.system(size: 8, weight: .semibold))
-            .foregroundStyle(Color.accentColor.opacity(0.8))
+            .foregroundStyle(color.opacity(0.8))
             .padding(4)
             .background(
                 RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.accentColor.opacity(0.15))
+                    .fill(color.opacity(0.15))
             )
             .contentShape(Rectangle())
             .accessibilityLabel("Drag to connect")
@@ -5170,6 +5184,7 @@ private struct DeviceEditorSheet: View {
     @Binding var category: DeviceCategory
     @Binding var serialNumber: String
     @Binding var location: String
+    @Binding var customColor: Color?
 
     @Binding var supportPageURL: String
     @Binding var downloadsPageURL: String
@@ -5286,6 +5301,37 @@ private struct DeviceEditorSheet: View {
                                     TextField("", text: $location)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Custom Color")
+                                    HStack {
+                                        if let color = customColor {
+                                            ColorPicker("", selection: Binding(
+                                                get: { color },
+                                                set: { customColor = $0 }
+                                            ))
+                                            .labelsHidden()
+                                            
+                                            Button("Reset to Category Default") {
+                                                customColor = nil
+                                            }
+                                            .buttonStyle(.borderless)
+                                        } else {
+                                            let categoryColors = CategoryColorSettings.loadCategoryColors()
+                                            let categoryColor = categoryColors[category] ?? .gray
+                                            
+                                            ColorPicker("", selection: Binding(
+                                                get: { categoryColor },
+                                                set: { customColor = $0 }
+                                            ))
+                                            .labelsHidden()
+                                            
+                                            Text("Using category default")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                             .padding(8)
@@ -6994,6 +7040,9 @@ private struct ConnectionMatrixView: View {
                                 
                                 // Column headers (destination devices)
                                 ForEach(toDevices, id: \.id) { device in
+                                    let categoryColors = CategoryColorSettings.loadCategoryColors()
+                                    let deviceColor = device.resolvedColor(categoryColors: categoryColors)
+                                    
                                     VStack(spacing: 2) {
                                         Text(device.nickname)
                                             .font(.caption)
@@ -7006,8 +7055,8 @@ private struct ConnectionMatrixView: View {
                                             .multilineTextAlignment(.center)
                                     }
                                     .frame(width: 100, height: 60, alignment: .center)
-                                    .background(Color(white: 0.15).opacity(0.1))
-                                    .border(Color.secondary.opacity(0.3))
+                                    .background(deviceColor.opacity(0.15))
+                                    .border(deviceColor.opacity(0.5))
                                 }
                             }
                             
@@ -7015,6 +7064,9 @@ private struct ConnectionMatrixView: View {
                             ForEach(fromDevices, id: \.id) { fromDevice in
                                 HStack(spacing: 0) {
                                     // Row header (source device)
+                                    let categoryColors = CategoryColorSettings.loadCategoryColors()
+                                    let deviceColor = fromDevice.resolvedColor(categoryColors: categoryColors)
+                                    
                                     VStack(spacing: 2) {
                                         Text(fromDevice.nickname)
                                             .font(.caption)
@@ -7027,8 +7079,8 @@ private struct ConnectionMatrixView: View {
                                             .multilineTextAlignment(.center)
                                     }
                                     .frame(width: 120, height: 60, alignment: .center)
-                                    .background(Color(white: 0.15).opacity(0.1))
-                                    .border(Color.secondary.opacity(0.3))
+                                    .background(deviceColor.opacity(0.15))
+                                    .border(deviceColor.opacity(0.5))
                                     
                                     // Connection cells
                                     ForEach(toDevices, id: \.id) { toDevice in

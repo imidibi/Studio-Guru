@@ -641,47 +641,55 @@ final class ConnectionBundleModel {
     var studioId: UUID = UUID()
     var fromDeviceId: UUID = UUID()
     var toDeviceId: UUID = UUID()
-    
+    var modifiedAt: Date = Date()
+
     @Relationship(deleteRule: .cascade, inverse: \ConnectionEdgeModel.bundle) var edges: [ConnectionEdgeModel]? = []
     @Relationship(deleteRule: .cascade, inverse: \EndpointNameModel.bundle) var endpointNames: [EndpointNameModel]? = []
-    
+
     init(id: UUID = UUID(), studioId: UUID, fromDeviceId: UUID, toDeviceId: UUID) {
         self.id = id
         self.studioId = studioId
         self.fromDeviceId = fromDeviceId
         self.toDeviceId = toDeviceId
+        self.modifiedAt = Date()
         self.edges = []
         self.endpointNames = []
+    }
+
+    func markAsModified() {
+        self.modifiedAt = Date()
     }
 }
 
 @Model
 final class ConnectionEdgeModel {
     var id: UUID = UUID()
-    
+    var modifiedAt: Date = Date()
+
     // From endpoint
     var fromDeviceId: UUID = UUID()
     var fromPortId: UUID = UUID()
     var fromChannelId: UUID = UUID()
     var fromDirection: String = "output"
-    
+
     // To endpoint
     var toDeviceId: UUID = UUID()
     var toPortId: UUID = UUID()
     var toChannelId: UUID = UUID()
     var toDirection: String = "input"
-    
+
     // Labels
     var fromName: String = ""
     var toName: String = ""
-    
+
     var bundle: ConnectionBundleModel?
-    
+
     init(id: UUID = UUID(),
          fromDeviceId: UUID, fromPortId: UUID, fromChannelId: UUID, fromDirection: String,
          toDeviceId: UUID, toPortId: UUID, toChannelId: UUID, toDirection: String,
          fromName: String = "", toName: String = "") {
         self.id = id
+        self.modifiedAt = Date()
         self.fromDeviceId = fromDeviceId
         self.fromPortId = fromPortId
         self.fromChannelId = fromChannelId
@@ -693,20 +701,30 @@ final class ConnectionEdgeModel {
         self.fromName = fromName
         self.toName = toName
     }
+
+    func markAsModified() {
+        self.modifiedAt = Date()
+    }
 }
 
 @Model
 final class EndpointNameModel {
     var id: UUID = UUID()
+    var modifiedAt: Date = Date()
     var endpointKey: String = ""
     var name: String = ""
-    
+
     var bundle: ConnectionBundleModel?
-    
+
     init(id: UUID = UUID(), endpointKey: String, name: String) {
         self.id = id
+        self.modifiedAt = Date()
         self.endpointKey = endpointKey
         self.name = name
+    }
+
+    func markAsModified() {
+        self.modifiedAt = Date()
     }
 }
 

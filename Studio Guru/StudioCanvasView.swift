@@ -378,7 +378,11 @@ struct StudioCanvasView: View {
             }
         }
         .onChange(of: selectedStudioId) { _, newValue in
-            // Defer state-modifying operations to avoid "Modifying state during view update" warning  
+            // Clear auto-arrange undo state when switching studios
+            canUndoAutoArrange = false
+            savedDevicePositions.removeAll()
+
+            // Defer state-modifying operations to avoid "Modifying state during view update" warning
             if let sid = newValue,
                 let studio = studios.first(where: { $0.id == sid })
             {
@@ -444,11 +448,11 @@ struct StudioCanvasView: View {
 
                 ToolbarItem(placement: .navigation) {
                     Button {
-                        autoArrangeDevices(in: studio)
+                        autoArrangeWithHubDetection(in: studio)
                     } label: {
                         Label("Auto-Arrange", systemImage: "square.grid.3x2")
                     }
-                    .help("Automatically arrange devices by signal flow")
+                    .help("Automatically arrange devices using hub detection")
                 }
                 
                 ToolbarItem(placement: .navigation) {
@@ -2322,10 +2326,324 @@ struct StudioCanvasView: View {
         }
         #endif
     }
+    
+    // MARK: - Hub Detection Auto-Arrange (Zone-Based)
+    
+    /// Arranges devices in three zones: top (outputs/controls), middle (interfaces/hubs), bottom (sources)
+    private func autoArrangeWithHubDetection(in studio: Studio) {
+        guard !(studio.devices?.isEmpty ?? true) else { return }
+
+        // Save current positions for undo
+        savedDevicePositions.removeAll()
+        for device in studio.devices ?? [] {
+            savedDevicePositions[device.id] = (x: device.posX, y: device.posY)
+        }
+        canUndoAutoArrange = true
+        
+        // Get connections from the connection store
+        let links = connectionsStore.links(for: studio.id)
+        
+        // Count connections per device
+        var connectionCounts: [UUID: Int] = [:]
+        for device in studio.devices ?? [] {
+            connectionCounts[device.id] = 0
+        }
+        
+        var processedPairs = Set<String>()
+        for link in links {
+            let pairKey1 = "\(link.fromDeviceId)_\(link.toDeviceId)"
+            let pairKey2 = "\(link.toDeviceId)_\(link.fromDeviceId)"
+            
+            if !processedPairs.contains(pairKey1) && !processedPairs.contains(pairKey2) {
+                processedPairs.insert(pairKey1)
+                connectionCounts[link.fromDeviceId, default: 0] += 1
+                connectionCounts[link.toDeviceId, default: 0] += 1
+            }
+        }
+        
+        // Categorize devices into zones
+        var topZoneDevices: [DeviceInstance] = []      // Output/control devices
+        var middleZoneDevices: [DeviceInstance] = []   // Interfaces, patchbays, computers
+        var bottomZoneDevices: [DeviceInstance] = []   // Source/input devices
+        var unconnectedDevices: [DeviceInstance] = []
+        
+        for device in studio.devices ?? [] {
+            let hasConnections = (connectionCounts[device.id] ?? 0) > 0
+            
+            if !hasConnections {
+                unconnectedDevices.append(device)
+                continue
+            }
+            
+            // Classify by category
+            switch device.category {
+            // Top third: Output and control devices
+            case .videoMonitor, .monitor, .controlSurface:
+                topZoneDevices.append(device)
+                
+            // Middle third: Hub devices (interfaces, patchbays, mixers, computers)
+            case .computer, .adatExpander, .audioInterface, .digitalMixer, .mixer, 
+                 .usbHub, .usbExpander:
+                middleZoneDevices.append(device)
+                
+            // Bottom third: Source and processing devices
+            case .busCompressor, .channelStrip, .compressor, .effectsUnit, .equalizer,
+                 .keyboard, .midiDevice, .multi, .preamp, .synth, .other:
+                bottomZoneDevices.append(device)
+                
+            default:
+                // Fallback: try to intelligently place unknown categories
+                bottomZoneDevices.append(device)
+            }
+        }
+        
+        // Find the hub: audio interface with most connections
+        let audioInterfaces = middleZoneDevices.filter { 
+            $0.category == .audioInterface 
+        }
+        
+        // If no audio interface, fall back to standard auto-arrange
+        guard let hub = audioInterfaces.max(by: { 
+            (connectionCounts[$0.id] ?? 0) < (connectionCounts[$1.id] ?? 0)
+        }) else {
+            autoArrangeDevices(in: studio)
+            return
+        }
+        
+        // Layout constants
+        let deviceCardHeight: Double = 96
+        let deviceCardWidth: Double = 260
+        let padding: Double = 150
+        let horizontalSpacing: Double = 80
+        let verticalSpacing: Double = 50
+        let maxColumns = 4  // Max devices per row in grids
+        
+        // CALCULATE REQUIRED DIMENSIONS FOR EACH ZONE
+        
+        // Top zone dimensions (monitors, control surfaces - grid layout)
+        let topGridDimensions = calculateGridDimensions(
+            deviceCount: topZoneDevices.count,
+            maxColumns: maxColumns
+        )
+        let topZoneWidth = Double(topGridDimensions.columns) * deviceCardWidth + 
+                          Double(max(0, topGridDimensions.columns - 1)) * horizontalSpacing
+        let topZoneHeight = Double(topGridDimensions.rows) * deviceCardHeight + 
+                           Double(max(0, topGridDimensions.rows - 1)) * verticalSpacing
+        
+        // Middle zone: ALL middle zone devices (hub + computers + other interfaces)
+        let totalMiddleDevices = middleZoneDevices.count
+        let middleZoneWidth: Double
+        let middleZoneHeight: Double
+        
+        if totalMiddleDevices <= 4 {
+            // Single row layout for 4 or fewer devices
+            middleZoneWidth = Double(totalMiddleDevices) * deviceCardWidth + 
+                             Double(max(0, totalMiddleDevices - 1)) * horizontalSpacing
+            middleZoneHeight = deviceCardHeight
+        } else {
+            // Grid layout for more than 4 devices
+            let middleGridDimensions = calculateGridDimensions(
+                deviceCount: totalMiddleDevices,
+                maxColumns: maxColumns
+            )
+            middleZoneWidth = Double(middleGridDimensions.columns) * deviceCardWidth + 
+                             Double(max(0, middleGridDimensions.columns - 1)) * horizontalSpacing
+            middleZoneHeight = Double(middleGridDimensions.rows) * deviceCardHeight + 
+                              Double(max(0, middleGridDimensions.rows - 1)) * verticalSpacing
+        }
+        
+        // Bottom zone dimensions (sources - grid layout)
+        let bottomGridDimensions = calculateGridDimensions(
+            deviceCount: bottomZoneDevices.count,
+            maxColumns: maxColumns
+        )
+        let bottomZoneWidth = Double(bottomGridDimensions.columns) * deviceCardWidth + 
+                             Double(max(0, bottomGridDimensions.columns - 1)) * horizontalSpacing
+        let bottomZoneHeight = Double(bottomGridDimensions.rows) * deviceCardHeight + 
+                              Double(max(0, bottomGridDimensions.rows - 1)) * verticalSpacing
+        
+        // Calculate total required canvas size
+        let maxZoneWidth = max(topZoneWidth, middleZoneWidth, bottomZoneWidth)
+        let requiredCanvasWidth = maxZoneWidth + padding * 2
+        
+        // Each zone gets equal height (divide by 3)
+        // Calculate minimum height needed for each zone's content
+        let minTopZoneHeight = topZoneHeight + padding * 2
+        let minMiddleZoneHeight = middleZoneHeight + padding * 2
+        let minBottomZoneHeight = bottomZoneHeight + padding * 2
+        let minTotalHeight = minTopZoneHeight + minMiddleZoneHeight + minBottomZoneHeight
+        
+        // Use minimum canvas size that fits everything
+        let layoutWidth = max(requiredCanvasWidth, 1400)  // Minimum width
+        let layoutHeight = max(minTotalHeight, 1000)  // Minimum height
+        
+        // Calculate zone boundaries - three equal thirds
+        let zoneHeight = layoutHeight / 3.0
+        let topZoneCenterY = layoutHeight * 0.166    // Center of top third (16.6%)
+        let middleZoneCenterY = layoutHeight * 0.5   // Center of middle third (50%)
+        let bottomZoneCenterY = layoutHeight * 0.833  // Center of bottom third (83.3%)
+        
+        let centerX = layoutWidth / 2
+        
+        // POSITION TOP ZONE (monitors, control surfaces)
+        if !topZoneDevices.isEmpty {
+            positionDevicesInGrid(
+                devices: topZoneDevices,
+                centerX: centerX,
+                baseY: topZoneCenterY,
+                cardWidth: deviceCardWidth,
+                cardHeight: deviceCardHeight,
+                horizontalSpacing: horizontalSpacing,
+                verticalSpacing: verticalSpacing,
+                maxColumns: maxColumns,
+                anchorTop: false  // Center in zone
+            )
+        }
+        
+        // POSITION MIDDLE ZONE (hub + all other middle devices)
+        if totalMiddleDevices <= 4 {
+            // Single row layout with hub positioned naturally
+            positionDevicesInSimpleRow(
+                devices: middleZoneDevices,
+                centerX: centerX,
+                y: middleZoneCenterY,
+                cardWidth: deviceCardWidth,
+                horizontalSpacing: horizontalSpacing
+            )
+        } else {
+            // Grid layout - hub will be positioned naturally in the grid
+            positionDevicesInGrid(
+                devices: middleZoneDevices,
+                centerX: centerX,
+                baseY: middleZoneCenterY,
+                cardWidth: deviceCardWidth,
+                cardHeight: deviceCardHeight,
+                horizontalSpacing: horizontalSpacing,
+                verticalSpacing: verticalSpacing,
+                maxColumns: maxColumns,
+                anchorTop: false  // Center in zone
+            )
+        }
+        
+        // POSITION BOTTOM ZONE (sources, instruments, processors)
+        if !bottomZoneDevices.isEmpty {
+            positionDevicesInGrid(
+                devices: bottomZoneDevices,
+                centerX: centerX,
+                baseY: bottomZoneCenterY,
+                cardWidth: deviceCardWidth,
+                cardHeight: deviceCardHeight,
+                horizontalSpacing: horizontalSpacing,
+                verticalSpacing: verticalSpacing,
+                maxColumns: maxColumns,
+                anchorTop: false  // Center in zone
+            )
+        }
+        
+        // Position unconnected devices in far right column
+        if !unconnectedDevices.isEmpty {
+            let unconnectedX = layoutWidth - padding - deviceCardWidth / 2
+            let unconnectedStartY = padding + deviceCardHeight / 2
+            
+            for (index, device) in unconnectedDevices.enumerated() {
+                device.posX = unconnectedX
+                device.posY = unconnectedStartY + Double(index) * (deviceCardHeight + verticalSpacing)
+            }
+        }
+        
+        // Mark all modified devices and studio for iCloud sync
+        for device in studio.devices ?? [] {
+            device.markAsModified()
+        }
+        studio.markAsModified()
+        
+        // Save changes
+        try? modelContext.save()
+    }
+    
+    /// Calculate grid dimensions (columns, rows) for a given device count
+    private func calculateGridDimensions(deviceCount: Int, maxColumns: Int) -> (columns: Int, rows: Int) {
+        guard deviceCount > 0 else { return (0, 0) }
+        let columns = min(maxColumns, deviceCount)
+        let rows = (deviceCount + columns - 1) / columns  // Ceiling division
+        return (columns, rows)
+    }
+    
+    /// Position devices in a simple centered horizontal row
+    private func positionDevicesInSimpleRow(devices: [DeviceInstance], centerX: Double, y: Double, cardWidth: Double, horizontalSpacing: Double) {
+        guard !devices.isEmpty else { return }
+        
+        let sortedDevices = devices.sorted { $0.nickname < $1.nickname }
+        let totalWidth = Double(sortedDevices.count) * cardWidth + 
+                        Double(max(0, sortedDevices.count - 1)) * horizontalSpacing
+        let startX = centerX - totalWidth / 2 + cardWidth / 2
+        
+        for (index, device) in sortedDevices.enumerated() {
+            device.posX = startX + Double(index) * (cardWidth + horizontalSpacing)
+            device.posY = y
+        }
+    }
+    
+    /// Position devices in a grid layout, grouped by category
+    private func positionDevicesInGrid(devices: [DeviceInstance], centerX: Double, baseY: Double, cardWidth: Double, cardHeight: Double, horizontalSpacing: Double, verticalSpacing: Double, maxColumns: Int, anchorTop: Bool) {
+        guard !devices.isEmpty else { return }
+        
+        // Group devices by category and sort
+        var categoryGroups: [DeviceCategory: [DeviceInstance]] = [:]
+        for device in devices {
+            categoryGroups[device.category, default: []].append(device)
+        }
+        
+        // Sort each category group by nickname
+        for (category, devicesInCategory) in categoryGroups {
+            categoryGroups[category] = devicesInCategory.sorted { $0.nickname < $1.nickname }
+        }
+        
+        // Sort categories by count (largest first)
+        let sortedCategories = categoryGroups.keys.sorted { cat1, cat2 in
+            (categoryGroups[cat1]?.count ?? 0) > (categoryGroups[cat2]?.count ?? 0)
+        }
+        
+        // Flatten into single ordered array
+        var allDevicesOrdered: [DeviceInstance] = []
+        for category in sortedCategories {
+            if let devicesInCategory = categoryGroups[category] {
+                allDevicesOrdered.append(contentsOf: devicesInCategory)
+            }
+        }
+        
+        // Calculate grid dimensions
+        let columns = min(maxColumns, allDevicesOrdered.count)
+        let rows = (allDevicesOrdered.count + columns - 1) / columns
+        
+        // Calculate total grid size
+        let totalWidth = Double(columns) * cardWidth + Double(max(0, columns - 1)) * horizontalSpacing
+        let totalHeight = Double(rows) * cardHeight + Double(max(0, rows - 1)) * verticalSpacing
+        
+        // Calculate starting position
+        let startX = centerX - totalWidth / 2 + cardWidth / 2
+        let startY: Double
+        if anchorTop {
+            // Start from baseY and grow downward
+            startY = baseY + cardHeight / 2
+        } else {
+            // Start from baseY and grow downward
+            startY = baseY + cardHeight / 2
+        }
+        
+        // Position devices in grid
+        for (index, device) in allDevicesOrdered.enumerated() {
+            let col = index % columns
+            let row = index / columns
+            
+            device.posX = startX + Double(col) * (cardWidth + horizontalSpacing)
+            device.posY = startY + Double(row) * (cardHeight + verticalSpacing)
+        }
+    }
 
     private func autoArrangeDevices(in studio: Studio) {
         guard !(studio.devices?.isEmpty ?? true) else { return }
-        
+
         // Save current positions for undo
         savedDevicePositions.removeAll()
         for device in studio.devices ?? [] {
@@ -5304,29 +5622,31 @@ private struct DeviceEditorSheet: View {
                                 }
                                 GridRow {
                                     Text("Custom Color")
-                                    HStack {
-                                        if let color = customColor {
-                                            ColorPicker("", selection: Binding(
-                                                get: { color },
-                                                set: { customColor = $0 }
-                                            ))
-                                            .labelsHidden()
-                                            
-                                            Button("Reset to Category Default") {
-                                                customColor = nil
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack {
+                                            if let color = customColor {
+                                                ColorPicker("Custom Color", selection: Binding(
+                                                    get: { color },
+                                                    set: { customColor = $0 }
+                                                ))
+
+                                                Button("Reset") {
+                                                    customColor = nil
+                                                }
+                                                .buttonStyle(.borderless)
+                                            } else {
+                                                let categoryColors = CategoryColorSettings.loadCategoryColors()
+                                                let categoryColor = categoryColors[category] ?? .gray
+
+                                                ColorPicker("Set Custom Color", selection: Binding(
+                                                    get: { categoryColor },
+                                                    set: { customColor = $0 }
+                                                ))
                                             }
-                                            .buttonStyle(.borderless)
-                                        } else {
-                                            let categoryColors = CategoryColorSettings.loadCategoryColors()
-                                            let categoryColor = categoryColors[category] ?? .gray
-                                            
-                                            ColorPicker("", selection: Binding(
-                                                get: { categoryColor },
-                                                set: { customColor = $0 }
-                                            ))
-                                            .labelsHidden()
-                                            
-                                            Text("Using category default")
+                                        }
+
+                                        if customColor == nil {
+                                            Text("Using category default color")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }

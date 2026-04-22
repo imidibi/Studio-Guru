@@ -113,6 +113,11 @@ final class Studio {
     var name: String = ""
     var createdAt: Date = Date()
     var modifiedAt: Date = Date()
+    
+    // Layout settings
+    var layoutMode: String = "freeform"  // "freeform" or "snapToGrid"
+    var gridSize: Double = 24.0
+    var showGridOverlay: Bool = false
 
     @Relationship(deleteRule: .cascade, inverse: \DeviceInstance.studio) var devices: [DeviceInstance]? = []
     @Relationship(deleteRule: .cascade, inverse: \Connection.studio) var connections: [Connection]? = []
@@ -178,6 +183,9 @@ final class DeviceInstance {
     var posY: Double = 200
     var scale: Double = 1.0
     var zIndex: Int = 0
+    
+    // Layout settings
+    var isPinned: Bool = false  // Pinned devices don't move during auto-arrange
     
     // Custom color override (optional - stored as hex string for SwiftData compatibility)
     var customColorHex: String?

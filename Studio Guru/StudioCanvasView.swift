@@ -456,6 +456,51 @@ struct StudioCanvasView: View {
                 }
                 
                 ToolbarItem(placement: .navigation) {
+                    Menu {
+                        Toggle(isOn: Binding(
+                            get: { studio.showGridOverlay },
+                            set: { newValue in
+                                studio.showGridOverlay = newValue
+                                studio.markAsModified()
+                            }
+                        )) {
+                            Label("Show Grid", systemImage: "squareshape.split.3x3")
+                        }
+                        
+                        Toggle(isOn: Binding(
+                            get: { studio.layoutMode == "snapToGrid" },
+                            set: { newValue in
+                                studio.layoutMode = newValue ? "snapToGrid" : "freeform"
+                                studio.markAsModified()
+                            }
+                        )) {
+                            Label("Snap to Grid", systemImage: "square.grid.3x3")
+                        }
+                        
+                        Divider()
+                        
+                        Menu("Grid Size") {
+                            ForEach([16.0, 24.0, 32.0, 48.0], id: \.self) { size in
+                                Button {
+                                    studio.gridSize = size
+                                    studio.markAsModified()
+                                } label: {
+                                    HStack {
+                                        Text("\(Int(size))px")
+                                        if studio.gridSize == size {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Grid", systemImage: "grid")
+                    }
+                    .help("Grid and layout settings")
+                }
+                
+                ToolbarItem(placement: .navigation) {
                     Button {
                         exportCanvasAsPDF(studio: studio)
                     } label: {
@@ -688,7 +733,7 @@ struct StudioCanvasView: View {
                 .environmentObject(selectionState)
             }
             
-            // Floating undo button
+            // Floating undo button - positioned but doesn't block canvas interactions
             if canUndoAutoArrange {
                 VStack {
                     Spacer()
@@ -706,6 +751,22 @@ struct StudioCanvasView: View {
                         .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
                         .padding(20)
                     }
+                }
+                .allowsHitTesting(false) // Make the container non-interactive
+                .overlay(alignment: .bottomTrailing) {
+                    // Only the button itself is interactive
+                    Button {
+                        undoAutoArrange(in: studio)
+                    } label: {
+                        Label("Undo Auto-Arrange", systemImage: "arrow.uturn.backward.circle.fill")
+                            .font(.title2)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    .padding(20)
+                    .allowsHitTesting(true) // Button itself is interactive
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -2331,25 +2392,33 @@ struct StudioCanvasView: View {
     
     /// Arranges devices in three horizontal bands: top (outputs), middle (hubs), bottom (inputs)
     /// Signal flow goes from bottom → middle → top
+    /// Respects pinned devices - they remain in place
     private func autoArrangeWithHubDetection(in studio: Studio) {
         guard !(studio.devices?.isEmpty ?? true) else { return }
 
-        // Save current positions for undo
+        // Save current positions for undo (only for non-pinned devices)
         savedDevicePositions.removeAll()
         for device in studio.devices ?? [] {
-            savedDevicePositions[device.id] = (x: device.posX, y: device.posY)
+            if !device.isPinned {
+                savedDevicePositions[device.id] = (x: device.posX, y: device.posY)
+            }
         }
         canUndoAutoArrange = true
+        
+        // Separate pinned and unpinned devices
+        let allDevices = studio.devices ?? []
+        let unpinnedDevices = allDevices.filter { !$0.isPinned }
+        // Note: Pinned devices remain at their current positions and are not rearranged
         
         // Get connections from the connection store
         let links = connectionsStore.links(for: studio.id)
         
-        // Build graph: count incoming and outgoing connections per device
+        // Build graph: count incoming and outgoing connections per device (only for unpinned devices)
         var outgoingCounts: [UUID: Int] = [:]
         var incomingCounts: [UUID: Int] = [:]
         var totalConnections: [UUID: Int] = [:]
         
-        for device in studio.devices ?? [] {
+        for device in unpinnedDevices {
             outgoingCounts[device.id] = 0
             incomingCounts[device.id] = 0
             totalConnections[device.id] = 0
@@ -2372,7 +2441,7 @@ struct StudioCanvasView: View {
         
         var deviceRoles: [UUID: DeviceRole] = [:]
         
-        for device in studio.devices ?? [] {
+        for device in unpinnedDevices {
             let outgoing = outgoingCounts[device.id] ?? 0
             let incoming = incomingCounts[device.id] ?? 0
             let total = totalConnections[device.id] ?? 0
@@ -2416,13 +2485,13 @@ struct StudioCanvasView: View {
             }
         }
         
-        // Assign to bands
+        // Assign to bands (only unpinned devices)
         var topBand: [DeviceInstance] = []      // Outputs
         var middleBand: [DeviceInstance] = []   // Hubs + Neutral
         var bottomBand: [DeviceInstance] = []   // Inputs
         var unconnectedDevices: [DeviceInstance] = []
         
-        for device in studio.devices ?? [] {
+        for device in unpinnedDevices {
             let hasConnections = (totalConnections[device.id] ?? 0) > 0
             
             if !hasConnections {
@@ -2465,7 +2534,9 @@ struct StudioCanvasView: View {
             canvasWidth: canvasWidth,
             cardWidth: deviceCardWidth,
             spacing: horizontalSpacing,
-            padding: padding
+            padding: padding,
+            snapToGrid: studio.layoutMode == "snapToGrid",
+            gridSize: studio.gridSize
         )
         
         positionDevicesInBand(
@@ -2474,7 +2545,9 @@ struct StudioCanvasView: View {
             canvasWidth: canvasWidth,
             cardWidth: deviceCardWidth,
             spacing: horizontalSpacing,
-            padding: padding
+            padding: padding,
+            snapToGrid: studio.layoutMode == "snapToGrid",
+            gridSize: studio.gridSize
         )
         
         positionDevicesInBand(
@@ -2483,7 +2556,9 @@ struct StudioCanvasView: View {
             canvasWidth: canvasWidth,
             cardWidth: deviceCardWidth,
             spacing: horizontalSpacing,
-            padding: padding
+            padding: padding,
+            snapToGrid: studio.layoutMode == "snapToGrid",
+            gridSize: studio.gridSize
         )
         
         // Position unconnected devices in far right column
@@ -2538,7 +2613,9 @@ struct StudioCanvasView: View {
         canvasWidth: Double,
         cardWidth: Double,
         spacing: Double,
-        padding: Double
+        padding: Double,
+        snapToGrid: Bool,
+        gridSize: Double
     ) {
         guard !devices.isEmpty else { return }
         
@@ -2558,13 +2635,28 @@ struct StudioCanvasView: View {
         
         // Position each device with staggered vertical offsets
         for (index, device) in sortedDevices.enumerated() {
-            device.posX = startX + Double(index) * (cardWidth + spacing)
+            var posX = startX + Double(index) * (cardWidth + spacing)
             
             // Apply zigzag pattern: even indices at base Y, odd indices offset
             // Pattern: 0=base, 1=+offset, 2=base, 3=+offset, etc.
             let yOffset = (index % 2 == 0) ? 0 : verticalOffset
-            device.posY = y + yOffset
+            var posY = y + yOffset
+            
+            // Snap to grid if enabled
+            if snapToGrid && gridSize > 0 {
+                posX = round(posX / gridSize) * gridSize
+                posY = round(posY / gridSize) * gridSize
+            }
+            
+            device.posX = posX
+            device.posY = posY
         }
+    }
+    
+    /// Snap a coordinate to the nearest grid intersection
+    private func snapToGrid(_ value: Double, gridSize: Double) -> Double {
+        guard gridSize > 0 else { return value }
+        return round(value / gridSize) * gridSize
     }
 
     
@@ -3808,6 +3900,9 @@ private struct CanvasSurfaceView: View {
         GeometryReader { geo in
             let canvasBounds = calculateCanvasBounds(devices: studio.devices ?? [], viewport: geo.size)
             
+            // Calculate lane offsets for connection routing
+            let laneOffsets = ConnectionRouter.assignLaneOffsets(for: links)
+            
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
                 ZStack {
                     Rectangle()
@@ -3820,11 +3915,18 @@ private struct CanvasSurfaceView: View {
                                     antialiased: true
                                 )
                         )
-
-                    ForEach(links, id: \.id) { link in
-                        linkRow(link)
+                    
+                    // Grid overlay (if enabled)
+                    if studio.showGridOverlay {
+                        gridOverlay(bounds: canvasBounds, gridSize: studio.gridSize)
                     }
 
+                    // Connections - rendered without drawingGroup to prevent glitches on Mac
+                    ForEach(links, id: \.id) { link in
+                        linkRow(link, laneOffset: laneOffsets[link.id] ?? 0)
+                    }
+
+                    // Devices
                     ForEach(studio.devices ?? [], id: \.id) { d in
                         deviceCard(d, canvasSize: geo.size)
                     }
@@ -3839,7 +3941,6 @@ private struct CanvasSurfaceView: View {
                         .zIndex(10)
                     }
                 }
-                .drawingGroup()
                 .coordinateSpace(name: "canvasContent")
                 .frame(width: canvasBounds.width, height: canvasBounds.height)
                 .scaleEffect(canvasScale)
@@ -3886,12 +3987,13 @@ private struct CanvasSurfaceView: View {
     }
 
     @ViewBuilder
-    private func linkRow(_ link: ConnectionLinkSummary) -> some View {
+    private func linkRow(_ link: ConnectionLinkSummary, laneOffset: CGFloat) -> some View {
         ConnectionLineRow(
             link: link,
             studio: studio,
             connectionsStore: connectionsStore,
             handleTips: connectionHandleTips,
+            laneOffset: laneOffset,
             isSelected: isSelectedConnection(linkId: link.id),
             onSelect: { onSelectLink(link) },
             onDelete: { onRequestDeleteLink(link) },
@@ -3924,6 +4026,8 @@ private struct CanvasSurfaceView: View {
             connectionHandleTip: tip,
             isExplosionEnabled: isExplosionEnabled,
             onExplode: { onExplodeDevice(d) },
+            snapToGrid: studio.layoutMode == "snapToGrid",
+            gridSize: studio.gridSize,
             dragOrigin: $dragOrigin,
             beginDragIfNeeded: { device in
                 if dragOrigin?.id != device.id {
@@ -3933,71 +4037,63 @@ private struct CanvasSurfaceView: View {
                 }
             },
             onBeginConnectionDrag: { device, startPoint in
-                DispatchQueue.main.async {
-                    activeConnectionDrag = (
-                        fromId: device.id, start: startPoint, location: startPoint
-                    )
-                    hoveredConnectionTargetId = nil
-                }
+                activeConnectionDrag = (
+                    fromId: device.id, start: startPoint, location: startPoint
+                )
+                hoveredConnectionTargetId = nil
             },
             onUpdateConnectionDrag: { fromDevice, point in
-                DispatchQueue.main.async {
-                    guard activeConnectionDrag != nil else { return }
-                    activeConnectionDrag!.location = point
+                guard activeConnectionDrag != nil else { return }
+                activeConnectionDrag!.location = point
 
-                    // Determine which device card (if any) the drag is currently over.
-                    let target = deviceId(at: point, excluding: fromDevice.id)
-                    hoveredConnectionTargetId = target
-                }
+                // Determine which device card (if any) the drag is currently over.
+                let target = deviceId(at: point, excluding: fromDevice.id)
+                hoveredConnectionTargetId = target
             },
             onEndConnectionDrag: {
-                DispatchQueue.main.async {
-                    if let drag = activeConnectionDrag,
-                        let targetId = hoveredConnectionTargetId
-                    {
-                        connectionsStore.ensureLinkSummary(
-                            studioId: studio.id,
-                            fromId: drag.fromId,
-                            toId: targetId
-                        )
-                    }
-                    hoveredConnectionTargetId = nil
-                    activeConnectionDrag = nil
+                if let drag = activeConnectionDrag,
+                    let targetId = hoveredConnectionTargetId
+                {
+                    connectionsStore.ensureLinkSummary(
+                        studioId: studio.id,
+                        fromId: drag.fromId,
+                        toId: targetId
+                    )
                 }
+                hoveredConnectionTargetId = nil
+                activeConnectionDrag = nil
             },
             onEndDeviceDrag: {
-                let capturedStudio = studio
-                Task.detached { @MainActor in
-                    guard let devices = capturedStudio.devices, !devices.isEmpty else { return }
-                    
-                    let cardWidth: CGFloat = 260
-                    let cardHeight: CGFloat = 96
-                    let padding: CGFloat = 100
-                    
-                    var minX = CGFloat.infinity
-                    var minY = CGFloat.infinity
-                    
+                // Normalize coordinates immediately on main thread to prevent devices going off-canvas
+                guard let devices = studio.devices, !devices.isEmpty else { return }
+                
+                let cardWidth: CGFloat = 260
+                let cardHeight: CGFloat = 96
+                let padding: CGFloat = 100
+                
+                var minX = CGFloat.infinity
+                var minY = CGFloat.infinity
+                
+                for device in devices {
+                    minX = min(minX, CGFloat(device.posX) - cardWidth / 2)
+                    minY = min(minY, CGFloat(device.posY) - cardHeight / 2)
+                }
+                
+                let targetMin = padding
+                var shiftX: Double = 0
+                var shiftY: Double = 0
+                
+                if minX < targetMin {
+                    shiftX = Double(targetMin - minX)
+                }
+                if minY < targetMin {
+                    shiftY = Double(targetMin - minY)
+                }
+                
+                if shiftX != 0 || shiftY != 0 {
                     for device in devices {
-                        minX = min(minX, CGFloat(device.posX) - cardWidth / 2)
-                        minY = min(minY, CGFloat(device.posY) - cardHeight / 2)
-                    }
-                    
-                    let targetMin = padding
-                    var shiftX: Double = 0
-                    var shiftY: Double = 0
-                    
-                    if minX < targetMin {
-                        shiftX = Double(targetMin - minX)
-                    }
-                    if minY < targetMin {
-                        shiftY = Double(targetMin - minY)
-                    }
-                    
-                    if shiftX != 0 || shiftY != 0 {
-                        for device in devices {
-                            device.posX += shiftX
-                            device.posY += shiftY
-                        }
+                        device.posX += shiftX
+                        device.posY += shiftY
                     }
                 }
             }
@@ -4037,6 +4133,48 @@ private struct CanvasSurfaceView: View {
             if rect.contains(point) { return d.id }
         }
         return nil
+    }
+    
+    // Draw grid overlay
+    @ViewBuilder
+    private func gridOverlay(bounds: CGSize, gridSize: Double) -> some View {
+        Canvas { context, size in
+            let spacing = CGFloat(gridSize)
+            
+            // Use gray color that works in both light and dark mode
+            let gridColor = Color.gray.opacity(0.3)
+            
+            // Draw vertical lines
+            var x: CGFloat = 0
+            while x <= bounds.width {
+                let path = Path { p in
+                    p.move(to: CGPoint(x: x, y: 0))
+                    p.addLine(to: CGPoint(x: x, y: bounds.height))
+                }
+                context.stroke(
+                    path,
+                    with: .color(gridColor),
+                    lineWidth: 0.5
+                )
+                x += spacing
+            }
+            
+            // Draw horizontal lines
+            var y: CGFloat = 0
+            while y <= bounds.height {
+                let path = Path { p in
+                    p.move(to: CGPoint(x: 0, y: y))
+                    p.addLine(to: CGPoint(x: bounds.width, y: y))
+                }
+                context.stroke(
+                    path,
+                    with: .color(gridColor),
+                    lineWidth: 0.5
+                )
+                y += spacing
+            }
+        }
+        .allowsHitTesting(false)
     }
     
     // Calculate canvas bounds - PURE FUNCTION, no state modification
@@ -4133,6 +4271,8 @@ private struct DeviceCardView: View {
     let connectionHandleTip: CGPoint?
     let isExplosionEnabled: Bool
     let onExplode: () -> Void
+    let snapToGrid: Bool
+    let gridSize: Double
 
     @Binding var dragOrigin: (id: UUID, x: Double, y: Double)?
     let beginDragIfNeeded: (DeviceInstance) -> Void
@@ -4279,9 +4419,23 @@ private struct DeviceCardView: View {
                     }
 
                     // Allow free movement across large virtual canvas
-                    // No clamping - devices can be positioned anywhere for scrolling
-                    let newX = origin.x + Double(v.translation.width)
-                    let newY = origin.y + Double(v.translation.height)
+                    var newX = origin.x + Double(v.translation.width)
+                    var newY = origin.y + Double(v.translation.height)
+                    
+                    // Prevent negative coordinates to avoid canvas origin shifts
+                    // This prevents the shaking/glitching on the left side
+                    let cardWidth: Double = 260
+                    let cardHeight: Double = 96
+                    let minPadding: Double = 100
+                    
+                    newX = max(newX, cardWidth / 2 + minPadding)
+                    newY = max(newY, cardHeight / 2 + minPadding)
+                    
+                    // Apply snap-to-grid if enabled
+                    if snapToGrid && gridSize > 0 {
+                        newX = round(newX / gridSize) * gridSize
+                        newY = round(newY / gridSize) * gridSize
+                    }
 
                     device.posX = newX
                     device.posY = newY
@@ -4553,6 +4707,22 @@ private struct InspectorPanel: View {
                                     }
                                     .buttonStyle(.bordered)
                                 }
+                                
+                                HStack(spacing: 12) {
+                                    Button {
+                                        d.isPinned.toggle()
+                                        d.markAsModified()
+                                        studio.markAsModified()
+                                    } label: {
+                                        Label(
+                                            d.isPinned ? "Unpin" : "Pin",
+                                            systemImage: d.isPinned ? "pin.slash" : "pin"
+                                        )
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(d.isPinned ? .orange : .blue)
+                                }
                             }
                             .padding(.vertical, 4)
                         }
@@ -4737,6 +4907,79 @@ private struct ZoomableScrollView<Content: View>: View {
 
 // MARK: - Selection State and CanvasSelection
 
+// MARK: - Connection Routing Engine
+
+/// Groups connections and assigns lane offsets to prevent overlapping
+struct ConnectionRouter {
+    struct ConnectionGroup {
+        let devicePair: Set<UUID>  // Unordered pair of device IDs
+        var linkIds: [UUID]
+        
+        init(fromId: UUID, toId: UUID, linkId: UUID) {
+            self.devicePair = Set([fromId, toId])
+            self.linkIds = [linkId]
+        }
+        
+        mutating func addLink(_ linkId: UUID) {
+            linkIds.append(linkId)
+        }
+    }
+    
+    /// Group connections by device pairs and assign lane offsets
+    static func assignLaneOffsets(
+        for links: [ConnectionLinkSummary]
+    ) -> [UUID: CGFloat] {
+        var groups: [Set<UUID>: ConnectionGroup] = [:]
+        
+        // Group connections by device pairs
+        for link in links {
+            let pair = Set([link.fromDeviceId, link.toDeviceId])
+            
+            if var existingGroup = groups[pair] {
+                existingGroup.addLink(link.id)
+                groups[pair] = existingGroup
+            } else {
+                groups[pair] = ConnectionGroup(
+                    fromId: link.fromDeviceId,
+                    toId: link.toDeviceId,
+                    linkId: link.id
+                )
+            }
+        }
+        
+        // Assign lane offsets based on group size
+        var laneOffsets: [UUID: CGFloat] = [:]
+        
+        for group in groups.values {
+            let linkCount = group.linkIds.count
+            
+            if linkCount == 1 {
+                // Single connection: no offset
+                laneOffsets[group.linkIds[0]] = 0
+            } else if linkCount == 2 {
+                // Two connections: offset symmetrically
+                laneOffsets[group.linkIds[0]] = -6
+                laneOffsets[group.linkIds[1]] = 6
+            } else if linkCount == 3 {
+                // Three connections: center one at 0, others offset
+                laneOffsets[group.linkIds[0]] = -8
+                laneOffsets[group.linkIds[1]] = 0
+                laneOffsets[group.linkIds[2]] = 8
+            } else {
+                // 4+ connections: distribute evenly
+                let spacing: CGFloat = 6.0
+                let totalWidth = spacing * CGFloat(linkCount - 1)
+                
+                for (index, linkId) in group.linkIds.enumerated() {
+                    laneOffsets[linkId] = CGFloat(index) * spacing - totalWidth / 2
+                }
+            }
+        }
+        
+        return laneOffsets
+    }
+}
+
 // MARK: - Connection Line Row Helper
 
 private struct ConnectionLineRow: View {
@@ -4744,6 +4987,7 @@ private struct ConnectionLineRow: View {
     let studio: Studio
     let connectionsStore: ConnectionsStore
     let handleTips: [UUID: CGPoint]
+    let laneOffset: CGFloat
     let isSelected: Bool
     let onSelect: () -> Void
     let onDelete: () -> Void
@@ -4924,6 +5168,7 @@ private struct ConnectionLineRow: View {
                 ConnectionLineView(
                     from: fromCenter,
                     to: toCenter,
+                    laneOffset: laneOffset,
                     isSelected: isSelected,
                     connectionTypes: metadata.types,
                     channelCount: metadata.channelCount,
@@ -5011,6 +5256,7 @@ enum ArrowDirection {
 private struct ConnectionLineView: View {
     let from: CGPoint
     let to: CGPoint
+    var laneOffset: CGFloat = 0
     let isSelected: Bool
     var connectionTypes: [ConnectionVisualType] = [.unknown]
     var channelCount: Int = 1
@@ -5019,6 +5265,12 @@ private struct ConnectionLineView: View {
     var onArrowTap: ((ArrowDirection) -> Void)?
 
     private var path: Path {
+        // If there's a lane offset, use the offset path instead
+        if laneOffset != 0 {
+            return offsetPath(by: laneOffset)
+        }
+        
+        // Standard path (no offset)
         var p = Path()
         
         let dx = to.x - from.x

@@ -2327,9 +2327,9 @@ struct StudioCanvasView: View {
         #endif
     }
     
-    // MARK: - Hub Detection Auto-Arrange (Zone-Based)
+    // MARK: - Hub Detection Auto-Arrange (Radial with Offset Pattern)
     
-    /// Arranges devices in three zones: top (outputs/controls), middle (interfaces/hubs), bottom (sources)
+    /// Arranges devices in three zones with radial positioning around hub and offset patterns to prevent straight-line overlaps
     private func autoArrangeWithHubDetection(in studio: Studio) {
         guard !(studio.devices?.isEmpty ?? true) else { return }
 
@@ -2361,10 +2361,10 @@ struct StudioCanvasView: View {
             }
         }
         
-        // Categorize devices into zones
-        var topZoneDevices: [DeviceInstance] = []      // Output/control devices
-        var middleZoneDevices: [DeviceInstance] = []   // Interfaces, patchbays, computers
-        var bottomZoneDevices: [DeviceInstance] = []   // Source/input devices
+        // Categorize devices into zones based on principles 7
+        var zoneADevices: [DeviceInstance] = []  // Output/control (top)
+        var zoneBDevices: [DeviceInstance] = []  // Hub devices (middle)
+        var zoneCDevices: [DeviceInstance] = []  // Input/source devices (bottom)
         var unconnectedDevices: [DeviceInstance] = []
         
         for device in studio.devices ?? [] {
@@ -2375,37 +2375,27 @@ struct StudioCanvasView: View {
                 continue
             }
             
-            // Classify by category
+            // Classify by category according to principle 7
             switch device.category {
-            // Top third: Output and control devices
-            case .videoMonitor, .monitor, .controlSurface:
-                topZoneDevices.append(device)
+            // Zone A: Studio Monitor, Video Monitor, Control Surface
+            case .monitor, .videoMonitor, .controlSurface:
+                zoneADevices.append(device)
                 
-            // Middle third: Hub devices (interfaces, patchbays, mixers, computers)
-            case .computer, .adatExpander, .audioInterface, .digitalMixer, .mixer, 
-                 .usbHub, .usbExpander:
-                middleZoneDevices.append(device)
+            // Zone B: Computer, USB Hub, USB Expander, Audio Interface, Mixer, Digital Mixer, ADAT Expander, Patchbay
+            case .computer, .usbHub, .usbExpander, .audioInterface, .mixer, .digitalMixer, .adatExpander, .patchbay:
+                zoneBDevices.append(device)
                 
-            // Bottom third: Source and processing devices
-            case .busCompressor, .channelStrip, .compressor, .effectsUnit, .equalizer,
-                 .keyboard, .midiDevice, .multi, .preamp, .synth, .other:
-                bottomZoneDevices.append(device)
-                
+            // Zone C: Other, Synth, Preamp, Multi, MIDI Device, Keyboard, Equalizer, Effects Unit, Compressor, Channel Strip, Bus Compressor
             default:
-                // Fallback: try to intelligently place unknown categories
-                bottomZoneDevices.append(device)
+                zoneCDevices.append(device)
             }
         }
         
-        // Find the hub: audio interface with most connections
-        let audioInterfaces = middleZoneDevices.filter { 
-            $0.category == .audioInterface 
-        }
-        
-        // If no audio interface, fall back to standard auto-arrange
-        guard let hub = audioInterfaces.max(by: { 
+        // Find the hub: device in Zone B with most connections (principle 8)
+        guard let hub = zoneBDevices.max(by: { 
             (connectionCounts[$0.id] ?? 0) < (connectionCounts[$1.id] ?? 0)
         }) else {
+            // No hub found, fall back to standard auto-arrange
             autoArrangeDevices(in: studio)
             return
         }
@@ -2413,141 +2403,110 @@ struct StudioCanvasView: View {
         // Layout constants
         let deviceCardHeight: Double = 96
         let deviceCardWidth: Double = 260
-        let padding: Double = 150
-        let horizontalSpacing: Double = 80
-        let verticalSpacing: Double = 50
-        let maxColumns = 4  // Max devices per row in grids
+        let minRadialDistance: Double = 450  // Minimum distance from hub for arrow visibility (principle 9)
+        let offsetAmount: Double = 100  // Offset for staggering (principle 5)
+        let padding: Double = 100
         
-        // CALCULATE REQUIRED DIMENSIONS FOR EACH ZONE
-        
-        // Top zone dimensions (monitors, control surfaces - grid layout)
-        let topGridDimensions = calculateGridDimensions(
-            deviceCount: topZoneDevices.count,
-            maxColumns: maxColumns
-        )
-        let topZoneWidth = Double(topGridDimensions.columns) * deviceCardWidth + 
-                          Double(max(0, topGridDimensions.columns - 1)) * horizontalSpacing
-        let topZoneHeight = Double(topGridDimensions.rows) * deviceCardHeight + 
-                           Double(max(0, topGridDimensions.rows - 1)) * verticalSpacing
-        
-        // Middle zone: ALL middle zone devices (hub + computers + other interfaces)
-        let totalMiddleDevices = middleZoneDevices.count
-        let middleZoneWidth: Double
-        let middleZoneHeight: Double
-        
-        if totalMiddleDevices <= 4 {
-            // Single row layout for 4 or fewer devices
-            middleZoneWidth = Double(totalMiddleDevices) * deviceCardWidth + 
-                             Double(max(0, totalMiddleDevices - 1)) * horizontalSpacing
-            middleZoneHeight = deviceCardHeight
-        } else {
-            // Grid layout for more than 4 devices
-            let middleGridDimensions = calculateGridDimensions(
-                deviceCount: totalMiddleDevices,
-                maxColumns: maxColumns
-            )
-            middleZoneWidth = Double(middleGridDimensions.columns) * deviceCardWidth + 
-                             Double(max(0, middleGridDimensions.columns - 1)) * horizontalSpacing
-            middleZoneHeight = Double(middleGridDimensions.rows) * deviceCardHeight + 
-                              Double(max(0, middleGridDimensions.rows - 1)) * verticalSpacing
+        // Build connection map for intelligent positioning (principle 10)
+        var deviceConnections: [UUID: Set<UUID>] = [:]
+        for device in studio.devices ?? [] {
+            deviceConnections[device.id] = []
+        }
+        for link in links {
+            deviceConnections[link.fromDeviceId, default: []].insert(link.toDeviceId)
+            deviceConnections[link.toDeviceId, default: []].insert(link.fromDeviceId)
         }
         
-        // Bottom zone dimensions (sources - grid layout)
-        let bottomGridDimensions = calculateGridDimensions(
-            deviceCount: bottomZoneDevices.count,
-            maxColumns: maxColumns
-        )
-        let bottomZoneWidth = Double(bottomGridDimensions.columns) * deviceCardWidth + 
-                             Double(max(0, bottomGridDimensions.columns - 1)) * horizontalSpacing
-        let bottomZoneHeight = Double(bottomGridDimensions.rows) * deviceCardHeight + 
-                              Double(max(0, bottomGridDimensions.rows - 1)) * verticalSpacing
+        // Position hub at origin - we'll normalize all coordinates at the end (principle 8)
+        let hubX: Double = 0
+        let hubY: Double = 0
+        hub.posX = hubX
+        hub.posY = hubY
         
-        // Calculate total required canvas size
-        let maxZoneWidth = max(topZoneWidth, middleZoneWidth, bottomZoneWidth)
-        let requiredCanvasWidth = maxZoneWidth + padding * 2
+        // Remove hub from zoneBDevices for separate processing
+        zoneBDevices.removeAll { $0.id == hub.id }
         
-        // Each zone gets equal height (divide by 3)
-        // Calculate minimum height needed for each zone's content
-        let minTopZoneHeight = topZoneHeight + padding * 2
-        let minMiddleZoneHeight = middleZoneHeight + padding * 2
-        let minBottomZoneHeight = bottomZoneHeight + padding * 2
-        let minTotalHeight = minTopZoneHeight + minMiddleZoneHeight + minBottomZoneHeight
-        
-        // Use minimum canvas size that fits everything
-        let layoutWidth = max(requiredCanvasWidth, 1400)  // Minimum width
-        let layoutHeight = max(minTotalHeight, 1000)  // Minimum height
-        
-        // Calculate zone boundaries - three equal thirds
-        let zoneHeight = layoutHeight / 3.0
-        let topZoneCenterY = layoutHeight * 0.166    // Center of top third (16.6%)
-        let middleZoneCenterY = layoutHeight * 0.5   // Center of middle third (50%)
-        let bottomZoneCenterY = layoutHeight * 0.833  // Center of bottom third (83.3%)
-        
-        let centerX = layoutWidth / 2
-        
-        // POSITION TOP ZONE (monitors, control surfaces)
-        if !topZoneDevices.isEmpty {
-            positionDevicesInGrid(
-                devices: topZoneDevices,
-                centerX: centerX,
-                baseY: topZoneCenterY,
+        // POSITION ZONE A DEVICES (top/output zone) with offset pattern
+        if !zoneADevices.isEmpty {
+            positionDevicesInRadialArc(
+                devices: zoneADevices,
+                hubX: hubX,
+                hubY: hubY,
+                hubId: hub.id,
+                deviceConnections: deviceConnections,
+                minDistance: minRadialDistance,
+                startAngle: -90,  // Top of canvas (12 o'clock)
+                arcSpan: 120,     // Spread across top arc
+                offsetAmount: offsetAmount,
                 cardWidth: deviceCardWidth,
-                cardHeight: deviceCardHeight,
-                horizontalSpacing: horizontalSpacing,
-                verticalSpacing: verticalSpacing,
-                maxColumns: maxColumns,
-                anchorTop: false  // Center in zone
+                cardHeight: deviceCardHeight
             )
         }
         
-        // POSITION MIDDLE ZONE (hub + all other middle devices)
-        if totalMiddleDevices <= 4 {
-            // Single row layout with hub positioned naturally
-            positionDevicesInSimpleRow(
-                devices: middleZoneDevices,
-                centerX: centerX,
-                y: middleZoneCenterY,
+        // POSITION ZONE B DEVICES (middle/hub zone - other hub-category devices)
+        if !zoneBDevices.isEmpty {
+            positionDevicesInRadialArc(
+                devices: zoneBDevices,
+                hubX: hubX,
+                hubY: hubY,
+                hubId: hub.id,
+                deviceConnections: deviceConnections,
+                minDistance: minRadialDistance * 0.7,  // Closer to hub
+                startAngle: 150,   // Left and right sides
+                arcSpan: 60,
+                offsetAmount: offsetAmount,
                 cardWidth: deviceCardWidth,
-                horizontalSpacing: horizontalSpacing
-            )
-        } else {
-            // Grid layout - hub will be positioned naturally in the grid
-            positionDevicesInGrid(
-                devices: middleZoneDevices,
-                centerX: centerX,
-                baseY: middleZoneCenterY,
-                cardWidth: deviceCardWidth,
-                cardHeight: deviceCardHeight,
-                horizontalSpacing: horizontalSpacing,
-                verticalSpacing: verticalSpacing,
-                maxColumns: maxColumns,
-                anchorTop: false  // Center in zone
+                cardHeight: deviceCardHeight
             )
         }
         
-        // POSITION BOTTOM ZONE (sources, instruments, processors)
-        if !bottomZoneDevices.isEmpty {
-            positionDevicesInGrid(
-                devices: bottomZoneDevices,
-                centerX: centerX,
-                baseY: bottomZoneCenterY,
+        // POSITION ZONE C DEVICES (bottom/input zone) with offset pattern
+        if !zoneCDevices.isEmpty {
+            positionDevicesInRadialArc(
+                devices: zoneCDevices,
+                hubX: hubX,
+                hubY: hubY,
+                hubId: hub.id,
+                deviceConnections: deviceConnections,
+                minDistance: minRadialDistance,
+                startAngle: 30,    // Bottom of canvas (6 o'clock)
+                arcSpan: 120,      // Spread across bottom arc
+                offsetAmount: offsetAmount,
                 cardWidth: deviceCardWidth,
-                cardHeight: deviceCardHeight,
-                horizontalSpacing: horizontalSpacing,
-                verticalSpacing: verticalSpacing,
-                maxColumns: maxColumns,
-                anchorTop: false  // Center in zone
+                cardHeight: deviceCardHeight
             )
         }
         
-        // Position unconnected devices in far right column
+        // Position unconnected devices to the right
         if !unconnectedDevices.isEmpty {
-            let unconnectedX = layoutWidth - padding - deviceCardWidth / 2
-            let unconnectedStartY = padding + deviceCardHeight / 2
+            let unconnectedX = minRadialDistance * 1.5
+            let unconnectedStartY = -Double(unconnectedDevices.count - 1) * (deviceCardHeight + 50) / 2
             
             for (index, device) in unconnectedDevices.enumerated() {
                 device.posX = unconnectedX
-                device.posY = unconnectedStartY + Double(index) * (deviceCardHeight + verticalSpacing)
+                device.posY = unconnectedStartY + Double(index) * (deviceCardHeight + 50)
+            }
+        }
+        
+        // Normalize all coordinates to ensure they're positive and within visible bounds (principle 1)
+        // Find minimum coordinates
+        var minX = Double.infinity
+        var minY = Double.infinity
+        
+        for device in studio.devices ?? [] {
+            minX = min(minX, device.posX - deviceCardWidth / 2)
+            minY = min(minY, device.posY - deviceCardHeight / 2)
+        }
+        
+        // Shift all devices so minimum is at padding
+        let targetMin = padding
+        let shiftX = minX < targetMin ? (targetMin - minX) : 0
+        let shiftY = minY < targetMin ? (targetMin - minY) : 0
+        
+        if shiftX != 0 || shiftY != 0 {
+            for device in studio.devices ?? [] {
+                device.posX += shiftX
+                device.posY += shiftY
             }
         }
         
@@ -2557,8 +2516,114 @@ struct StudioCanvasView: View {
         }
         studio.markAsModified()
         
-        // Save changes
-        try? modelContext.save()
+        // Save changes once at the end
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save after auto-arrange: \(error)")
+        }
+    }
+    
+    /// Position devices in a radial arc around the hub with offset pattern to prevent straight lines (principle 4 & 5)
+    private func positionDevicesInRadialArc(
+        devices: [DeviceInstance],
+        hubX: Double,
+        hubY: Double,
+        hubId: UUID,
+        deviceConnections: [UUID: Set<UUID>],
+        minDistance: Double,
+        startAngle: Double,
+        arcSpan: Double,
+        offsetAmount: Double,
+        cardWidth: Double,
+        cardHeight: Double
+    ) {
+        guard !devices.isEmpty else { return }
+        
+        // Sort devices by connection count to hub (connected devices first, closer)
+        let sortedDevices = devices.sorted { device1, device2 in
+            let connected1 = deviceConnections[device1.id]?.contains(hubId) ?? false
+            let connected2 = deviceConnections[device2.id]?.contains(hubId) ?? false
+            
+            if connected1 != connected2 {
+                return connected1  // Connected devices first
+            }
+            return device1.nickname < device2.nickname
+        }
+        
+        // Track already-positioned devices to check for overlaps
+        var positionedDevices: [(x: Double, y: Double, width: Double, height: Double)] = []
+        
+        // Increased spacing to ensure arrows are visible
+        let effectiveMinDistance = minDistance
+        
+        for (index, device) in sortedDevices.enumerated() {
+            var positioned = false
+            var attemptRadius = effectiveMinDistance
+            let maxAttempts = 10
+            
+            // Calculate base angle with wider spread
+            let angleStep = devices.count > 1 ? arcSpan / Double(devices.count) : 0
+            let baseAngle = startAngle + Double(index) * angleStep + angleStep / 2
+            
+            for _ in 0..<maxAttempts {
+                // Apply offset pattern (principle 5): alternate radii for staggering
+                let isOffset = index % 2 == 1
+                let radiusMultiplier = isOffset ? 1.35 : 1.0  // 35% further out for offset
+                let distance = attemptRadius * radiusMultiplier
+                
+                // Add slight random variation to prevent perfect alignment (principle 4)
+                let randomAngleOffset = Double.random(in: -3...3)
+                let angle = baseAngle + randomAngleOffset
+                let angleRad = angle * .pi / 180.0
+                
+                // Calculate candidate position
+                let candidateX = hubX + distance * cos(angleRad)
+                let candidateY = hubY + distance * sin(angleRad)
+                
+                // Check for overlaps with already-positioned devices (principle 3)
+                let minSpacing: Double = 120  // Minimum gap for arrow visibility
+                var hasOverlap = false
+                
+                for positioned in positionedDevices {
+                    let dx = candidateX - positioned.x
+                    let dy = candidateY - positioned.y
+                    let distanceBetweenCenters = sqrt(dx * dx + dy * dy)
+                    
+                    // Calculate minimum required distance (diagonal of both cards + spacing)
+                    let minRequired = sqrt(
+                        pow((cardWidth + positioned.width) / 2 + minSpacing, 2) +
+                        pow((cardHeight + positioned.height) / 2 + minSpacing, 2)
+                    )
+                    
+                    if distanceBetweenCenters < minRequired * 0.7 {  // 70% threshold for overlap
+                        hasOverlap = true
+                        break
+                    }
+                }
+                
+                if !hasOverlap {
+                    // Position is valid
+                    device.posX = candidateX
+                    device.posY = candidateY
+                    positionedDevices.append((x: candidateX, y: candidateY, width: cardWidth, height: cardHeight))
+                    positioned = true
+                    break
+                } else {
+                    // Try again with larger radius
+                    attemptRadius += 80
+                }
+            }
+            
+            // Fallback if no valid position found
+            if !positioned {
+                let angle = baseAngle * .pi / 180.0
+                let fallbackDistance = effectiveMinDistance + Double(index) * 150
+                device.posX = hubX + fallbackDistance * cos(angle)
+                device.posY = hubY + fallbackDistance * sin(angle)
+                positionedDevices.append((x: device.posX, y: device.posY, width: cardWidth, height: cardHeight))
+            }
+        }
     }
     
     /// Calculate grid dimensions (columns, rows) for a given device count
@@ -2614,11 +2679,9 @@ struct StudioCanvasView: View {
         
         // Calculate grid dimensions
         let columns = min(maxColumns, allDevicesOrdered.count)
-        let rows = (allDevicesOrdered.count + columns - 1) / columns
         
         // Calculate total grid size
         let totalWidth = Double(columns) * cardWidth + Double(max(0, columns - 1)) * horizontalSpacing
-        let totalHeight = Double(rows) * cardHeight + Double(max(0, rows - 1)) * verticalSpacing
         
         // Calculate starting position
         let startX = centerX - totalWidth / 2 + cardWidth / 2
@@ -3921,12 +3984,10 @@ private struct CanvasSurfaceView: View {
             onExplode: { onExplodeDevice(d) },
             dragOrigin: $dragOrigin,
             beginDragIfNeeded: { device in
-                DispatchQueue.main.async {
-                    if dragOrigin?.id != device.id {
-                        dragOrigin = (device.id, device.posX, device.posY)
-                        // Clear undo when user manually moves a device
-                        onClearAutoArrangeUndo()
-                    }
+                if dragOrigin?.id != device.id {
+                    dragOrigin = (device.id, device.posX, device.posY)
+                    // Clear undo when user manually moves a device
+                    onClearAutoArrangeUndo()
                 }
             },
             onBeginConnectionDrag: { device, startPoint in

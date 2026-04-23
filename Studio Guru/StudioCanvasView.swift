@@ -733,28 +733,9 @@ struct StudioCanvasView: View {
                 .environmentObject(selectionState)
             }
             
-            // Floating undo button - positioned but doesn't block canvas interactions
+            // Floating undo button - completely non-blocking
             if canUndoAutoArrange {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Button {
-                            undoAutoArrange(in: studio)
-                        } label: {
-                            Label("Undo Auto-Arrange", systemImage: "arrow.uturn.backward.circle.fill")
-                                .font(.title2)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                        .padding(20)
-                    }
-                }
-                .allowsHitTesting(false) // Make the container non-interactive
-                .overlay(alignment: .bottomTrailing) {
-                    // Only the button itself is interactive
+                GeometryReader { geo in
                     Button {
                         undoAutoArrange(in: studio)
                     } label: {
@@ -765,9 +746,12 @@ struct StudioCanvasView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                    .padding(20)
-                    .allowsHitTesting(true) // Button itself is interactive
+                    .position(
+                        x: geo.size.width - 120,
+                        y: geo.size.height - 40
+                    )
                 }
+                .allowsHitTesting(true)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -2235,6 +2219,15 @@ struct StudioCanvasView: View {
             
             // Draw devices
             ForEach(devices, id: \.id) { device in
+                let deviceColor: Color = {
+                    if let customColor = device.customColor {
+                        return customColor
+                    } else {
+                        let categoryColors = CategoryColorSettings.loadCategoryColors()
+                        return categoryColors[device.category] ?? .gray
+                    }
+                }()
+                
                 VStack(spacing: 4) {
                     Text(device.nickname)
                         .font(.caption)
@@ -2253,8 +2246,14 @@ struct StudioCanvasView: View {
                 }
                 .frame(width: 240, height: 80)
                 .padding(8)
-                .background(Color.white)
-                .cornerRadius(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(deviceColor, lineWidth: 3)
+                        )
+                )
                 .shadow(radius: 2)
                 .position(
                     x: device.posX + offsetX,
@@ -2371,18 +2370,25 @@ struct StudioCanvasView: View {
             }
         }
         #elseif os(macOS)
-        let renderer = ImageRenderer(content: fullView)
-        renderer.scale = 2.0
-        
-        if let pdfData = renderer.pdf() {
-            let savePanel = NSSavePanel()
-            savePanel.allowedContentTypes = [.pdf]
-            savePanel.nameFieldStringValue = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.pdf"
+        DispatchQueue.main.async { [self] in
+            let renderer = ImageRenderer(content: fullView)
+            renderer.scale = 2.0
             
-            savePanel.begin { response in
-                if response == .OK, let url = savePanel.url {
-                    try? pdfData.write(to: url)
+            if let pdfData = renderer.pdf() {
+                let savePanel = NSSavePanel()
+                savePanel.allowedContentTypes = [.pdf]
+                savePanel.nameFieldStringValue = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.pdf"
+                
+                savePanel.begin { response in
+                    if response == .OK, let url = savePanel.url {
+                        try? pdfData.write(to: url)
+                    }
+                    // Hide loading indicator after save dialog closes
+                    self.isExportingCanvas = false
                 }
+            } else {
+                // Hide loading indicator on failure
+                self.isExportingCanvas = false
             }
         }
         #endif
@@ -4142,7 +4148,7 @@ private struct CanvasSurfaceView: View {
             let spacing = CGFloat(gridSize)
             
             // Use gray color that works in both light and dark mode
-            let gridColor = Color.gray.opacity(0.3)
+            let gridColor = Color.gray.opacity(0.5)
             
             // Draw vertical lines
             var x: CGFloat = 0
@@ -4187,34 +4193,25 @@ private struct CanvasSurfaceView: View {
         let cardHeight: CGFloat = 96
         let padding: CGFloat = 100
         
-        var minX = CGFloat.infinity
-        var minY = CGFloat.infinity
-        var maxX = -CGFloat.infinity
-        var maxY = -CGFloat.infinity
+        // Always use 0,0 as the fixed top-left origin
+        // Only expand canvas to the right and down based on device positions
+        var maxX: CGFloat = 0
+        var maxY: CGFloat = 0
         
         for device in devices {
             let x = CGFloat(device.posX)
             let y = CGFloat(device.posY)
             
-            minX = min(minX, x - cardWidth / 2)
-            minY = min(minY, y - cardHeight / 2)
+            // Find the rightmost and bottommost edges
             maxX = max(maxX, x + cardWidth / 2)
             maxY = max(maxY, y + cardHeight / 2)
         }
         
-        // If devices have negative coordinates, extend canvas WITHOUT modifying positions
-        if minX < 0 {
-            maxX += abs(minX)
-            minX = 0
-        }
-        if minY < 0 {
-            maxY += abs(minY)
-            minY = 0
-        }
+        // Add padding to the content bounds
+        let contentWidth = maxX + padding
+        let contentHeight = maxY + padding
         
-        let contentWidth = (maxX - minX) + padding * 2
-        let contentHeight = (maxY - minY) + padding * 2
-        
+        // Ensure canvas is at least as large as viewport
         let canvasWidth = max(contentWidth, viewport.width)
         let canvasHeight = max(contentHeight, viewport.height)
         
@@ -4422,20 +4419,21 @@ private struct DeviceCardView: View {
                     var newX = origin.x + Double(v.translation.width)
                     var newY = origin.y + Double(v.translation.height)
                     
+                    // Apply snap-to-grid if enabled
+                    if snapToGrid && gridSize > 0 {
+                        newX = round(newX / gridSize) * gridSize
+                        newY = round(newY / gridSize) * gridSize
+                    }
+                    
                     // Prevent negative coordinates to avoid canvas origin shifts
-                    // This prevents the shaking/glitching on the left side
+                    // This prevents the shaking/glitching on all edges
+                    // Apply this AFTER snap-to-grid to ensure snapping doesn't violate bounds
                     let cardWidth: Double = 260
                     let cardHeight: Double = 96
                     let minPadding: Double = 100
                     
                     newX = max(newX, cardWidth / 2 + minPadding)
                     newY = max(newY, cardHeight / 2 + minPadding)
-                    
-                    // Apply snap-to-grid if enabled
-                    if snapToGrid && gridSize > 0 {
-                        newX = round(newX / gridSize) * gridSize
-                        newY = round(newY / gridSize) * gridSize
-                    }
 
                     device.posX = newX
                     device.posY = newY
@@ -6204,6 +6202,36 @@ private struct DeviceEditorSheet: View {
 
                         TextField("Serial Number", text: $serialNumber)
                         TextField("Location", text: $location)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                if let color = customColor {
+                                    ColorPicker("Custom Color", selection: Binding(
+                                        get: { color },
+                                        set: { customColor = $0 }
+                                    ))
+
+                                    Button("Reset") {
+                                        customColor = nil
+                                    }
+                                    .buttonStyle(.borderless)
+                                } else {
+                                    let categoryColors = CategoryColorSettings.loadCategoryColors()
+                                    let categoryColor = categoryColors[category] ?? .gray
+
+                                    ColorPicker("Set Custom Color", selection: Binding(
+                                        get: { categoryColor },
+                                        set: { customColor = $0 }
+                                    ))
+                                }
+                            }
+
+                            if customColor == nil {
+                                Text("Using category default color")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
 
                     Section("Links") {

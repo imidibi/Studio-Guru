@@ -137,6 +137,9 @@ struct StudioCanvasView: View {
     // Device inspector overlay
     @State private var presentedInspectorDeviceId: UUID? = nil
     @State private var suppressInspectorUntil: Date? = nil
+    
+    // Canvas annotations (drawing mode)
+    @State private var isDrawingMode: Bool = false
     @State private var inspectorDetent: PresentationDetent = .large
 
     // When saving from the device editor we often set selection to the saved device.
@@ -511,6 +514,19 @@ struct StudioCanvasView: View {
                 
                 ToolbarItem(placement: .navigation) {
                     Button {
+                        isDrawingMode.toggle()
+                    } label: {
+                        Label(
+                            isDrawingMode ? "Done Drawing" : "Annotate",
+                            systemImage: isDrawingMode ? "checkmark.circle.fill" : "pencil.tip.crop.circle"
+                        )
+                    }
+                    .help(isDrawingMode ? "Exit annotation mode" : "Draw annotations on canvas")
+                    .keyboardShortcut("d", modifiers: [.command])
+                }
+                
+                ToolbarItem(placement: .navigation) {
+                    Button {
                         isShowingMatrixView.toggle()
                     } label: {
                         Label("Connection Matrix", systemImage: "tablecells")
@@ -728,6 +744,7 @@ struct StudioCanvasView: View {
                         canUndoAutoArrange = false
                         savedDevicePositions.removeAll()
                     },
+                    isDrawingMode: $isDrawingMode,
                     canvasSize: $canvasSize
                 )
                 .environmentObject(selectionState)
@@ -2008,6 +2025,9 @@ struct StudioCanvasView: View {
             }
         }
 
+        // Copy canvas annotations
+        copy.canvasDrawingData = source.canvasDrawingData
+        
         modelContext.insert(copy)
         copy.markAsModified()
         try? modelContext.save()
@@ -3581,6 +3601,9 @@ struct StudioCanvasView: View {
                 studio.connections?.append(connection)
             }
 
+            // Import canvas annotations
+            studio.canvasDrawingData = exportable.canvasDrawingData
+            
             // Save to model context
             modelContext.insert(studio)
             try modelContext.save()
@@ -3734,6 +3757,7 @@ private struct DetailCanvas: View {
     let onArrowTap: ((ConnectionLinkSummary, ArrowDirection) -> Void)?
     let onExplodeDevice: (DeviceInstance) -> Void
     let onClearAutoArrangeUndo: () -> Void
+    @Binding var isDrawingMode: Bool
     @EnvironmentObject var selectionState: SelectionState
     @Binding var canvasSize: CGSize
 
@@ -3753,7 +3777,8 @@ private struct DetailCanvas: View {
             onArrowTap: onArrowTap,
             onExplodeDevice: onExplodeDevice,
             isExplosionEnabled: isExplosionEnabled,
-            onClearAutoArrangeUndo: onClearAutoArrangeUndo
+            onClearAutoArrangeUndo: onClearAutoArrangeUndo,
+            isDrawingMode: $isDrawingMode
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
@@ -3887,6 +3912,7 @@ private struct CanvasSurfaceView: View {
     let onExplodeDevice: (DeviceInstance) -> Void
     let isExplosionEnabled: Bool
     let onClearAutoArrangeUndo: () -> Void
+    @Binding var isDrawingMode: Bool
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -3936,6 +3962,12 @@ private struct CanvasSurfaceView: View {
                     ForEach(studio.devices ?? [], id: \.id) { d in
                         deviceCard(d, canvasSize: geo.size)
                     }
+                    
+                    // Canvas annotations layer (drawing overlay)
+                    CanvasAnnotationOverlay(studio: studio, isDrawingMode: $isDrawingMode)
+                        .frame(width: canvasBounds.width, height: canvasBounds.height)
+                        .allowsHitTesting(isDrawingMode)
+                        .zIndex(5)
 
                     if let temp = activeConnectionDrag {
                         ConnectionLineView(

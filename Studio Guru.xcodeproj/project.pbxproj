@@ -6,7 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAnnotations.swift; sourceTree = "<group>"; };
 		5FFE5C962F37D70900EB00B9 /* Studio Guru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Studio Guru.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -34,6 +39,7 @@
 			children = (
 				5FFE5C982F37D70900EB00B9 /* Studio Guru */,
 				5FFE5C972F37D70900EB00B9 /* Products */,
+				5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -119,6 +125,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -249,7 +256,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -299,7 +306,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

@@ -118,6 +118,9 @@ final class Studio {
     var layoutMode: String = "freeform"  // "freeform" or "snapToGrid"
     var gridSize: Double = 24.0
     var showGridOverlay: Bool = false
+    
+    // Canvas annotations (PencilKit drawing data)
+    @Attribute(.externalStorage) var canvasDrawingData: Data?
 
     @Relationship(deleteRule: .cascade, inverse: \DeviceInstance.studio) var devices: [DeviceInstance]? = []
     @Relationship(deleteRule: .cascade, inverse: \Connection.studio) var connections: [Connection]? = []
@@ -470,6 +473,7 @@ struct ExportableStudio: Sendable {
     let name: String
     let devices: [ExportableDevice]
     let connections: [ExportableConnection]
+    let canvasDrawingData: Data?
     let exportDate: Date
     let appVersion: String
 
@@ -477,6 +481,7 @@ struct ExportableStudio: Sendable {
         self.name = studio.name
         self.devices = (studio.devices ?? []).map { ExportableDevice(from: $0) }
         self.connections = (studio.connections ?? []).map { ExportableConnection(from: $0) }
+        self.canvasDrawingData = studio.canvasDrawingData
         self.exportDate = Date()
         self.appVersion = "1.0"
     }
@@ -485,7 +490,7 @@ struct ExportableStudio: Sendable {
 // Manual Codable conformance to avoid Swift 6 concurrency warnings
 extension ExportableStudio: Codable {
     enum CodingKeys: String, CodingKey {
-        case name, devices, connections, exportDate, appVersion
+        case name, devices, connections, canvasDrawingData, exportDate, appVersion
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -493,6 +498,7 @@ extension ExportableStudio: Codable {
         name = try container.decode(String.self, forKey: .name)
         devices = try container.decode([ExportableDevice].self, forKey: .devices)
         connections = try container.decode([ExportableConnection].self, forKey: .connections)
+        canvasDrawingData = try container.decodeIfPresent(Data.self, forKey: .canvasDrawingData)
         exportDate = try container.decode(Date.self, forKey: .exportDate)
         appVersion = try container.decode(String.self, forKey: .appVersion)
     }
@@ -502,6 +508,7 @@ extension ExportableStudio: Codable {
         try container.encode(name, forKey: .name)
         try container.encode(devices, forKey: .devices)
         try container.encode(connections, forKey: .connections)
+        try container.encodeIfPresent(canvasDrawingData, forKey: .canvasDrawingData)
         try container.encode(exportDate, forKey: .exportDate)
         try container.encode(appVersion, forKey: .appVersion)
     }

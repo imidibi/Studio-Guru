@@ -384,6 +384,9 @@ struct StudioCanvasView: View {
             // Clear auto-arrange undo state when switching studios
             canUndoAutoArrange = false
             savedDevicePositions.removeAll()
+            
+            // Turn off annotation mode when switching studios
+            isDrawingMode = false
 
             // Defer state-modifying operations to avoid "Modifying state during view update" warning
             if let sid = newValue,
@@ -512,6 +515,7 @@ struct StudioCanvasView: View {
                     .help("Export studio canvas as PDF")
                 }
                 
+                #if os(iOS)
                 ToolbarItem(placement: .navigation) {
                     Button {
                         isDrawingMode.toggle()
@@ -524,6 +528,21 @@ struct StudioCanvasView: View {
                     .help(isDrawingMode ? "Exit annotation mode" : "Draw annotations on canvas")
                     .keyboardShortcut("d", modifiers: [.command])
                 }
+                
+                // Show clear annotations button when in drawing mode
+                if isDrawingMode {
+                    ToolbarItem(placement: .navigation) {
+                        Button(role: .destructive) {
+                            // Clear annotations for current studio
+                            studio.canvasDrawingData = nil
+                            studio.markAsModified()
+                        } label: {
+                            Label("Clear Annotations", systemImage: "trash")
+                        }
+                        .help("Clear all annotations from this studio")
+                    }
+                }
+                #endif
                 
                 ToolbarItem(placement: .navigation) {
                     Button {

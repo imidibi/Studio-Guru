@@ -565,21 +565,6 @@ struct StudioCanvasView: View {
                     .help("Grid and layout settings")
                 }
                 
-                // Clear Annotations button - show on Mac when annotations exist
-                #if os(macOS)
-                if studio.canvasDrawingData != nil {
-                    ToolbarItem(placement: .navigation) {
-                        Button(role: .destructive) {
-                            studio.canvasDrawingData = nil
-                            studio.markAsModified()
-                        } label: {
-                            Label("Clear Annotations", systemImage: "trash")
-                        }
-                        .help("Clear all annotations from this studio")
-                    }
-                }
-                #endif
-                
                 #if os(iOS)
                 ToolbarItem(placement: .navigation) {
                     Button {
@@ -593,20 +578,6 @@ struct StudioCanvasView: View {
                     .help(isDrawingMode ? "Exit annotation mode" : "Draw annotations on canvas")
                     .keyboardShortcut("d", modifiers: [.command])
                 }
-                
-                // Show clear annotations button when in drawing mode
-                if isDrawingMode {
-                    ToolbarItem(placement: .navigation) {
-                        Button(role: .destructive) {
-                            // Clear annotations for current studio
-                            studio.canvasDrawingData = nil
-                            studio.markAsModified()
-                        } label: {
-                            Label("Clear Annotations", systemImage: "trash")
-                        }
-                        .help("Clear all annotations from this studio")
-                    }
-                }
                 #endif
                 
                 ToolbarItem(placement: .navigation) {
@@ -619,8 +590,23 @@ struct StudioCanvasView: View {
                 }
             }
             
-            // Right side: App-Level Actions
-            ToolbarItemGroup(placement: .primaryAction) {
+            // Right side: App actions (consolidated into single group with constant items)
+            ToolbarItemGroup(placement: .automatic) {
+                #if os(iOS)
+                // Clear Annotations - always visible on iPad, enabled only when in drawing mode with annotations
+                Button(role: .destructive) {
+                    if let studio = currentStudio {
+                        studio.canvasDrawingData = nil
+                        studio.markAsModified()
+                    }
+                } label: {
+                    Label("Clear Annotations", systemImage: "trash")
+                }
+                .help("Clear all annotations from this studio")
+                .disabled(!isDrawingMode || currentStudio?.canvasDrawingData == nil)
+                .opacity((isDrawingMode && currentStudio?.canvasDrawingData != nil) ? 1.0 : 0.3)
+                #endif
+                
                 Button {
                     isShowingGuru = true
                 } label: {

@@ -44,6 +44,11 @@ struct DrawingCanvasView: UIViewRepresentable {
         uiView.isUserInteractionEnabled = isDrawingMode
     }
     
+    static func dismantleUIView(_ uiView: PKCanvasView, coordinator: Coordinator) {
+        // Ensure tool picker is hidden when view is dismantled
+        coordinator.hideToolPicker(for: uiView)
+    }
+    
     func makeCoordinator() -> Coordinator {
         Coordinator(onDrawingChanged: onDrawingChanged)
     }
@@ -88,6 +93,12 @@ struct DrawingCanvasView: UIViewRepresentable {
             }
         }
         
+        func hideToolPicker(for canvasView: PKCanvasView) {
+            toolPicker?.setVisible(false, forFirstResponder: canvasView)
+            toolPicker?.removeObserver(canvasView)
+            canvasView.resignFirstResponder()
+        }
+        
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             onDrawingChanged(canvasView.drawing)
         }
@@ -117,8 +128,8 @@ struct CanvasAnnotationOverlay: View {
         CanvasAnnotationContent(studio: studio, isDrawingMode: $isDrawingMode)
             .id(studio.id)  // Force complete recreation when studio changes
         #elseif os(macOS)
-        // macOS: Display-only mode
-        Color.clear
+        // macOS: Display-only mode - show annotations as static image
+        CanvasAnnotationMacView(studio: studio)
             .id(studio.id)
         #endif
     }
@@ -146,6 +157,53 @@ private struct CanvasAnnotationContent: View {
             }
         )
         .allowsHitTesting(isDrawingMode)
+        .onChange(of: studio.canvasDrawingData) { _, _ in
+            // Reload drawing when data changes (e.g., from iCloud sync)
+            viewModel.loadDrawing(from: studio)
+        }
+    }
+}
+#endif
+
+#if os(macOS)
+/// macOS read-only view that displays annotations as an image
+private struct CanvasAnnotationMacView: View {
+    let studio: Studio
+    @State private var drawingImage: NSImage?
+    
+    var body: some View {
+        Group {
+            if let image = drawingImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .allowsHitTesting(false)
+            } else {
+                Color.clear
+                    .allowsHitTesting(false)
+            }
+        }
+        .onAppear {
+            loadDrawing()
+        }
+        .onChange(of: studio.canvasDrawingData) { _, _ in
+            loadDrawing()
+        }
+    }
+    
+    private func loadDrawing() {
+        guard let drawingData = studio.canvasDrawingData else {
+            drawingImage = nil
+            return
+        }
+        
+        do {
+            let drawing = try PKDrawing(data: drawingData)
+            drawingImage = drawing.image(from: drawing.bounds, scale: 1.0)
+        } catch {
+            print("Failed to load drawing on Mac: \(error)")
+            drawingImage = nil
+        }
     }
 }
 #endif
@@ -182,7 +240,11 @@ class AnnotationViewModel: ObservableObject {
     func saveDrawing(_ drawing: PKDrawing, to studio: Studio) {
         do {
             let data = drawing.dataRepresentation()
-            studio.canvasDrawingData = data
+            // Only save if data has changed to avoid unnecessary updates
+            if studio.canvasDrawingData != data {
+                studio.canvasDrawingData = data
+                studio.markAsModified()
+            }
         } catch {
             print("Failed to save drawing: \(error)")
         }
@@ -191,6 +253,7 @@ class AnnotationViewModel: ObservableObject {
     func clearDrawing(for studio: Studio) {
         canvasView.drawing = PKDrawing()
         studio.canvasDrawingData = nil
+        studio.markAsModified()
     }
 }
 

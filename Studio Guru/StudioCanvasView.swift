@@ -18,6 +18,25 @@ import CloudKit
     import AppKit
 #endif
 
+// MARK: - Helper Functions
+
+/// Ensures a URL has a proper scheme (http/https), adding https:// if missing
+private func ensureURLScheme(_ url: URL) -> URL {
+    // If URL already has a scheme, return it as-is
+    if url.scheme != nil {
+        return url
+    }
+    
+    // No scheme - add https:// prefix
+    let urlString = url.absoluteString
+    if let newURL = URL(string: "https://\(urlString)") {
+        return newURL
+    }
+    
+    // Fallback to original if construction fails
+    return url
+}
+
 struct StudioCanvasView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Studio.name, order: .forward) private var studios: [Studio]
@@ -4568,16 +4587,40 @@ private struct InspectorPanel: View {
                             }
 
                             if let url = d.supportPageURL {
-                                LabeledContent("Support Page") {
-                                    Link(url.absoluteString, destination: url)
+                                HStack {
+                                    Text("Support Page")
+                                    Spacer()
+                                    Text(url.absoluteString)
                                         .lineLimit(1)
+                                        .foregroundStyle(.blue)
+                                        .underline()
+                                        .onTapGesture {
+                                            let validURL = ensureURLScheme(url)
+                                            #if os(macOS)
+                                            NSWorkspace.shared.open(validURL)
+                                            #else
+                                            UIApplication.shared.open(validURL)
+                                            #endif
+                                        }
                                 }
                             }
 
                             if let url = d.downloadsPageURL {
-                                LabeledContent("Downloads Page") {
-                                    Link(url.absoluteString, destination: url)
+                                HStack {
+                                    Text("Downloads Page")
+                                    Spacer()
+                                    Text(url.absoluteString)
                                         .lineLimit(1)
+                                        .foregroundStyle(.blue)
+                                        .underline()
+                                        .onTapGesture {
+                                            let validURL = ensureURLScheme(url)
+                                            #if os(macOS)
+                                            NSWorkspace.shared.open(validURL)
+                                            #else
+                                            UIApplication.shared.open(validURL)
+                                            #endif
+                                        }
                                 }
                             }
                         }
@@ -5777,7 +5820,10 @@ extension DeviceInstance {
         case .digitalMixer: return "music.mic"
         case .effectsUnit: return "sparkles"
         case .equalizer: return "slider.horizontal.3"
+        case .headphoneAmp: return "amplifier"
+        case .headphones: return "headphones"
         case .keyboard: return "pianokeys"
+        case .microphone: return "mic"
         case .midiDevice: return "pianokeys.inverse"
         case .mixer: return "dial.medium"
         case .monitor: return "speaker.wave.2"
@@ -6582,16 +6628,40 @@ private struct DeviceInspectorOverlay: View {
                             }
 
                             if let url = d.supportPageURL {
-                                LabeledContent("Support Page") {
-                                    Link(url.absoluteString, destination: url)
+                                HStack {
+                                    Text("Support Page")
+                                    Spacer()
+                                    Text(url.absoluteString)
                                         .lineLimit(1)
+                                        .foregroundStyle(.blue)
+                                        .underline()
+                                        .onTapGesture {
+                                            let validURL = ensureURLScheme(url)
+                                            #if os(macOS)
+                                            NSWorkspace.shared.open(validURL)
+                                            #else
+                                            UIApplication.shared.open(validURL)
+                                            #endif
+                                        }
                                 }
                             }
 
                             if let url = d.downloadsPageURL {
-                                LabeledContent("Downloads Page") {
-                                    Link(url.absoluteString, destination: url)
+                                HStack {
+                                    Text("Downloads Page")
+                                    Spacer()
+                                    Text(url.absoluteString)
                                         .lineLimit(1)
+                                        .foregroundStyle(.blue)
+                                        .underline()
+                                        .onTapGesture {
+                                            let validURL = ensureURLScheme(url)
+                                            #if os(macOS)
+                                            NSWorkspace.shared.open(validURL)
+                                            #else
+                                            UIApplication.shared.open(validURL)
+                                            #endif
+                                        }
                                 }
                             }
                         }

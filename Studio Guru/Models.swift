@@ -46,7 +46,10 @@ enum DeviceCategory: String, Codable, CaseIterable {
     case digitalMixer = "Digital Mixer"
     case effectsUnit = "Effects Unit"
     case equalizer = "Equalizer"
+    case headphoneAmp = "Headphone Amp"
+    case headphones = "Headphones"
     case keyboard = "Keyboard"
+    case microphone = "Microphone"
     case midiDevice = "MIDI Device"
     case mixer = "Mixer"
     case monitor = "Studio Monitor"
@@ -794,7 +797,10 @@ struct CategoryColorSettings {
         case .digitalMixer: return Color(hex: "#16A085") ?? .teal
         case .effectsUnit: return Color(hex: "#8E44AD") ?? .purple
         case .equalizer: return Color(hex: "#D35400") ?? .orange
+        case .headphoneAmp: return Color(hex: "#2C3E50") ?? .gray
+        case .headphones: return Color(hex: "#34495E") ?? .gray
         case .keyboard: return Color(hex: "#C0392B") ?? .red
+        case .microphone: return Color(hex: "#16A085") ?? .teal
         case .midiDevice: return Color(hex: "#2980B9") ?? .blue
         case .mixer: return Color(hex: "#27AE60") ?? .green
         case .monitor: return Color(hex: "#F1C40F") ?? .yellow

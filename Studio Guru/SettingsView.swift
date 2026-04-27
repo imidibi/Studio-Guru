@@ -31,7 +31,10 @@ struct SettingsView: View {
     @AppStorage("categoryColor_DigitalMixer") private var digitalMixerColor = "#16A085"
     @AppStorage("categoryColor_EffectsUnit") private var effectsUnitColor = "#8E44AD"
     @AppStorage("categoryColor_Equalizer") private var equalizerColor = "#D35400"
+    @AppStorage("categoryColor_HeadphoneAmp") private var headphoneAmpColor = "#2C3E50"
+    @AppStorage("categoryColor_Headphones") private var headphonesColor = "#34495E"
     @AppStorage("categoryColor_Keyboard") private var keyboardColor = "#C0392B"
+    @AppStorage("categoryColor_Microphone") private var microphoneColor = "#16A085"
     @AppStorage("categoryColor_MIDIDevice") private var midiDeviceColor = "#2980B9"
     @AppStorage("categoryColor_Mixer") private var mixerColor = "#27AE60"
     @AppStorage("categoryColor_StudioMonitor") private var monitorColor = "#F1C40F"
@@ -66,7 +69,10 @@ struct SettingsView: View {
         case .digitalMixer: hex = digitalMixerColor
         case .effectsUnit: hex = effectsUnitColor
         case .equalizer: hex = equalizerColor
+        case .headphoneAmp: hex = headphoneAmpColor
+        case .headphones: hex = headphonesColor
         case .keyboard: hex = keyboardColor
+        case .microphone: hex = microphoneColor
         case .midiDevice: hex = midiDeviceColor
         case .mixer: hex = mixerColor
         case .monitor: hex = monitorColor
@@ -96,7 +102,10 @@ struct SettingsView: View {
         case .digitalMixer: digitalMixerColor = hex
         case .effectsUnit: effectsUnitColor = hex
         case .equalizer: equalizerColor = hex
+        case .headphoneAmp: headphoneAmpColor = hex
+        case .headphones: headphonesColor = hex
         case .keyboard: keyboardColor = hex
+        case .microphone: microphoneColor = hex
         case .midiDevice: midiDeviceColor = hex
         case .mixer: mixerColor = hex
         case .monitor: monitorColor = hex

@@ -76,25 +76,19 @@ struct DrawingCanvasView: UIViewRepresentable {
         }
         
         func setupToolPicker(for canvasView: PKCanvasView) {
-            // Get or create the shared tool picker
-            if let window = canvasView.window {
-                toolPicker = PKToolPicker.shared(for: window)
-            } else {
-                toolPicker = PKToolPicker()
-            }
-            
+            // Create individual tool picker instance (iOS 14+)
+            toolPicker = PKToolPicker()
             toolPicker?.addObserver(canvasView)
         }
         
         func updateToolPickerVisibility(for canvasView: PKCanvasView, isDrawingMode: Bool) {
             guard let toolPicker = toolPicker else {
-                // Fallback: try to get tool picker if not already set
-                if let window = canvasView.window {
-                    self.toolPicker = PKToolPicker.shared(for: window)
+                // Fallback: create tool picker if not already set
+                self.toolPicker = PKToolPicker()
+                if self.toolPicker != nil {
                     self.toolPicker?.addObserver(canvasView)
+                    self.updateToolPickerVisibility(for: canvasView, isDrawingMode: isDrawingMode)
                 }
-                guard let toolPicker = self.toolPicker else { return }
-                self.updateToolPickerVisibility(for: canvasView, isDrawingMode: isDrawingMode)
                 return
             }
             
@@ -251,17 +245,13 @@ class AnnotationViewModel: ObservableObject {
         isSaving = true
         defer { isSaving = false }
         
-        do {
-            let data = drawing.dataRepresentation()
-            // Only save if data has changed to avoid unnecessary updates
-            if studio.canvasDrawingData != data {
-                studio.canvasDrawingData = data
-                studio.markAsModified()
-                lastLoadedData = data
-                print("💾 Saved drawing to SwiftData")
-            }
-        } catch {
-            print("Failed to save drawing: \(error)")
+        let data = drawing.dataRepresentation()
+        // Only save if data has changed to avoid unnecessary updates
+        if studio.canvasDrawingData != data {
+            studio.canvasDrawingData = data
+            studio.markAsModified()
+            lastLoadedData = data
+            print("💾 Saved drawing to SwiftData")
         }
     }
     

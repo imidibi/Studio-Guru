@@ -41,8 +41,15 @@ struct DrawingCanvasView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: PKCanvasView, context: Context) {
-        // Update transform when scale changes
-        uiView.transform = CGAffineTransform(scaleX: canvasScale, y: canvasScale)
+        // Only update transform if scale actually changed to avoid unnecessary updates
+        let currentTransform = uiView.transform
+        let targetTransform = CGAffineTransform(scaleX: canvasScale, y: canvasScale)
+        if currentTransform != targetTransform {
+            // Use UIView animation for smoother transform updates during orientation changes
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+                uiView.transform = targetTransform
+            }
+        }
         
         // Update tool picker visibility based on drawing mode
         context.coordinator.updateToolPickerVisibility(for: uiView, isDrawingMode: isDrawingMode)

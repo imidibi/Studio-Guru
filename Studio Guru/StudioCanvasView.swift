@@ -593,7 +593,7 @@ struct StudioCanvasView: View {
             // Right side: App actions (consolidated into single group with constant items)
             ToolbarItemGroup(placement: .automatic) {
                 #if os(iOS)
-                // Clear Annotations - always visible on iPad, enabled only when in drawing mode with annotations
+                // Clear Annotations - always visible on iPad, enabled when annotations exist
                 Button(role: .destructive) {
                     if let studio = currentStudio {
                         studio.canvasDrawingData = nil
@@ -603,8 +603,8 @@ struct StudioCanvasView: View {
                     Label("Clear Annotations", systemImage: "trash")
                 }
                 .help("Clear all annotations from this studio")
-                .disabled(!isDrawingMode || currentStudio?.canvasDrawingData == nil)
-                .opacity((isDrawingMode && currentStudio?.canvasDrawingData != nil) ? 1.0 : 0.3)
+                .disabled(currentStudio?.canvasDrawingData == nil)
+                .opacity(currentStudio?.canvasDrawingData != nil ? 1.0 : 0.3)
                 #endif
                 
                 Button {
@@ -4060,9 +4060,11 @@ private struct CanvasSurfaceView: View {
                 // Reset scale on significant geometry changes (like rotation)
                 // to prevent distortion and hangs
                 if abs(oldSize.width - newSize.width) > 100 || abs(oldSize.height - newSize.height) > 100 {
-                    // Reset immediately without animation to prevent visual distortion
-                    canvasScale = 1.0
-                    lastScale = 1.0
+                    // Use a smooth animation to make the transition less jarring
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        canvasScale = 1.0
+                        lastScale = 1.0
+                    }
                     lastKnownWidth = newSize.width
                 }
             }

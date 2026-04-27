@@ -303,9 +303,9 @@ struct SettingsView: View {
                             }
                         }
                     } header: {
-                        Text("Studio Sync Status")
+                        Text("Studios & Sessions")
                     } footer: {
-                        Text("Shows when each studio was last modified. Recent changes should sync to other devices within a few minutes.")
+                        Text("Shows when each studio or session was last modified. Recent changes should sync to other devices within a few minutes.")
                     }
                 }
                 

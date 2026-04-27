@@ -439,7 +439,7 @@ struct StudioCanvasView: View {
             }
         }
         .toolbar {
-            // Left side: New Studio + Help
+            // Left side: Studio Actions
             ToolbarItem(placement: .navigation) {
                 Button {
                     newStudioNameDraft = "My Studio"
@@ -448,17 +448,6 @@ struct StudioCanvasView: View {
                     Label("New Studio", systemImage: "plus")
                 }
                 .help("Create a new studio")
-            }
-
-            // Help button - always available, even without a studio
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    isShowingHelp = true
-                } label: {
-                    Label("Help", systemImage: "questionmark.circle")
-                }
-                .help("How to use Studio Guru")
-                .keyboardShortcut("?", modifiers: .command)
             }
             
             if let studio = currentStudio {
@@ -470,6 +459,57 @@ struct StudioCanvasView: View {
                     }
                     .help("Duplicate this studio")
                 }
+                
+                ToolbarItem(placement: .navigation) {
+                    Menu {
+                        Button {
+                            isShowingImportPicker = true
+                        } label: {
+                            Label("Import Studio...", systemImage: "square.and.arrow.down")
+                        }
+                        
+                        Button {
+                            exportStudio(studio)
+                        } label: {
+                            Label("Export Studio...", systemImage: "square.and.arrow.up")
+                        }
+                        
+                        Button {
+                            exportCanvasAsPDF(studio: studio)
+                        } label: {
+                            Label("Export Canvas as PDF...", systemImage: "arrow.down.doc")
+                        }
+                        
+                        Divider()
+                        
+                        Button(role: .destructive) {
+                            studioIdPendingDelete = studio.id
+                            isShowingDeleteStudioConfirm = true
+                        } label: {
+                            Label("Delete Studio...", systemImage: "trash")
+                        }
+                    } label: {
+                        Label("Files", systemImage: "folder")
+                    }
+                    .help("Import, export, and manage studio files")
+                }
+            } else {
+                // Show import option even without a studio
+                ToolbarItem(placement: .navigation) {
+                    Menu {
+                        Button {
+                            isShowingImportPicker = true
+                        } label: {
+                            Label("Import Studio...", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Label("Files", systemImage: "folder")
+                    }
+                    .help("Import a studio file")
+                }
+            }
+            
+            if let studio = currentStudio {
 
                 ToolbarItem(placement: .navigation) {
                     Button {
@@ -525,14 +565,20 @@ struct StudioCanvasView: View {
                     .help("Grid and layout settings")
                 }
                 
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        exportCanvasAsPDF(studio: studio)
-                    } label: {
-                        Label("Export Canvas", systemImage: "arrow.down.doc.fill")
+                // Clear Annotations button - show on Mac when annotations exist
+                #if os(macOS)
+                if studio.canvasDrawingData != nil {
+                    ToolbarItem(placement: .navigation) {
+                        Button(role: .destructive) {
+                            studio.canvasDrawingData = nil
+                            studio.markAsModified()
+                        } label: {
+                            Label("Clear Annotations", systemImage: "trash")
+                        }
+                        .help("Clear all annotations from this studio")
                     }
-                    .help("Export studio canvas as PDF")
                 }
+                #endif
                 
                 #if os(iOS)
                 ToolbarItem(placement: .navigation) {
@@ -573,57 +619,29 @@ struct StudioCanvasView: View {
                 }
             }
             
-            // Guru is available even without a studio selected in the list
-            ToolbarItem(placement: .navigation) {
+            // Right side: App-Level Actions
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     isShowingGuru = true
                 } label: {
                     Label("Guru", systemImage: "lightbulb")
                 }
                 .help("Quick setup suggestions for common devices")
-            }
-
-            // Right side: Import, Export, Delete, Settings
-            ToolbarItem(placement: .primaryAction) {
+                
                 Button {
-                    isShowingImportPicker = true
+                    isShowingHelp = true
                 } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
+                    Label("Help", systemImage: "questionmark.circle")
                 }
-                .help("Import a studio from file")
-            }
+                .help("How to use Studio Guru")
+                .keyboardShortcut("?", modifiers: .command)
 
-            if let studio = currentStudio {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        exportStudio(studio)
-                    } label: {
-                        Label("Export", systemImage: "square.and.arrow.up")
-                    }
-                    .help("Export this studio to share with others")
-                }
-
-                ToolbarItem(placement: .primaryAction) {
-                    Button(role: .destructive) {
-                        studioIdPendingDelete = studio.id
-                        isShowingDeleteStudioConfirm = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .help("Delete this studio")
-                    #if os(macOS)
-                        .keyboardShortcut(.delete, modifiers: [])
-                    #endif
-                }
-            }
-
-            ToolbarItem(placement: .primaryAction) {
                 Button {
                     isShowingSettings = true
                 } label: {
                     Label("Settings", systemImage: "gear")
                 }
-                .help("App settings and sync information")
+                .help("App settings and preferences")
             }
         }
     }
@@ -3836,7 +3854,7 @@ private struct StudiosList: View {
 
     var body: some View {
         List(selection: $selectedStudioId) {
-            Section("Studios") {
+            Section("Studios/Sessions") {
                 ForEach(studios, id: \.id) { studio in
                     Text(studio.name)
                         .tag(studio.id)
@@ -3975,55 +3993,58 @@ private struct CanvasSurfaceView: View {
             
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
                 ZStack {
-                    Rectangle()
-                        .fill(background)
-                        .overlay(
-                            Rectangle()
-                                .strokeBorder(
-                                    Color.primary.opacity(0.1),
-                                    lineWidth: 2,
-                                    antialiased: true
-                                )
-                        )
-                    
-                    // Grid overlay (if enabled)
-                    if studio.showGridOverlay {
-                        gridOverlay(bounds: canvasBounds, gridSize: studio.gridSize)
-                    }
+                    // Main canvas content (everything except annotations)
+                    ZStack {
+                        Rectangle()
+                            .fill(background)
+                            .overlay(
+                                Rectangle()
+                                    .strokeBorder(
+                                        Color.primary.opacity(0.1),
+                                        lineWidth: 2,
+                                        antialiased: true
+                                    )
+                            )
+                        
+                        // Grid overlay (if enabled)
+                        if studio.showGridOverlay {
+                            gridOverlay(bounds: canvasBounds, gridSize: studio.gridSize)
+                        }
 
-                    // Connections - rendered without drawingGroup to prevent glitches on Mac
-                    ForEach(links, id: \.id) { link in
-                        linkRow(link, laneOffset: laneOffsets[link.id] ?? 0)
-                    }
+                        // Connections - rendered without drawingGroup to prevent glitches on Mac
+                        ForEach(links, id: \.id) { link in
+                            linkRow(link, laneOffset: laneOffsets[link.id] ?? 0)
+                        }
 
-                    // Devices
-                    ForEach(studio.devices ?? [], id: \.id) { d in
-                        deviceCard(d, canvasSize: geo.size)
+                        // Devices
+                        ForEach(studio.devices ?? [], id: \.id) { d in
+                            deviceCard(d, canvasSize: geo.size)
+                        }
+
+                        if let temp = activeConnectionDrag {
+                            ConnectionLineView(
+                                from: temp.start,
+                                to: temp.location,
+                                isSelected: true
+                            )
+                            .allowsHitTesting(false)
+                            .zIndex(10)
+                        }
                     }
+                    .coordinateSpace(name: "canvasContent")
+                    .frame(width: canvasBounds.width, height: canvasBounds.height)
+                    .scaleEffect(canvasScale)
+                    .frame(
+                        width: canvasBounds.width * canvasScale,
+                        height: canvasBounds.height * canvasScale
+                    )
                     
-                    // Canvas annotations layer (drawing overlay)
-                    CanvasAnnotationOverlay(studio: studio, isDrawingMode: $isDrawingMode)
-                        .frame(width: canvasBounds.width, height: canvasBounds.height)
+                    // Canvas annotations layer (drawing overlay) - overlaid on top with scaled frame
+                    CanvasAnnotationOverlay(studio: studio, isDrawingMode: $isDrawingMode, canvasScale: canvasScale, canvasBounds: canvasBounds)
+                        .frame(width: canvasBounds.width * canvasScale, height: canvasBounds.height * canvasScale)
                         .allowsHitTesting(isDrawingMode)
                         .zIndex(5)
-
-                    if let temp = activeConnectionDrag {
-                        ConnectionLineView(
-                            from: temp.start,
-                            to: temp.location,
-                            isSelected: true
-                        )
-                        .allowsHitTesting(false)
-                        .zIndex(10)
-                    }
                 }
-                .coordinateSpace(name: "canvasContent")
-                .frame(width: canvasBounds.width, height: canvasBounds.height)
-                .scaleEffect(canvasScale)
-                .frame(
-                    width: canvasBounds.width * canvasScale,
-                    height: canvasBounds.height * canvasScale
-                )
                 .contentShape(Rectangle())
                 .onTapGesture {
                     selection.selection = nil
@@ -4256,12 +4277,14 @@ private struct CanvasSurfaceView: View {
     // Calculate canvas bounds - PURE FUNCTION, no state modification
     private func calculateCanvasBounds(devices: [DeviceInstance], viewport: CGSize) -> CGSize {
         guard !devices.isEmpty else {
-            return viewport
+            // For empty studios, use a fixed minimum size instead of viewport
+            return CGSize(width: 2000, height: 2000)
         }
         
         let cardWidth: CGFloat = 260
         let cardHeight: CGFloat = 96
         let padding: CGFloat = 100
+        let minCanvasSize: CGFloat = 2000  // Minimum canvas size for consistency
         
         // Always use 0,0 as the fixed top-left origin
         // Only expand canvas to the right and down based on device positions
@@ -4281,9 +4304,10 @@ private struct CanvasSurfaceView: View {
         let contentWidth = maxX + padding
         let contentHeight = maxY + padding
         
-        // Ensure canvas is at least as large as viewport
-        let canvasWidth = max(contentWidth, viewport.width)
-        let canvasHeight = max(contentHeight, viewport.height)
+        // Use content size or minimum, whichever is larger
+        // This ensures consistent canvas size across all devices regardless of viewport
+        let canvasWidth = max(contentWidth, minCanvasSize)
+        let canvasHeight = max(contentHeight, minCanvasSize)
         
         return CGSize(width: canvasWidth, height: canvasHeight)
     }

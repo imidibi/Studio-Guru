@@ -6,20 +6,20 @@
 //
 
 import SwiftUI
-#if canImport(PencilKit)
-import PencilKit
-#endif
 import Combine
+import PencilKit
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - PencilKit Canvas View
-
-#if canImport(PencilKit)
 
 /// SwiftUI wrapper for PencilKit's PKCanvasView
 #if os(iOS)
 struct DrawingCanvasView: UIViewRepresentable {
     @Binding var canvasView: PKCanvasView
     @Binding var isDrawingMode: Bool
+    let canvasScale: CGFloat
     let onDrawingChanged: (PKDrawing) -> Void
     
     func makeUIView(context: Context) -> PKCanvasView {
@@ -30,6 +30,10 @@ struct DrawingCanvasView: UIViewRepresentable {
         canvas.isOpaque = false
         canvas.tool = PKInkingTool(.pen, color: .black, width: 10)  // Set default tool
         
+        // Scale the canvas transform to match the visual zoom level
+        // This makes the drawing area match the scaled canvas content
+        canvas.transform = CGAffineTransform(scaleX: canvasScale, y: canvasScale)
+        
         // Store tool picker in coordinator for reliable access
         context.coordinator.setupToolPicker(for: canvas)
         
@@ -37,6 +41,9 @@ struct DrawingCanvasView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: PKCanvasView, context: Context) {
+        // Update transform when scale changes
+        uiView.transform = CGAffineTransform(scaleX: canvasScale, y: canvasScale)
+        
         // Update tool picker visibility based on drawing mode
         context.coordinator.updateToolPickerVisibility(for: uiView, isDrawingMode: isDrawingMode)
         
@@ -104,33 +111,26 @@ struct DrawingCanvasView: UIViewRepresentable {
         }
     }
 }
-#else
-// macOS placeholder - PencilKit not fully supported yet
-class PKCanvasViewPlaceholder {
-    var drawing = PKDrawing()
-}
-#endif
-
-#endif // canImport(PencilKit)
+#endif // os(iOS)
 
 // MARK: - Annotation Overlay View
-
-#if canImport(PencilKit)
 
 /// Main annotation view that overlays the studio canvas
 struct CanvasAnnotationOverlay: View {
     let studio: Studio
     @Binding var isDrawingMode: Bool
+    var canvasScale: CGFloat = 1.0
+    var canvasBounds: CGSize = CGSize(width: 2000, height: 2000)
     
     var body: some View {
         #if os(iOS)
         // Create a new view model for each studio
-        CanvasAnnotationContent(studio: studio, isDrawingMode: $isDrawingMode)
+        CanvasAnnotationContent(studio: studio, isDrawingMode: $isDrawingMode, canvasScale: canvasScale)
             .id(studio.id)  // Force complete recreation when studio changes
         #elseif os(macOS)
         // macOS: Display-only mode - show annotations as static image
-        CanvasAnnotationMacView(studio: studio)
-            .id(studio.id)
+        CanvasAnnotationMacView(studio: studio, canvasBounds: canvasBounds, canvasScale: canvasScale)
+            .id("\(studio.id)-\(studio.modifiedAt.timeIntervalSince1970)")
         #endif
     }
 }
@@ -140,11 +140,13 @@ struct CanvasAnnotationOverlay: View {
 private struct CanvasAnnotationContent: View {
     let studio: Studio
     @Binding var isDrawingMode: Bool
+    let canvasScale: CGFloat
     @StateObject private var viewModel: AnnotationViewModel
     
-    init(studio: Studio, isDrawingMode: Binding<Bool>) {
+    init(studio: Studio, isDrawingMode: Binding<Bool>, canvasScale: CGFloat) {
         self.studio = studio
         self._isDrawingMode = isDrawingMode
+        self.canvasScale = canvasScale
         self._viewModel = StateObject(wrappedValue: AnnotationViewModel(studio: studio))
     }
     
@@ -152,6 +154,7 @@ private struct CanvasAnnotationContent: View {
         DrawingCanvasView(
             canvasView: $viewModel.canvasView,
             isDrawingMode: $isDrawingMode,
+            canvasScale: canvasScale,
             onDrawingChanged: { drawing in
                 viewModel.saveDrawing(drawing, to: studio)
             }
@@ -161,48 +164,37 @@ private struct CanvasAnnotationContent: View {
             // Reload drawing when data changes (e.g., from iCloud sync)
             viewModel.loadDrawing(from: studio)
         }
+        .onChange(of: studio.modifiedAt) { _, _ in
+            // Also check on modifiedAt changes (catches iCloud sync events)
+            viewModel.loadDrawing(from: studio)
+        }
+        .onAppear {
+            // Ensure drawing is loaded when view appears
+            viewModel.loadDrawing(from: studio)
+        }
     }
 }
 #endif
 
 #if os(macOS)
-/// macOS read-only view that displays annotations as an image
+/// macOS display-only view for annotations (no interactive editing on Mac)
 private struct CanvasAnnotationMacView: View {
     let studio: Studio
-    @State private var drawingImage: NSImage?
+    let canvasBounds: CGSize
+    let canvasScale: CGFloat
     
     var body: some View {
-        Group {
-            if let image = drawingImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .allowsHitTesting(false)
-            } else {
-                Color.clear
-                    .allowsHitTesting(false)
-            }
-        }
-        .onAppear {
-            loadDrawing()
-        }
-        .onChange(of: studio.canvasDrawingData) { _, _ in
-            loadDrawing()
-        }
-    }
-    
-    private func loadDrawing() {
-        guard let drawingData = studio.canvasDrawingData else {
-            drawingImage = nil
-            return
-        }
-        
-        do {
-            let drawing = try PKDrawing(data: drawingData)
-            drawingImage = drawing.image(from: drawing.bounds, scale: 1.0)
-        } catch {
-            print("Failed to load drawing on Mac: \(error)")
-            drawingImage = nil
+        // Display annotations as a static image on Mac
+        if let drawingData = studio.canvasDrawingData,
+           let drawing = try? PKDrawing(data: drawingData) {
+            // Render the drawing at the full canvas size (not just drawing.bounds)
+            // This ensures the annotation appears at the correct size and position
+            let renderRect = CGRect(x: 0, y: 0, width: canvasBounds.width, height: canvasBounds.height)
+            let image = drawing.image(from: renderRect, scale: canvasScale)
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: canvasBounds.width * canvasScale, height: canvasBounds.height * canvasScale)
+                .allowsHitTesting(false)
         }
     }
 }
@@ -210,23 +202,34 @@ private struct CanvasAnnotationMacView: View {
 
 // MARK: - View Model
 
+#if os(iOS)
 @MainActor
 class AnnotationViewModel: ObservableObject {
-    #if os(iOS)
     @Published var canvasView = PKCanvasView()
-    #else
-    @Published var canvasView = PKCanvasViewPlaceholder()
-    #endif
+    
+    private var lastLoadedData: Data?
+    private var isSaving = false
     
     init(studio: Studio) {
         loadDrawing(from: studio)
     }
     
     func loadDrawing(from studio: Studio) {
-        if let drawingData = studio.canvasDrawingData {
+        // Don't reload if we're currently saving (prevents overwriting user's changes)
+        guard !isSaving else { return }
+        
+        let newData = studio.canvasDrawingData
+        
+        // Only reload if the data actually changed
+        guard newData != lastLoadedData else { return }
+        
+        lastLoadedData = newData
+        
+        if let drawingData = newData {
             do {
                 let drawing = try PKDrawing(data: drawingData)
                 canvasView.drawing = drawing
+                print("✅ Loaded drawing from iCloud sync")
             } catch {
                 print("Failed to load drawing: \(error)")
                 canvasView.drawing = PKDrawing()  // Clear on error
@@ -238,12 +241,17 @@ class AnnotationViewModel: ObservableObject {
     }
     
     func saveDrawing(_ drawing: PKDrawing, to studio: Studio) {
+        isSaving = true
+        defer { isSaving = false }
+        
         do {
             let data = drawing.dataRepresentation()
             // Only save if data has changed to avoid unnecessary updates
             if studio.canvasDrawingData != data {
                 studio.canvasDrawingData = data
                 studio.markAsModified()
+                lastLoadedData = data
+                print("💾 Saved drawing to SwiftData")
             }
         } catch {
             print("Failed to save drawing: \(error)")
@@ -256,6 +264,7 @@ class AnnotationViewModel: ObservableObject {
         studio.markAsModified()
     }
 }
+#endif // os(iOS)
 
 // MARK: - Toolbar Button
 
@@ -275,5 +284,3 @@ struct AnnotationModeButton: View {
         .keyboardShortcut("d", modifiers: [.command])
     }
 }
-#endif // canImport(PencilKit)
-

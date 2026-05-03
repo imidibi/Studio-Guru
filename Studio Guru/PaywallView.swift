@@ -1,0 +1,225 @@
+//
+//  PaywallView.swift
+//  Studio Guru
+//
+//  Paywall and upgrade prompts for Pro features
+//
+
+import SwiftUI
+import StoreKit
+
+struct PaywallView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var storeManager: StoreManager
+    @State private var isPurchasing = false
+    @State private var errorMessage: String?
+
+    let reason: PaywallReason
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 32) {
+                    // Header
+                    VStack(spacing: 12) {
+                        Image(systemName: "star.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.yellow)
+
+                        Text("Upgrade to Pro")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+
+                        Text(reason.message)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 24)
+
+                    // Pro Features
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Pro Features")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+
+                        FeatureRow(
+                            icon: "square.stack.3d.up.fill",
+                            title: "Unlimited Studios",
+                            description: "Create as many studios as you need"
+                        )
+
+                        FeatureRow(
+                            icon: "mic.fill",
+                            title: "Unlimited Devices",
+                            description: "Add as many devices as your studio has"
+                        )
+
+                        FeatureRow(
+                            icon: "arrow.up.arrow.down.circle.fill",
+                            title: "Export & Import",
+                            description: "Share studio configurations with others"
+                        )
+
+                        FeatureRow(
+                            icon: "icloud.fill",
+                            title: "iCloud Sync",
+                            description: "Keep your studios in sync across all devices"
+                        )
+                    }
+                    .padding()
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(12)
+
+                    // Purchase button
+                    if let product = storeManager.products.first {
+                        VStack(spacing: 12) {
+                            Button {
+                                Task {
+                                    await purchaseProduct(product)
+                                }
+                            } label: {
+                                HStack {
+                                    if isPurchasing {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Text("Upgrade to Pro - \(product.displayPrice)")
+                                            .fontWeight(.semibold)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.accentColor)
+                                .foregroundStyle(.white)
+                                .cornerRadius(12)
+                            }
+                            .disabled(isPurchasing)
+
+                            Button {
+                                Task {
+                                    await storeManager.restorePurchases()
+                                    if storeManager.isPro {
+                                        dismiss()
+                                    }
+                                }
+                            } label: {
+                                Text("Restore Purchases")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .disabled(isPurchasing)
+                        }
+                    } else if storeManager.isLoading {
+                        ProgressView("Loading...")
+                    } else {
+                        Text("Unable to load product. Please check your internet connection.")
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    // Error message
+                    if let error = errorMessage {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    // Free tier info
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Free Version Includes:")
+                            .font(.headline)
+                        Text("• Up to \(StoreManager.freeDeviceLimit) devices")
+                        Text("• \(StoreManager.freeStudioLimit) studio")
+                        Text("• All basic features")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(Color.secondary.opacity(0.05))
+                    .cornerRadius(8)
+                }
+                .padding(24)
+            }
+            .navigationTitle("Studio Guru Pro")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Not Now") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 500, minHeight: 600)
+        #endif
+    }
+
+    private func purchaseProduct(_ product: Product) async {
+        isPurchasing = true
+        errorMessage = nil
+
+        do {
+            let success = try await storeManager.purchase(product)
+            if success {
+                dismiss()
+            }
+        } catch {
+            errorMessage = "Purchase failed: \(error.localizedDescription)"
+        }
+
+        isPurchasing = false
+    }
+}
+
+struct FeatureRow: View {
+    let icon: String
+    let title: String
+    let description: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+enum PaywallReason {
+    case deviceLimit
+    case studioLimit
+    case exportImport
+    case iCloudSync
+    case general
+
+    var message: String {
+        switch self {
+        case .deviceLimit:
+            return "You've reached the free limit of \(StoreManager.freeDeviceLimit) devices"
+        case .studioLimit:
+            return "You've reached the free limit of \(StoreManager.freeStudioLimit) studio"
+        case .exportImport:
+            return "Export and import features require Pro"
+        case .iCloudSync:
+            return "iCloud sync requires Pro"
+        case .general:
+            return "Unlock unlimited studios and devices"
+        }
+    }
+}
+
+#Preview {
+    PaywallView(reason: .general)
+        .environmentObject(StoreManager())
+}

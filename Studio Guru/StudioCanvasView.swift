@@ -40,8 +40,13 @@ private func ensureURLScheme(_ url: URL) -> URL {
 struct StudioCanvasView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Studio.name, order: .forward) private var studios: [Studio]
+    @EnvironmentObject var storeManager: StoreManager
 
     @State private var selectedStudioId: UUID?
+
+    // Paywall
+    @State private var isShowingPaywall: Bool = false
+    @State private var paywallReason: PaywallReason = .general
 
     // New studio prompt
     @State private var isShowingNewStudioPrompt: Bool = false
@@ -318,6 +323,10 @@ struct StudioCanvasView: View {
         .sheet(isPresented: $isShowingHelp) {
             HelpView()
         }
+        .sheet(isPresented: $isShowingPaywall) {
+            PaywallView(reason: paywallReason)
+                .environmentObject(storeManager)
+        }
         .fileExporter(
             isPresented: $isShowingExportPicker,
             document: exportDocument,
@@ -442,8 +451,14 @@ struct StudioCanvasView: View {
             // Left side: Studio Actions
             ToolbarItem(placement: .navigation) {
                 Button {
-                    newStudioNameDraft = "My Studio"
-                    isShowingNewStudioPrompt = true
+                    // Check studio limit for free tier
+                    if !storeManager.canAddStudio(currentCount: studios.count) {
+                        paywallReason = .studioLimit
+                        isShowingPaywall = true
+                    } else {
+                        newStudioNameDraft = "My Studio"
+                        isShowingNewStudioPrompt = true
+                    }
                 } label: {
                     Label("New Studio", systemImage: "plus")
                 }
@@ -463,11 +478,17 @@ struct StudioCanvasView: View {
                 ToolbarItem(placement: .navigation) {
                     Menu {
                         Button {
-                            isShowingImportPicker = true
+                            // Check if import is allowed for free tier
+                            if !storeManager.canExportImport {
+                                paywallReason = .exportImport
+                                isShowingPaywall = true
+                            } else {
+                                isShowingImportPicker = true
+                            }
                         } label: {
                             Label("Import Studio...", systemImage: "square.and.arrow.down")
                         }
-                        
+
                         Button {
                             exportStudio(studio)
                         } label: {
@@ -498,7 +519,13 @@ struct StudioCanvasView: View {
                 ToolbarItem(placement: .navigation) {
                     Menu {
                         Button {
-                            isShowingImportPicker = true
+                            // Check if import is allowed for free tier
+                            if !storeManager.canExportImport {
+                                paywallReason = .exportImport
+                                isShowingPaywall = true
+                            } else {
+                                isShowingImportPicker = true
+                            }
                         } label: {
                             Label("Import Studio...", systemImage: "square.and.arrow.down")
                         }
@@ -1056,6 +1083,16 @@ struct StudioCanvasView: View {
     // MARK: - Device Actions
 
     private func beginCreateDevice() {
+        // Check device limit for free tier
+        if let studio = currentStudio {
+            let deviceCount = studio.devices?.count ?? 0
+            if !storeManager.canAddDevice(currentCount: deviceCount) {
+                paywallReason = .deviceLimit
+                isShowingPaywall = true
+                return
+            }
+        }
+
         editingDeviceId = nil
         deviceEditorError = nil
 
@@ -1885,6 +1922,13 @@ struct StudioCanvasView: View {
     }
 
     private func duplicateStudio(from source: Studio) {
+        // Check studio limit for free tier
+        if !storeManager.canAddStudio(currentCount: studios.count) {
+            paywallReason = .studioLimit
+            isShowingPaywall = true
+            return
+        }
+
         let copy = Studio(name: "\(source.name) Copy")
         
         // Map old device UUIDs to new devices
@@ -2081,9 +2125,16 @@ struct StudioCanvasView: View {
     }
 
     private func exportStudio(_ studio: Studio) {
+        // Check if export is allowed for free tier
+        if !storeManager.canExportImport {
+            paywallReason = .exportImport
+            isShowingPaywall = true
+            return
+        }
+
         // First, clean up any orphaned connections in ConnectionsStore
         connectionsStore.cleanupOrphanedConnections(studio: studio)
-        
+
         // Then sync connections from ConnectionsStore to SwiftData
         syncConnectionsToSwiftData(studio: studio)
 
@@ -8548,7 +8599,54 @@ private struct HelpView: View {
                     }
                     
                     Divider()
-                    
+
+                    // Free vs Pro
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Free vs Pro")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Studio Guru offers both a free version and a Pro upgrade:")
+                                .font(.body)
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("**Free Version**")
+                                    .font(.headline)
+                                Text("• Up to \(StoreManager.freeDeviceLimit) devices per studio")
+                                    .font(.body)
+                                Text("• \(StoreManager.freeStudioLimit) studio")
+                                    .font(.body)
+                                Text("• Local storage only (no iCloud sync)")
+                                    .font(.body)
+                                Text("• All other core features including annotations")
+                                    .font(.body)
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("**Pro Version**")
+                                    .font(.headline)
+                                Text("• Unlimited devices")
+                                    .font(.body)
+                                Text("• Unlimited studios")
+                                    .font(.body)
+                                Text("• iCloud sync across all devices")
+                                    .font(.body)
+                                Text("• Export and import studios")
+                                    .font(.body)
+                                Text("• Support ongoing development")
+                                    .font(.body)
+                            }
+
+                            Text("Upgrade to Pro anytime from the Settings screen.")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
                     // Additional tips
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Tips")

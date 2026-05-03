@@ -10,6 +10,8 @@ import SwiftData
 
 @main
 struct Studio_GuruApp: App {
+    @StateObject private var storeManager = StoreManager()
+
     var sharedModelContainer: ModelContainer = {
         // SwiftData schema - migration happens automatically when models change
         let schema = Schema([
@@ -24,8 +26,8 @@ struct Studio_GuruApp: App {
             EndpointNameModel.self
         ])
         
-        // Check user preference for iCloud sync
-        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
+        // Check user preference for iCloud sync (default to false for free users)
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
         
         let modelConfiguration = ModelConfiguration(
             schema: schema,
@@ -87,6 +89,7 @@ struct Studio_GuruApp: App {
     var body: some Scene {
         WindowGroup {
             StudioCanvasView()
+                .environmentObject(storeManager)
         }
         .modelContainer(sharedModelContainer)
         .commands {

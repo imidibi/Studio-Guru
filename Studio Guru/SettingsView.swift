@@ -11,9 +11,13 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var storeManager: StoreManager
     @Query private var studios: [Studio]
-    
-    @AppStorage("iCloudSyncEnabled") private var iCloudSyncEnabled = true
+
+    @State private var isShowingPaywall = false
+    @State private var paywallReason: PaywallReason = .general
+    // Default to false for free users - Pro users can enable it
+    @AppStorage("iCloudSyncEnabled") private var iCloudSyncEnabled = false
     @State private var showingSyncReset = false
     @State private var syncResetConfirmed = false
     @State private var showingRestartAlert = false
@@ -123,12 +127,91 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Pro status and upgrade section
+                Section {
+                    if storeManager.isPro {
+                        HStack {
+                            Image(systemName: "star.circle.fill")
+                                .foregroundStyle(.yellow)
+                                .font(.title)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Studio Guru Pro")
+                                    .font(.headline)
+                                Text("Thank you for your support!")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.title2)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "star.circle")
+                                    .foregroundStyle(.yellow)
+                                    .font(.title)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Free Version")
+                                        .font(.headline)
+                                    Text("\(StoreManager.freeDeviceLimit) devices • \(StoreManager.freeStudioLimit) studio")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Button {
+                                isShowingPaywall = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "arrow.up.circle.fill")
+                                    Text("Upgrade to Pro")
+                                        .fontWeight(.semibold)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.accentColor)
+                                .foregroundStyle(.white)
+                                .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Pro Features:")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                Text("• Unlimited studios and devices")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("• iCloud sync across all devices")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("• Export & import studios")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("• Support development")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Account")
+                }
+
                 Section {
                     Toggle(isOn: Binding(
                         get: { iCloudSyncEnabled },
                         set: { newValue in
-                            iCloudSyncEnabled = newValue
-                            showingRestartAlert = true
+                            // Check if user has Pro when trying to enable iCloud sync
+                            if newValue && !storeManager.canUseICloudSync {
+                                paywallReason = .iCloudSync
+                                isShowingPaywall = true
+                            } else {
+                                iCloudSyncEnabled = newValue
+                                showingRestartAlert = true
+                            }
                         }
                     )) {
                         HStack {
@@ -136,6 +219,11 @@ struct SettingsView: View {
                                 .foregroundStyle(iCloudSyncEnabled ? .green : .secondary)
                             Text("iCloud Sync")
                                 .font(.headline)
+                            if !storeManager.isPro {
+                                Image(systemName: "star.fill")
+                                    .foregroundStyle(.yellow)
+                                    .font(.caption)
+                            }
                         }
                     }
                     
@@ -336,7 +424,7 @@ struct SettingsView: View {
                         Text(appVersion)
                     }
                     .font(.caption)
-                    
+
                     HStack {
                         Text("Build")
                             .foregroundStyle(.secondary)
@@ -347,6 +435,49 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 }
+
+                #if DEBUG
+                // Debug section for testing freemium features
+                Section {
+                    Toggle(isOn: $storeManager.debugSimulateFree) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Simulate Free Tier")
+                                .font(.headline)
+                            Text("Test free user experience with all limits")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if storeManager.debugSimulateFree {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("⚠️ Debug Mode Active")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.orange)
+                            Text("App will behave as a free user:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("• Max \(StoreManager.freeDeviceLimit) devices")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("• \(StoreManager.freeStudioLimit) studio only")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("• No iCloud sync")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("• No export/import")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Debug Testing")
+                } footer: {
+                    Text("This section only appears in debug builds. Use it to test the freemium experience without creating a new Apple ID.")
+                }
+                #endif
             }
             #if os(macOS)
             .formStyle(.grouped)
@@ -372,6 +503,10 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Please quit and restart Studio Guru for the sync setting change to take effect.")
+            }
+            .sheet(isPresented: $isShowingPaywall) {
+                PaywallView(reason: paywallReason)
+                    .environmentObject(storeManager)
             }
         }
     }

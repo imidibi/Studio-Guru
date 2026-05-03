@@ -8487,26 +8487,61 @@ private struct HelpView: View {
                             .fontWeight(.semibold)
                         
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("The canvas in Studio Guru Pro is designed to accommodate studios of any size with unlimited devices. A light grey border shows the current canvas bounds.")
+                            Text("The canvas in Studio Guru Pro is designed to accommodate studios of any size with unlimited devices. A light grey border shows the current bounds of the canvas.")
                                 .font(.body)
                             
-                            Text("When you drag a device beyond the canvas edge, the canvas automatically expands to accommodate it when you release the device. This works in all directions:")
+                            Text("The canvas can be expanded by dragging devices to the right or downwards on the canvas. The top and the left borders are fixed points of reference.")
                                 .font(.body)
                             
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text("•")
-                                    Text("Moving devices **right or down** provides the smoothest experience - you'll see the canvas stretch in real-time as you drag")
-                                }
-                                
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text("•")
-                                    Text("Moving devices **left or up** still works perfectly, though devices may temporarily move off-screen during the drag. The canvas will automatically expand and reposition everything when you release the device")
-                                }
-                            }
-                            .font(.body)
+                            Text("The canvas can be displayed as a blank workspace or as a grid. Select the # icon to turn on the grid, define its size and to enable a \"snap to grid\" function to ease lining devices up.")
+                                .font(.body)
                             
-                            Text("This ensures your devices always remain within the canvas bounds while giving you complete freedom to arrange your studio layout.")
+                            Text("There is an \"auto-arrange\" function that will place output devices towards the top of the screen (speakers for example), hub devices (the ones with the most connections such as audio interfaces) in the middle of the canvas, and input devices (such as a synth) at the bottom of the screen. It will also offset devices so they are not parallel to enable visibility of the connection lines.")
+                                .font(.body)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    
+                    Divider()
+                    
+                    // Working with color
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Working with color")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("The device categories (e.g. computer, mixer etc.) all have default colors set in the settings screen (the gearwheel). These can be edited there at a category level. However, any device can also be given an override color when it is set up or edited.")
+                                .font(.body)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    
+                    Divider()
+                    
+                    // Working with annotations
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Working with annotations")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("The app supports drawing with the Apple Pencil or your fingers. Annotations are great for educators who want to illustrate a point to audio students, or for studio engineers who simply want to make notes on a studio design. They are saved with the studio canvas but there is also a delete button that removes all annotations for a canvas.")
+                                .font(.body)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    
+                    Divider()
+                    
+                    // Working with sessions
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Working with sessions")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("A studio is a foundational datapoint but as work is done, the studio will have additional equipment added or different connections made. For example, a live band setup will be very different from an in-the-box synth session. To capture a session, use the \"duplicate studio\" function and name the duplicate for the session. You then have your foundational studio design and your session notes saved for subsequent recall as needed.")
                                 .font(.body)
                         }
                         .foregroundStyle(.secondary)

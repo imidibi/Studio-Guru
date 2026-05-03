@@ -45,8 +45,8 @@ struct PaywallView: View {
 
                         FeatureRow(
                             icon: "square.stack.3d.up.fill",
-                            title: "Unlimited Studios",
-                            description: "Create as many studios as you need"
+                            title: "Unlimited Studios/Sessions",
+                            description: "Create as many studios/sessions as you need"
                         )
 
                         FeatureRow(
@@ -66,6 +66,17 @@ struct PaywallView: View {
                             title: "iCloud Sync",
                             description: "Keep your studios in sync across all devices"
                         )
+                        
+                        Divider()
+                            .padding(.vertical, 8)
+                        
+                        HStack {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            Text("One-time purchase · No subscription")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
                     }
                     .padding()
                     .background(Color.secondary.opacity(0.1))
@@ -113,9 +124,38 @@ struct PaywallView: View {
                     } else if storeManager.isLoading {
                         ProgressView("Loading...")
                     } else {
-                        Text("Unable to load product. Please check your internet connection.")
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                        VStack(spacing: 16) {
+                            Text("Unable to load product from App Store")
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .font(.subheadline)
+
+                            #if DEBUG
+                            VStack(spacing: 8) {
+                                Text("⚠️ Debug Info")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                Text("Product ID: com.ianmiller.studioguru.pro.upgrade")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Make sure this product exists in App Store Connect")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding()
+                            .background(Color.orange.opacity(0.1))
+                            .cornerRadius(8)
+                            #endif
+
+                            Button {
+                                Task {
+                                    await storeManager.loadProducts()
+                                }
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
 
                     // Error message
@@ -145,8 +185,11 @@ struct PaywallView: View {
             .navigationTitle("Studio Guru Pro")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Not Now") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Text("Continue with Free")
+                            .font(.subheadline)
                     }
                 }
             }

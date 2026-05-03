@@ -18,23 +18,74 @@ class StoreManager: ObservableObject {
 
     // Debug mode for testing (only available in DEBUG builds)
     #if DEBUG
-    @Published var debugSimulateFree: Bool = false
+    @Published var debugSimulatePro: Bool = false
+    @Published var debugForceFreeTier: Bool = false
+    @Published private var refreshTrigger: Bool = false
     #endif
 
     // Product ID - this must match what you create in App Store Connect
-    private let proProductID = "com.ianmiller.studioguru.pro"
+    private let proProductID = "com.ianmiller.studioguru.pro.upgrade"
 
     private var updates: Task<Void, Never>? = nil
 
     // Computed property to check if user has Pro
     var isPro: Bool {
         #if DEBUG
-        // In debug mode, allow simulation of free tier
-        if debugSimulateFree {
+        // Reference refreshTrigger to make SwiftUI re-evaluate when it changes
+        _ = refreshTrigger
+        
+        // Force free tier overrides everything in debug mode
+        if debugForceFreeTier {
             return false
         }
+        
+        // In debug mode, allow simulation of Pro tier
+        if debugSimulatePro {
+            return true
+        }
         #endif
+        
+        // Honor original app purchase - anyone who bought v1.21 or earlier gets Pro for free
+        if didPurchaseOriginalApp {
+            return true
+        }
+        
         return purchasedProductIDs.contains(proProductID)
+    }
+    
+    // Check if user purchased the app before it went freemium
+    private var didPurchaseOriginalApp: Bool {
+        // Use AppStorage to remember if we've already granted Pro to an original purchaser
+        // This ensures we don't repeatedly check and honors original customers
+        let hasCheckedKey = "hasGrantedOriginalPurchaserPro"
+        
+        if UserDefaults.standard.bool(forKey: hasCheckedKey) {
+            // Already granted Pro status to this user
+            return true
+        }
+        
+        // For backwards compatibility during transition:
+        // Check if user has the app installed from before freemium launch
+        // We'll use a version check - if they're upgrading from v1.21 or earlier, grant Pro
+        let lastVersionKey = "lastKnownVersion"
+        let lastVersion = UserDefaults.standard.string(forKey: lastVersionKey)
+        
+        // If this is their first launch of v1.22+ and they had a previous version, grant Pro
+        if let previous = lastVersion, !previous.isEmpty {
+            // They upgraded from an earlier version - mark as original purchaser
+            UserDefaults.standard.set(true, forKey: hasCheckedKey)
+            print("✅ Granting Pro status to original app purchaser (upgraded from v\(previous))")
+            return true
+        }
+        
+        // Store current version for future checks (only if no previous version was detected)
+        // This prevents us from granting Pro status on fresh installs
+        if lastVersion == nil {
+            let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
+            UserDefaults.standard.set(currentVersion, forKey: lastVersionKey)
+        }
+        
+        return false
     }
 
     init() {
@@ -49,6 +100,14 @@ class StoreManager: ObservableObject {
     deinit {
         updates?.cancel()
     }
+    
+    #if DEBUG
+    // Debug method to force refresh of Pro status after changing UserDefaults
+    func refreshProStatus() {
+        // Toggle a published property to force SwiftUI to re-evaluate isPro
+        refreshTrigger.toggle()
+    }
+    #endif
 
     // Load available products from the App Store
     func loadProducts() async {

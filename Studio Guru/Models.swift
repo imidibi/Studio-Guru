@@ -124,6 +124,10 @@ final class Studio {
     
     // Canvas annotations (PencilKit drawing data)
     @Attribute(.externalStorage) var canvasDrawingData: Data?
+    
+    // Gear Locker system studio support
+    var isSystemStudio: Bool = false
+    var systemStudioType: String? = nil  // "gear_locker" for the Gear Locker
 
     @Relationship(deleteRule: .cascade, inverse: \DeviceInstance.studio) var devices: [DeviceInstance]? = []
     @Relationship(deleteRule: .cascade, inverse: \Connection.studio) var connections: [Connection]? = []
@@ -202,6 +206,13 @@ final class DeviceInstance {
     
     // Modification tracking for iCloud sync
     var modifiedAt: Date = Date()
+    
+    // Gear Locker support
+    var isInGearLocker: Bool = false              // Device lives in Gear Locker
+    var isAssignedFromLocker: Bool = false        // Device was assigned from locker to a studio
+    var lockerSourceDeviceId: UUID? = nil         // Reference to original locker device
+    var isGhostDevice: Bool = false               // Documentation placeholder (returned to locker)
+    var ghostOfDeviceId: UUID? = nil              // Reference to the locker device this is a ghost of
 
     @Relationship(deleteRule: .cascade, inverse: \Port.device) var ports: [Port]? = []
     @Relationship(deleteRule: .cascade, inverse: \DocLink.device) var docs: [DocLink]? = []

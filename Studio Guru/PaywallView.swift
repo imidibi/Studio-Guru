@@ -67,6 +67,12 @@ struct PaywallView: View {
                             description: "Keep your studios in sync across all devices"
                         )
                         
+                        FeatureRow(
+                            icon: "archivebox.fill",
+                            title: "Gear Locker",
+                            description: "Track equipment inventory and assign gear to studios"
+                        )
+                        
                         Divider()
                             .padding(.vertical, 8)
                         
@@ -244,6 +250,7 @@ enum PaywallReason {
     case studioLimit
     case exportImport
     case iCloudSync
+    case gearLocker
     case general
 
     var message: String {
@@ -256,6 +263,8 @@ enum PaywallReason {
             return "Export and import features require Pro"
         case .iCloudSync:
             return "iCloud sync requires Pro"
+        case .gearLocker:
+            return "Gear Locker requires Pro"
         case .general:
             return "Unlock unlimited studios and devices"
         }

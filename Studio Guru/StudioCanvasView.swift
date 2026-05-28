@@ -37,6 +37,12 @@ private func ensureURLScheme(_ url: URL) -> URL {
     return url
 }
 
+// Device location enum for Gear Locker
+enum DeviceLocation {
+    case currentStudio
+    case gearLocker
+}
+
 struct StudioCanvasView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Studio.name, order: .forward) private var studios: [Studio]
@@ -136,6 +142,9 @@ struct StudioCanvasView: View {
     // Draft manual for device editor
     @State private var draftManualURL: URL? = nil
     @State private var isSelectingManualForDraft: Bool = false
+    
+    // Draft device location for Gear Locker
+    @State private var draftDeviceLocation: DeviceLocation = .currentStudio
     
     // Auto-arrange undo
     @State private var savedDevicePositions: [UUID: (x: Double, y: Double)] = [:]
@@ -349,6 +358,11 @@ struct StudioCanvasView: View {
             // Set up model context for ConnectionsStore (enables iCloud sync)
             connectionsStore.setModelContext(modelContext)
             
+            // Initialize Gear Locker for Pro users
+            if storeManager.isPro {
+                StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)
+            }
+            
             #if DEBUG
             // print("📱 StudioCanvasView appeared - Studios count: \(studios.count)")
             // if !studios.isEmpty {
@@ -442,7 +456,13 @@ struct StudioCanvasView: View {
     private var detail: some View {
         Group {
             if let studio = currentStudio {
-                studioDetailView(studio)
+                if studio.isSystemStudio && studio.systemStudioType == "gear_locker" {
+                    // Show Gear Locker inventory view
+                    gearLockerDetailView(studio)
+                } else {
+                    // Show regular studio canvas view
+                    studioDetailView(studio)
+                }
             } else {
                 noStudioSelectedView
             }
@@ -764,6 +784,69 @@ struct StudioCanvasView: View {
                 Text("This will remove the selected connection.")
             }
     }
+    
+    @ViewBuilder
+    private func gearLockerDetailView(_ studio: Studio) -> some View {
+        GearLockerInventoryView(
+            studio: studio,
+            selectedDeviceId: Binding(
+                get: {
+                    if case .device(let id) = selectionState.selection {
+                        return id
+                    }
+                    return nil
+                },
+                set: { newId in
+                    if let newId = newId {
+                        selectionState.selection = .device(newId)
+                    } else {
+                        selectionState.selection = nil
+                    }
+                }
+            ),
+            onAssignDevice: { device in
+                // TODO: Implement assignment flow
+                print("Assign device: \(device.nickname)")
+            },
+            onEditDevice: { device in
+                beginEditDevice(device)
+            },
+            onDeleteDevice: { device in
+                deviceIdPendingDelete = device.id
+                isShowingDeleteDeviceConfirm = true
+            }
+        )
+        .sheet(isPresented: $isShowingDeviceEditor) {
+            deviceEditorSheetContent
+        }
+        .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
+            Button("Delete", role: .destructive) { deletePendingDevice() }
+            Button("Cancel", role: .cancel) { deviceIdPendingDelete = nil }
+        } message: {
+            Text("This will permanently delete the device from the Gear Locker.")
+        }
+        // Device Inspector Overlay Sheet
+        .sheet(
+            item: Binding<IdentifiableUUID?>(
+                get: {
+                    if case .device(let id) = selectionState.selection {
+                        return IdentifiableUUID(id: id)
+                    }
+                    return nil
+                },
+                set: { newValue in
+                    if let newValue = newValue {
+                        selectionState.selection = .device(newValue.id)
+                    } else {
+                        selectionState.selection = nil
+                    }
+                }
+            )
+        ) { item in
+            inspectorSheetContent(item: item)
+                .presentationDetents([.large, .medium], selection: $inspectorDetent)
+        }
+    }
 
     private func studioDetailBase(for studio: Studio) -> some View {
         ZStack {
@@ -1071,6 +1154,8 @@ struct StudioCanvasView: View {
                 errorMessage: $deviceEditorError,
                 manualURL: $draftManualURL,
                 isSelectingManual: $isSelectingManualForDraft,
+                deviceLocation: $draftDeviceLocation,
+                canAccessGearLocker: storeManager.canAccessGearLocker,
                 onCancel: { isShowingDeviceEditor = false },
                 onSave: { saveDeviceEdits(into: studio) }
             )
@@ -1174,6 +1259,17 @@ struct StudioCanvasView: View {
     }
     @MainActor
     private func saveDeviceEdits(into studio: Studio) {
+        // Determine target studio based on location picker
+        let targetStudio: Studio
+        if draftDeviceLocation == .gearLocker {
+            // Find Gear Locker
+            targetStudio = studios.first {
+                $0.isSystemStudio && $0.systemStudioType == "gear_locker"
+            } ?? studio
+        } else {
+            targetStudio = studio
+        }
+        
         let nickname = draftNickname.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
@@ -1201,9 +1297,9 @@ struct StudioCanvasView: View {
             return
         }
 
-        // Warn if another device in this studio already uses the same serial number
+        // Warn if another device in target studio already uses the same serial number
         if !serialNumber.isEmpty {
-            let duplicate = studio.devices?.first { other in
+            let duplicate = targetStudio.devices?.first { other in
                 other.serialNumber.trimmingCharacters(
                     in: .whitespacesAndNewlines
                 )
@@ -1213,19 +1309,19 @@ struct StudioCanvasView: View {
 
             if duplicate != nil {
                 deviceEditorError =
-                    "Another device in this studio already uses this serial number."
+                    "Another device in this location already uses this serial number."
                 return
             }
         }
 
         let device: DeviceInstance
         if let id = editingDeviceId,
-            let existing = studio.devices?.first(where: { $0.id == id })
+            let existing = targetStudio.devices?.first(where: { $0.id == id })
         {
             device = existing
         } else {
             let pos = findAvailableDevicePosition(
-                in: studio,
+                in: targetStudio,
                 canvas: canvasSize
             )
             device = DeviceInstance(
@@ -1253,10 +1349,18 @@ struct StudioCanvasView: View {
                 scale: 1.0,
                 zIndex: 0
             )
-            if studio.devices == nil {
-                studio.devices = []
+            
+            // Set Gear Locker flags
+            if targetStudio.isSystemStudio && targetStudio.systemStudioType == "gear_locker" {
+                device.isInGearLocker = true
+                device.isAssignedFromLocker = false
+                device.lockerSourceDeviceId = nil
             }
-            studio.devices?.append(device)
+            
+            if targetStudio.devices == nil {
+                targetStudio.devices = []
+            }
+            targetStudio.devices?.append(device)
         }
 
         device.nickname = nickname
@@ -1320,9 +1424,14 @@ struct StudioCanvasView: View {
             }
         }
 
-        // Mark device and studio as modified for iCloud sync
+        // Mark device and target studio as modified for iCloud sync
         device.markAsModified()
-        studio.markAsModified()
+        targetStudio.markAsModified()
+        
+        // If we added to Gear Locker, switch to it
+        if targetStudio.id != studio.id {
+            selectedStudioId = targetStudio.id
+        }
         
         // Keep selection for highlighting, but do not pop the inspector immediately after saving.
         suppressNextInspectorPresentation = true
@@ -3891,8 +4000,23 @@ private struct StudiosList: View {
 
     var body: some View {
         List(selection: $selectedStudioId) {
+            // System section - shows Gear Locker
+            if !systemStudios.isEmpty {
+                Section("System") {
+                    ForEach(systemStudios, id: \.id) { studio in
+                        HStack {
+                            Image(systemName: "archivebox.fill")
+                                .foregroundColor(.accentColor)
+                            Text(studio.name)
+                                .fontWeight(.medium)
+                        }
+                        .tag(studio.id)
+                    }
+                }
+            }
+            
             Section("Studios/Sessions") {
-                ForEach(studios, id: \.id) { studio in
+                ForEach(userStudios, id: \.id) { studio in
                     Text(studio.name)
                         .tag(studio.id)
                         .contextMenu {
@@ -3959,13 +4083,23 @@ private struct StudiosList: View {
                 }
                 .onDelete { indexSet in
                     if let first = indexSet.first,
-                        studios.indices.contains(first)
+                        userStudios.indices.contains(first)
                     {
-                        onRequestDelete(studios[first])
+                        onRequestDelete(userStudios[first])
                     }
                 }
             }
         }
+    }
+    
+    // Filter system studios (Gear Locker)
+    private var systemStudios: [Studio] {
+        studios.filter { $0.isSystemStudio }
+    }
+    
+    // Filter user studios (regular studios)
+    private var userStudios: [Studio] {
+        studios.filter { !$0.isSystemStudio }
     }
 }
 
@@ -5936,6 +6070,9 @@ private struct DeviceEditorSheet: View {
     
     @Binding var manualURL: URL?
     @Binding var isSelectingManual: Bool
+    
+    @Binding var deviceLocation: DeviceLocation
+    var canAccessGearLocker: Bool
 
     let onCancel: () -> Void
     let onSave: () -> Void
@@ -5980,6 +6117,16 @@ private struct DeviceEditorSheet: View {
             #if os(macOS)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        
+                        if canAccessGearLocker {
+                            GroupBox("Location") {
+                                Picker("Store Device In", selection: $deviceLocation) {
+                                    Text("Current Studio").tag(DeviceLocation.currentStudio)
+                                    Text("Gear Locker").tag(DeviceLocation.gearLocker)
+                                }
+                                .pickerStyle(.segmented)
+                            }
+                        }
 
                         GroupBox("Basics") {
                             Grid(
@@ -6349,6 +6496,16 @@ private struct DeviceEditorSheet: View {
                 }
             #else
                 Form {
+                    if canAccessGearLocker {
+                        Section("Location") {
+                            Picker("Store Device In", selection: $deviceLocation) {
+                                Text("Current Studio").tag(DeviceLocation.currentStudio)
+                                Text("Gear Locker").tag(DeviceLocation.gearLocker)
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+                    
                     Section("Basics") {
                         TextField("Nickname", text: $nickname)
                         TextField("Manufacturer", text: $manufacturer)

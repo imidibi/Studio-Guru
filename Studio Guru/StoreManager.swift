@@ -250,4 +250,9 @@ extension StoreManager {
     var canUseICloudSync: Bool {
         isPro
     }
+    
+    // Check if user can access Gear Locker
+    var canAccessGearLocker: Bool {
+        isPro
+    }
 }

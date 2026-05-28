@@ -32,4 +32,25 @@ enum StudioSeed {
         studio.devices?.append(contentsOf: [ssl, kong])
         modelContext.insert(studio)
     }
+    
+    static func ensureGearLockerExists(modelContext: ModelContext, studios: [Studio]) {
+        // Check if Gear Locker already exists
+        let existingLocker = studios.first {
+            $0.isSystemStudio && $0.systemStudioType == "gear_locker"
+        }
+        
+        if existingLocker == nil {
+            let locker = Studio(name: "Gear Locker")
+            locker.isSystemStudio = true
+            locker.systemStudioType = "gear_locker"
+            locker.layoutMode = "list"  // Custom layout mode for inventory view
+            modelContext.insert(locker)
+            
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to create Gear Locker: \(error)")
+            }
+        }
+    }
 }   

@@ -17,7 +17,7 @@ struct AssignGearSheet: View {
     
     @State private var selectedStudioId: UUID?
     
-    struct DeviceInfo {
+    struct DeviceInfo: Identifiable {
         let id: UUID
         let nickname: String
     }
@@ -28,12 +28,21 @@ struct AssignGearSheet: View {
         let deviceCount: Int
     }
     
+    // Wrapper struct to pass both device info and studio options through the sheet binding
+    struct AssignmentData: Identifiable {
+        let id = UUID()
+        let deviceInfo: DeviceInfo
+        let studioOptions: [StudioOption]
+    }
+    
     var body: some View {
         #if os(macOS)
         macOSContent
         #else
         NavigationStack {
             contentView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
                 .navigationTitle("Assign Device")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -42,7 +51,7 @@ struct AssignGearSheet: View {
                             dismiss()
                         }
                     }
-                    
+
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Next") {
                             if let studioId = selectedStudioId {
@@ -96,7 +105,6 @@ struct AssignGearSheet: View {
         VStack(spacing: 20) {
             headerView
             studioListView
-            Spacer()
         }
         .onAppear {
             // Pre-select first studio if available

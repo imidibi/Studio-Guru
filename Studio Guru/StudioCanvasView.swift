@@ -147,8 +147,8 @@ struct StudioCanvasView: View {
     @State private var draftDeviceLocation: DeviceLocation = .currentStudio
     
     // Gear Locker assignment workflow
-    @State private var isShowingAssignGearSheet: Bool = false
     @State private var deviceToAssign: DeviceInstance? = nil
+    @State private var assignmentData: AssignGearSheet.AssignmentData? = nil
     @State private var isPlacingDeviceFromLocker: Bool = false
     @State private var deviceToPlace: DeviceInstance? = nil
     
@@ -842,35 +842,20 @@ struct StudioCanvasView: View {
         }) {
             deviceEditorSheetContent
         }
-        .sheet(isPresented: $isShowingAssignGearSheet) {
-            if let device = deviceToAssign {
-                // Create lightweight data structures to avoid SwiftData materialization delays on macOS
-                let deviceInfo = AssignGearSheet.DeviceInfo(
-                    id: device.id,
-                    nickname: device.nickname
-                )
-                
-                let studioOptions = studios
-                    .filter { !$0.isSystemStudio }
-                    .map { studio in
-                        AssignGearSheet.StudioOption(
-                            id: studio.id,
-                            name: studio.name,
-                            deviceCount: studio.devices?.count ?? 0
-                        )
+        .sheet(item: $assignmentData) { data in
+            AssignGearSheet(
+                deviceInfo: data.deviceInfo,
+                studioOptions: data.studioOptions,
+                onAssign: { targetStudioId in
+                    // Look up the actual studio and device objects only when assigning
+                    if let device = deviceToAssign,
+                       let targetStudio = studios.first(where: { $0.id == targetStudioId }) {
+                        assignDeviceToStudio(device, targetStudio: targetStudio)
                     }
-                
-                AssignGearSheet(
-                    deviceInfo: deviceInfo,
-                    studioOptions: studioOptions,
-                    onAssign: { targetStudioId in
-                        // Look up the actual studio object
-                        if let targetStudio = studios.first(where: { $0.id == targetStudioId }) {
-                            assignDeviceToStudio(device, targetStudio: targetStudio)
-                        }
-                    }
-                )
-            }
+                    // Clear the item to dismiss
+                    assignmentData = nil
+                }
+            )
         }
         .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
             Button("Delete", role: .destructive) { deletePendingDevice() }
@@ -1318,8 +1303,30 @@ struct StudioCanvasView: View {
     // MARK: - Gear Locker Assignment
     
     private func beginAssignDeviceToStudio(_ device: DeviceInstance) {
+        // Store device reference
         deviceToAssign = device
-        isShowingAssignGearSheet = true
+        
+        // Get available studios (exclude Gear Locker and other system studios)
+        let availableStudios = studios.filter { !$0.isSystemStudio }
+        
+        // Create lightweight studio options (read minimal data to avoid SwiftData materialization delays)
+        let studioOptions = availableStudios.map { studio in
+            AssignGearSheet.StudioOption(
+                id: studio.id,
+                name: studio.name,
+                deviceCount: studio.devices?.count ?? 0
+            )
+        }
+        
+        // Create assignment data with both device info and studio options
+        // Setting this triggers the sheet via .sheet(item:)
+        assignmentData = AssignGearSheet.AssignmentData(
+            deviceInfo: AssignGearSheet.DeviceInfo(
+                id: device.id,
+                nickname: device.nickname
+            ),
+            studioOptions: studioOptions
+        )
     }
     
     private func assignDeviceToStudio(_ device: DeviceInstance, targetStudio: Studio) {
@@ -1673,6 +1680,32 @@ struct StudioCanvasView: View {
         from source: Studio,
         to destination: Studio
     ) {
+        // Special handling: If moving a Gear Locker-assigned device back to Gear Locker, just delete it
+        // The original locker device will automatically become available again
+        if destination.isSystemStudio && destination.systemStudioType == "gear_locker" && device.isAssignedFromLocker {
+            // Remove from source studio
+            if let idx = source.devices?.firstIndex(where: { $0.id == device.id }) {
+                source.devices?.remove(at: idx)
+                
+                // Remove any connections
+                let sourceLinks = connectionsStore.links(for: source.id)
+                for link in sourceLinks where (link.fromDeviceId == device.id || link.toDeviceId == device.id) {
+                    _ = connectionsStore.deleteBundle(studioId: source.id, linkId: link.id)
+                }
+                
+                // Delete the device (it was a copy from the locker)
+                modelContext.delete(device)
+                
+                source.markAsModified()
+                try? modelContext.save()
+                
+                // Switch to Gear Locker to show it's available again
+                selectedStudioId = destination.id
+                selectionState.selection = nil
+            }
+            return
+        }
+        
         // Remove from source studio
         if let idx = source.devices?.firstIndex(where: { $0.id == device.id }) {
             // Dismiss any presented inspector overlay during move

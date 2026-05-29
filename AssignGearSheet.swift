@@ -11,11 +11,16 @@ import SwiftData
 struct AssignGearSheet: View {
     @Environment(\.dismiss) private var dismiss
     
-    let device: DeviceInstance
+    let deviceInfo: DeviceInfo
     let studioOptions: [StudioOption]
     let onAssign: (UUID) -> Void
     
     @State private var selectedStudioId: UUID?
+    
+    struct DeviceInfo {
+        let id: UUID
+        let nickname: String
+    }
     
     struct StudioOption: Identifiable {
         let id: UUID
@@ -109,7 +114,7 @@ struct AssignGearSheet: View {
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text("Assign \"\(device.nickname)\" to a studio")
+            Text("Assign \"\(deviceInfo.nickname)\" to a studio")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

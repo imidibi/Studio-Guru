@@ -1592,14 +1592,14 @@ struct StudioCanvasView: View {
         device.markAsModified()
         targetStudio.markAsModified()
         
-        // If we added to Gear Locker, switch to it
-        if targetStudio.id != studio.id {
-            selectedStudioId = targetStudio.id
+        // Only set selection if device was saved to current studio AND it's not a system studio
+        // System studios (like Gear Locker) use list views and don't need canvas selection
+        if targetStudio.id == studio.id && !targetStudio.isSystemStudio {
+            // Keep selection for highlighting, but do not pop the inspector immediately after saving.
+            suppressNextInspectorPresentation = true
+            selectionState.selection = .device(device.id)
         }
         
-        // Keep selection for highlighting, but do not pop the inspector immediately after saving.
-        suppressNextInspectorPresentation = true
-        selectionState.selection = .device(device.id)
         isShowingDeviceEditor = false
     }
 

@@ -1370,6 +1370,21 @@ struct StudioCanvasView: View {
         newDevice.frontImagePath = sourceDevice.frontImagePath
         newDevice.rearImagePath = sourceDevice.rearImagePath
         
+        // Copy ports and channels
+        newDevice.ports = sourceDevice.ports?.map { p in
+            let np = Port(name: p.name, type: p.type, direction: p.direction)
+            np.channels = p.channels?.map { ch in
+                Channel(
+                    index: ch.index,
+                    nameLong: ch.nameLong,
+                    nameShort: ch.nameShort,
+                    signal: ch.signal,
+                    grouping: ch.grouping
+                )
+            } ?? []
+            return np
+        }
+        
         // Add to target studio
         if targetStudio.devices == nil {
             targetStudio.devices = []

@@ -127,15 +127,20 @@ struct GearLockerDeviceRow: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     
+    private var deviceColor: Color {
+        let categoryColors = CategoryColorSettings.loadCategoryColors()
+        return device.resolvedColor(categoryColors: categoryColors)
+    }
+    
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Device icon
                 Image(systemName: deviceIcon(for: device.category))
                     .font(.title2)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(deviceColor)
                     .frame(width: 40, height: 40)
-                    .background(Color.accentColor.opacity(0.1))
+                    .background(deviceColor.opacity(0.1))
                     .cornerRadius(8)
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -143,7 +148,7 @@ struct GearLockerDeviceRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\\(device.manufacturer) \\(device.model)")
+                    Text("\(device.manufacturer) \(device.model)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
@@ -151,7 +156,7 @@ struct GearLockerDeviceRow: View {
                         HStack(spacing: 4) {
                             Image(systemName: "location.fill")
                                 .font(.caption2)
-                            Text("In use: \\(studioName)")
+                            Text("In use: \(studioName)")
                                 .font(.caption2)
                         }
                         .foregroundColor(.orange)

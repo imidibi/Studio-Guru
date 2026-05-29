@@ -146,6 +146,12 @@ struct StudioCanvasView: View {
     // Draft device location for Gear Locker
     @State private var draftDeviceLocation: DeviceLocation = .currentStudio
     
+    // Gear Locker assignment workflow
+    @State private var isShowingAssignGearSheet: Bool = false
+    @State private var deviceToAssign: DeviceInstance? = nil
+    @State private var isPlacingDeviceFromLocker: Bool = false
+    @State private var deviceToPlace: DeviceInstance? = nil
+    
     // Auto-arrange undo
     @State private var savedDevicePositions: [UUID: (x: Double, y: Double)] = [:]
     @State private var canUndoAutoArrange: Bool = false
@@ -467,173 +473,188 @@ struct StudioCanvasView: View {
                 noStudioSelectedView
             }
         }
+        .navigationTitle(currentStudio?.isSystemStudio == true && currentStudio?.systemStudioType == "gear_locker" ? "Studio Guru - Gear Locker" : "Studio Guru")
         .toolbar {
-            // Left side: Studio Actions
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    // Check studio limit for free tier
-                    if !storeManager.canAddStudio(currentCount: studios.count) {
-                        paywallReason = .studioLimit
-                        isShowingPaywall = true
-                    } else {
-                        newStudioNameDraft = "My Studio"
-                        isShowingNewStudioPrompt = true
-                    }
-                } label: {
-                    Label("New Studio", systemImage: "plus")
-                }
-                .help("Create a new studio")
-            }
-            
-            if let studio = currentStudio {
+            // Conditional toolbar based on whether viewing Gear Locker or regular studio
+            if let studio = currentStudio, studio.isSystemStudio && studio.systemStudioType == "gear_locker" {
+                // GEAR LOCKER TOOLBAR
                 ToolbarItem(placement: .navigation) {
                     Button {
-                        duplicateStudio(from: studio)
+                        beginCreateDevice()
                     } label: {
-                        Label("Duplicate", systemImage: "plus.square.on.square")
+                        Label("Add Device", systemImage: "plus")
                     }
-                    .help("Duplicate this studio")
-                }
-                
-                ToolbarItem(placement: .navigation) {
-                    Menu {
-                        Button {
-                            // Check if import is allowed for free tier
-                            if !storeManager.canExportImport {
-                                paywallReason = .exportImport
-                                isShowingPaywall = true
-                            } else {
-                                isShowingImportPicker = true
-                            }
-                        } label: {
-                            Label("Import Studio...", systemImage: "square.and.arrow.down")
-                        }
-
-                        Button {
-                            exportStudio(studio)
-                        } label: {
-                            Label("Export Studio...", systemImage: "square.and.arrow.up")
-                        }
-                        
-                        Button {
-                            exportCanvasAsPDF(studio: studio)
-                        } label: {
-                            Label("Export Canvas as PDF...", systemImage: "arrow.down.doc")
-                        }
-                        
-                        Divider()
-                        
-                        Button(role: .destructive) {
-                            studioIdPendingDelete = studio.id
-                            isShowingDeleteStudioConfirm = true
-                        } label: {
-                            Label("Delete Studio...", systemImage: "trash")
-                        }
-                    } label: {
-                        Label("Files", systemImage: "folder")
-                    }
-                    .help("Import, export, and manage studio files")
+                    .help("Add a new device to Gear Locker")
                 }
             } else {
-                // Show import option even without a studio
-                ToolbarItem(placement: .navigation) {
-                    Menu {
-                        Button {
-                            // Check if import is allowed for free tier
-                            if !storeManager.canExportImport {
-                                paywallReason = .exportImport
-                                isShowingPaywall = true
-                            } else {
-                                isShowingImportPicker = true
-                            }
-                        } label: {
-                            Label("Import Studio...", systemImage: "square.and.arrow.down")
-                        }
-                    } label: {
-                        Label("Files", systemImage: "folder")
-                    }
-                    .help("Import a studio file")
-                }
-            }
-            
-            if let studio = currentStudio {
-
+                // REGULAR STUDIO TOOLBAR
+                // Left side: Studio Actions
                 ToolbarItem(placement: .navigation) {
                     Button {
-                        autoArrangeWithHubDetection(in: studio)
+                        // Check studio limit for free tier
+                        if !storeManager.canAddStudio(currentCount: studios.count) {
+                            paywallReason = .studioLimit
+                            isShowingPaywall = true
+                        } else {
+                            newStudioNameDraft = "My Studio"
+                            isShowingNewStudioPrompt = true
+                        }
                     } label: {
-                        Label("Auto-Arrange", systemImage: "square.grid.3x2")
+                        Label("New Studio", systemImage: "plus")
                     }
-                    .help("Automatically arrange devices using hub detection")
+                    .help("Create a new studio")
                 }
                 
-                ToolbarItem(placement: .navigation) {
-                    Menu {
-                        Toggle(isOn: Binding(
-                            get: { studio.showGridOverlay },
-                            set: { newValue in
-                                studio.showGridOverlay = newValue
-                                studio.markAsModified()
-                            }
-                        )) {
-                            Label("Show Grid", systemImage: "squareshape.split.3x3")
+                if let studio = currentStudio {
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            duplicateStudio(from: studio)
+                        } label: {
+                            Label("Duplicate", systemImage: "plus.square.on.square")
                         }
-                        
-                        Toggle(isOn: Binding(
-                            get: { studio.layoutMode == "snapToGrid" },
-                            set: { newValue in
-                                studio.layoutMode = newValue ? "snapToGrid" : "freeform"
-                                studio.markAsModified()
+                        .help("Duplicate this studio")
+                    }
+                    
+                    ToolbarItem(placement: .navigation) {
+                        Menu {
+                            Button {
+                                // Check if import is allowed for free tier
+                                if !storeManager.canExportImport {
+                                    paywallReason = .exportImport
+                                    isShowingPaywall = true
+                                } else {
+                                    isShowingImportPicker = true
+                                }
+                            } label: {
+                                Label("Import Studio...", systemImage: "square.and.arrow.down")
                             }
-                        )) {
-                            Label("Snap to Grid", systemImage: "square.grid.3x3")
+
+                            Button {
+                                exportStudio(studio)
+                            } label: {
+                                Label("Export Studio...", systemImage: "square.and.arrow.up")
+                            }
+                            
+                            Button {
+                                exportCanvasAsPDF(studio: studio)
+                            } label: {
+                                Label("Export Canvas as PDF...", systemImage: "arrow.down.doc")
+                            }
+                            
+                            Divider()
+                            
+                            Button(role: .destructive) {
+                                studioIdPendingDelete = studio.id
+                                isShowingDeleteStudioConfirm = true
+                            } label: {
+                                Label("Delete Studio...", systemImage: "trash")
+                            }
+                        } label: {
+                            Label("Files", systemImage: "folder")
                         }
-                        
-                        Divider()
-                        
-                        Menu("Grid Size") {
-                            ForEach([16.0, 24.0, 32.0, 48.0], id: \.self) { size in
-                                Button {
-                                    studio.gridSize = size
+                        .help("Import, export, and manage studio files")
+                    }
+                } else {
+                    // Show import option even without a studio
+                    ToolbarItem(placement: .navigation) {
+                        Menu {
+                            Button {
+                                // Check if import is allowed for free tier
+                                if !storeManager.canExportImport {
+                                    paywallReason = .exportImport
+                                    isShowingPaywall = true
+                                } else {
+                                    isShowingImportPicker = true
+                                }
+                            } label: {
+                                Label("Import Studio...", systemImage: "square.and.arrow.down")
+                            }
+                        } label: {
+                            Label("Files", systemImage: "folder")
+                        }
+                        .help("Import a studio file")
+                    }
+                }
+                
+                if let studio = currentStudio {
+
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            autoArrangeWithHubDetection(in: studio)
+                        } label: {
+                            Label("Auto-Arrange", systemImage: "square.grid.3x2")
+                        }
+                        .help("Automatically arrange devices using hub detection")
+                    }
+                    
+                    ToolbarItem(placement: .navigation) {
+                        Menu {
+                            Toggle(isOn: Binding(
+                                get: { studio.showGridOverlay },
+                                set: { newValue in
+                                    studio.showGridOverlay = newValue
                                     studio.markAsModified()
-                                } label: {
-                                    HStack {
-                                        Text("\(Int(size))px")
-                                        if studio.gridSize == size {
-                                            Image(systemName: "checkmark")
+                                }
+                            )) {
+                                Label("Show Grid", systemImage: "squareshape.split.3x3")
+                            }
+                            
+                            Toggle(isOn: Binding(
+                                get: { studio.layoutMode == "snapToGrid" },
+                                set: { newValue in
+                                    studio.layoutMode = newValue ? "snapToGrid" : "freeform"
+                                    studio.markAsModified()
+                                }
+                            )) {
+                                Label("Snap to Grid", systemImage: "square.grid.3x3")
+                            }
+                            
+                            Divider()
+                            
+                            Menu("Grid Size") {
+                                ForEach([16.0, 24.0, 32.0, 48.0], id: \.self) { size in
+                                    Button {
+                                        studio.gridSize = size
+                                        studio.markAsModified()
+                                    } label: {
+                                        HStack {
+                                            Text("\(Int(size))px")
+                                            if studio.gridSize == size {
+                                                Image(systemName: "checkmark")
+                                            }
                                         }
                                     }
                                 }
                             }
+                        } label: {
+                            Label("Grid", systemImage: "grid")
                         }
-                    } label: {
-                        Label("Grid", systemImage: "grid")
+                        .help("Grid and layout settings")
                     }
-                    .help("Grid and layout settings")
-                }
-                
-                #if os(iOS)
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        isDrawingMode.toggle()
-                    } label: {
-                        Label(
-                            isDrawingMode ? "Done Drawing" : "Annotate",
-                            systemImage: isDrawingMode ? "checkmark.circle.fill" : "pencil.tip.crop.circle"
-                        )
+                    
+                    #if os(iOS)
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            isDrawingMode.toggle()
+                        } label: {
+                            Label(
+                                isDrawingMode ? "Done Drawing" : "Annotate",
+                                systemImage: isDrawingMode ? "checkmark.circle.fill" : "pencil.tip.crop.circle"
+                            )
+                        }
+                        .help(isDrawingMode ? "Exit annotation mode" : "Draw annotations on canvas")
+                        .keyboardShortcut("d", modifiers: [.command])
                     }
-                    .help(isDrawingMode ? "Exit annotation mode" : "Draw annotations on canvas")
-                    .keyboardShortcut("d", modifiers: [.command])
-                }
-                #endif
-                
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        isShowingMatrixView.toggle()
-                    } label: {
-                        Label("Connection Matrix", systemImage: "tablecells")
+                    #endif
+                    
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            isShowingMatrixView.toggle()
+                        } label: {
+                            Label("Connection Matrix", systemImage: "tablecells")
+                        }
+                        .help("View connections in spreadsheet format")
                     }
-                    .help("View connections in spreadsheet format")
                 }
             }
             
@@ -641,17 +662,17 @@ struct StudioCanvasView: View {
             ToolbarItemGroup(placement: .automatic) {
                 #if os(iOS)
                 // Clear Annotations - always visible on iPad, enabled when annotations exist
-                Button(role: .destructive) {
-                    if let studio = currentStudio {
+                if let studio = currentStudio, !(studio.isSystemStudio && studio.systemStudioType == "gear_locker") {
+                    Button(role: .destructive) {
                         studio.canvasDrawingData = nil
                         studio.markAsModified()
+                    } label: {
+                        Label("Clear Annotations", systemImage: "trash")
                     }
-                } label: {
-                    Label("Clear Annotations", systemImage: "trash")
+                    .help("Clear all annotations from this studio")
+                    .disabled(studio.canvasDrawingData == nil)
+                    .opacity(studio.canvasDrawingData != nil ? 1.0 : 0.3)
                 }
-                .help("Clear all annotations from this studio")
-                .disabled(currentStudio?.canvasDrawingData == nil)
-                .opacity(currentStudio?.canvasDrawingData != nil ? 1.0 : 0.3)
                 #endif
                 
                 Button {
@@ -805,8 +826,7 @@ struct StudioCanvasView: View {
                 }
             ),
             onAssignDevice: { device in
-                // TODO: Implement assignment flow
-                print("Assign device: \(device.nickname)")
+                beginAssignDeviceToStudio(device)
             },
             onEditDevice: { device in
                 beginEditDevice(device)
@@ -816,8 +836,22 @@ struct StudioCanvasView: View {
                 isShowingDeleteDeviceConfirm = true
             }
         )
-        .sheet(isPresented: $isShowingDeviceEditor) {
+        .sheet(isPresented: $isShowingDeviceEditor, onDismiss: {
+            // Clear selection to close inspector when device editor is dismissed
+            selectionState.selection = nil
+        }) {
             deviceEditorSheetContent
+        }
+        .sheet(isPresented: $isShowingAssignGearSheet) {
+            if let device = deviceToAssign {
+                AssignGearSheet(
+                    device: device,
+                    studios: studios,
+                    onAssign: { targetStudio in
+                        assignDeviceToStudio(device, targetStudio: targetStudio)
+                    }
+                )
+            }
         }
         .alert("Delete Device", isPresented: $isShowingDeleteDeviceConfirm) {
             Button("Delete", role: .destructive) { deletePendingDevice() }
@@ -897,6 +931,10 @@ struct StudioCanvasView: View {
                         savedDevicePositions.removeAll()
                     },
                     isDrawingMode: $isDrawingMode,
+                    isPlacingDeviceFromLocker: $isPlacingDeviceFromLocker,
+                    onPlaceDevice: { location in
+                        placeDeviceFromLocker(at: location)
+                    },
                     canvasSize: $canvasSize
                 )
                 .environmentObject(selectionState)
@@ -1257,6 +1295,103 @@ struct StudioCanvasView: View {
         }
         return result
     }
+    
+    // MARK: - Gear Locker Assignment
+    
+    private func beginAssignDeviceToStudio(_ device: DeviceInstance) {
+        deviceToAssign = device
+        isShowingAssignGearSheet = true
+    }
+    
+    private func assignDeviceToStudio(_ device: DeviceInstance, targetStudio: Studio) {
+        // Switch to target studio
+        selectedStudioId = targetStudio.id
+        
+        // Enter click-to-place mode
+        deviceToPlace = device
+        isPlacingDeviceFromLocker = true
+    }
+    
+    private func placeDeviceFromLocker(at location: CGPoint) {
+        guard let sourceDevice = deviceToPlace,
+              let targetStudio = currentStudio else { return }
+        
+        // Create new device instance (independent copy)
+        let newDevice = DeviceInstance(
+            manufacturer: sourceDevice.manufacturer,
+            model: sourceDevice.model,
+            nickname: sourceDevice.nickname,
+            category: sourceDevice.category,
+            serialNumber: sourceDevice.serialNumber,
+            location: sourceDevice.location,
+            audioInputsCount: sourceDevice.audioInputsCount,
+            audioOutputsCount: sourceDevice.audioOutputsCount,
+            adatInputPortsCount: sourceDevice.adatInputPortsCount,
+            adatOutputPortsCount: sourceDevice.adatOutputPortsCount,
+            madiInputPortsCount: sourceDevice.madiInputPortsCount,
+            madiOutputPortsCount: sourceDevice.madiOutputPortsCount,
+            ethernetPortsCount: 0,
+            sampleRate: SampleRate(rawValue: sourceDevice.sampleRateRaw) ?? SampleRate.allCases.first!,
+            digitalInputs: sourceDevice.digitalInputs,
+            digitalOutputs: sourceDevice.digitalOutputs,
+            computerInterfaces: expandComputerInterfaces(from: sourceDevice.computerInterfaceCounts),
+            posX: location.x,
+            posY: location.y,
+            scale: 1.0,
+            zIndex: 0
+        )
+        
+        // Mark as assigned from locker
+        newDevice.isInGearLocker = false
+        newDevice.isAssignedFromLocker = true
+        newDevice.lockerSourceDeviceId = sourceDevice.id
+        
+        // Copy custom color if set
+        newDevice.customColorHex = sourceDevice.customColorHex
+        
+        // Copy support URLs
+        newDevice.supportPageURLString = sourceDevice.supportPageURLString
+        newDevice.downloadsPageURLString = sourceDevice.downloadsPageURLString
+        
+        // Copy documentation links
+        if let docs = sourceDevice.docs {
+            newDevice.docs = docs.map { original in
+                if let bookmarkData = original.localBookmarkData {
+                    return DocLink(title: original.title, kind: original.kind, bookmarkData: bookmarkData)
+                } else if let urlString = original.urlString, let url = URL(string: urlString) {
+                    return DocLink(title: original.title, kind: original.kind, url: url)
+                } else {
+                    return DocLink(title: original.title, kind: original.kind, url: URL(string: "about:blank")!)
+                }
+            }.compactMap { $0 }
+        }
+        
+        // Copy images
+        newDevice.frontImagePath = sourceDevice.frontImagePath
+        newDevice.rearImagePath = sourceDevice.rearImagePath
+        
+        // Add to target studio
+        if targetStudio.devices == nil {
+            targetStudio.devices = []
+        }
+        targetStudio.devices?.append(newDevice)
+        targetStudio.markAsModified()
+        
+        // Save
+        do {
+            try modelContext.save()
+        } catch {
+            print("Failed to save device from locker: \(error)")
+        }
+        
+        // Select new device
+        selectionState.selection = .device(newDevice.id)
+        
+        // Exit placement mode
+        isPlacingDeviceFromLocker = false
+        deviceToPlace = nil
+    }
+    
     @MainActor
     private func saveDeviceEdits(into studio: Studio) {
         // Determine target studio based on location picker
@@ -3960,6 +4095,8 @@ private struct DetailCanvas: View {
     let onExplodeDevice: (DeviceInstance) -> Void
     let onClearAutoArrangeUndo: () -> Void
     @Binding var isDrawingMode: Bool
+    @Binding var isPlacingDeviceFromLocker: Bool
+    let onPlaceDevice: ((CGPoint) -> Void)?
     @EnvironmentObject var selectionState: SelectionState
     @Binding var canvasSize: CGSize
 
@@ -3980,7 +4117,9 @@ private struct DetailCanvas: View {
             onExplodeDevice: onExplodeDevice,
             isExplosionEnabled: isExplosionEnabled,
             onClearAutoArrangeUndo: onClearAutoArrangeUndo,
-            isDrawingMode: $isDrawingMode
+            isDrawingMode: $isDrawingMode,
+            isPlacingDeviceFromLocker: $isPlacingDeviceFromLocker,
+            onPlaceDevice: onPlaceDevice
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
@@ -4140,6 +4279,8 @@ private struct CanvasSurfaceView: View {
     let isExplosionEnabled: Bool
     let onClearAutoArrangeUndo: () -> Void
     @Binding var isDrawingMode: Bool
+    @Binding var isPlacingDeviceFromLocker: Bool
+    let onPlaceDevice: ((CGPoint) -> Void)?
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -4217,8 +4358,14 @@ private struct CanvasSurfaceView: View {
                         .zIndex(5)
                 }
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    selection.selection = nil
+                .onTapGesture { location in
+                    if isPlacingDeviceFromLocker {
+                        // In click-to-place mode, place the device at tap location
+                        onPlaceDevice?(location)
+                    } else {
+                        // Normal mode: clear selection
+                        selection.selection = nil
+                    }
                 }
                 .preference(
                     key: CanvasSizePreferenceKey.self,

@@ -7,10 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5F4B730C2FC91176006E135F /* AssignGearSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4B730B2FC91176006E135F /* AssignGearSheet.swift */; };
 		5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5F4B730B2FC91176006E135F /* AssignGearSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssignGearSheet.swift; sourceTree = "<group>"; };
 		5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAnnotations.swift; sourceTree = "<group>"; };
 		5FFE5C962F37D70900EB00B9 /* Studio Guru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Studio Guru.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -40,6 +42,7 @@
 				5FFE5C982F37D70900EB00B9 /* Studio Guru */,
 				5FFE5C972F37D70900EB00B9 /* Products */,
 				5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */,
+				5F4B730B2FC91176006E135F /* AssignGearSheet.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -126,6 +129,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */,
+				5F4B730C2FC91176006E135F /* AssignGearSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

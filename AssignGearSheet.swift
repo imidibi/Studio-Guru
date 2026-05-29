@@ -14,48 +14,90 @@ struct AssignGearSheet: View {
     let studios: [Studio]
     let onAssign: (Studio) -> Void
     
-    @State private var selectedStudio: Studio?
+    @State private var selectedStudioId: UUID?
     
     // Filter out system studios (like Gear Locker itself)
     private var availableStudios: [Studio] {
         studios.filter { !$0.isSystemStudio }
     }
     
+    private var selectedStudio: Studio? {
+        availableStudios.first(where: { $0.id == selectedStudioId })
+    }
+    
     var body: some View {
+        #if os(macOS)
+        macOSContent
+        #else
         NavigationStack {
-            VStack(spacing: 20) {
-                headerView
-                studioListView
-                Spacer()
-            }
-            .navigationTitle("Assign Device")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Next") {
-                        if let studio = selectedStudio {
-                            onAssign(studio)
+            contentView
+                .navigationTitle("Assign Device")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
                             dismiss()
                         }
                     }
-                    .disabled(selectedStudio == nil)
+                    
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Next") {
+                            if let studio = selectedStudio {
+                                onAssign(studio)
+                                dismiss()
+                            }
+                        }
+                        .disabled(selectedStudio == nil)
+                    }
                 }
-            }
         }
-        #if os(macOS)
-        .frame(minWidth: 400, minHeight: 500)
         #endif
+    }
+    
+    #if os(macOS)
+    private var macOSContent: some View {
+        VStack(spacing: 0) {
+            // Header bar with title and buttons
+            HStack {
+                Text("Assign Device")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("Next") {
+                    if let studio = selectedStudio {
+                        onAssign(studio)
+                        dismiss()
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedStudio == nil)
+            }
+            .padding()
+            .background(Color(nsColor: .windowBackgroundColor))
+            
+            Divider()
+            
+            contentView
+        }
+        .frame(width: 500, height: 400)
+    }
+    #endif
+    
+    private var contentView: some View {
+        VStack(spacing: 20) {
+            headerView
+            studioListView
+            Spacer()
+        }
         .onAppear {
             // Pre-select first studio if available
-            selectedStudio = availableStudios.first
+            selectedStudioId = availableStudios.first?.id
         }
     }
     
@@ -81,7 +123,7 @@ struct AssignGearSheet: View {
         if availableStudios.isEmpty {
             emptyStateView
         } else {
-            List(availableStudios, id: \.id, selection: $selectedStudio) { studio in
+            List(availableStudios, id: \.id) { studio in
                 studioRow(studio)
             }
             #if os(iOS)
@@ -123,14 +165,14 @@ struct AssignGearSheet: View {
             
             Spacer()
             
-            if selectedStudio?.id == studio.id {
+            if selectedStudioId == studio.id {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color.accentColor)
             }
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            selectedStudio = studio
+            selectedStudioId = studio.id
         }
     }
 }

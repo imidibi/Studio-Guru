@@ -179,10 +179,27 @@ struct GearLockerDeviceRow: View {
                         .font(.title3)
                 }
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            #if os(macOS)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
+            #else
             .padding(.vertical, 4)
+            #endif
         }
         .buttonStyle(.plain)
         .opacity(isAvailable ? 1.0 : 0.6)
+        #if os(macOS)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        #endif
         .contextMenu {
             Button {
                 onTap()

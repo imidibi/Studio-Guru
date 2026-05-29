@@ -844,11 +844,25 @@ struct StudioCanvasView: View {
         }
         .sheet(isPresented: $isShowingAssignGearSheet) {
             if let device = deviceToAssign {
+                // Create lightweight studio options to avoid SwiftData query delays
+                let studioOptions = studios
+                    .filter { !$0.isSystemStudio }
+                    .map { studio in
+                        AssignGearSheet.StudioOption(
+                            id: studio.id,
+                            name: studio.name,
+                            deviceCount: studio.devices?.count ?? 0
+                        )
+                    }
+                
                 AssignGearSheet(
                     device: device,
-                    studios: studios,
-                    onAssign: { targetStudio in
-                        assignDeviceToStudio(device, targetStudio: targetStudio)
+                    studioOptions: studioOptions,
+                    onAssign: { targetStudioId in
+                        // Look up the actual studio object
+                        if let targetStudio = studios.first(where: { $0.id == targetStudioId }) {
+                            assignDeviceToStudio(device, targetStudio: targetStudio)
+                        }
                     }
                 )
             }

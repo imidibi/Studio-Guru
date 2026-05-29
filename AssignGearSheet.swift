@@ -10,19 +10,17 @@ import SwiftData
 
 struct AssignGearSheet: View {
     @Environment(\.dismiss) private var dismiss
+    
     let device: DeviceInstance
-    let studios: [Studio]
-    let onAssign: (Studio) -> Void
+    let studioOptions: [StudioOption]
+    let onAssign: (UUID) -> Void
     
     @State private var selectedStudioId: UUID?
     
-    // Filter out system studios (like Gear Locker itself)
-    private var availableStudios: [Studio] {
-        studios.filter { !$0.isSystemStudio }
-    }
-    
-    private var selectedStudio: Studio? {
-        availableStudios.first(where: { $0.id == selectedStudioId })
+    struct StudioOption: Identifiable {
+        let id: UUID
+        let name: String
+        let deviceCount: Int
     }
     
     var body: some View {
@@ -42,12 +40,12 @@ struct AssignGearSheet: View {
                     
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Next") {
-                            if let studio = selectedStudio {
-                                onAssign(studio)
+                            if let studioId = selectedStudioId {
+                                onAssign(studioId)
                                 dismiss()
                             }
                         }
-                        .disabled(selectedStudio == nil)
+                        .disabled(selectedStudioId == nil)
                     }
                 }
         }
@@ -70,13 +68,13 @@ struct AssignGearSheet: View {
                 .keyboardShortcut(.cancelAction)
                 
                 Button("Next") {
-                    if let studio = selectedStudio {
-                        onAssign(studio)
+                    if let studioId = selectedStudioId {
+                        onAssign(studioId)
                         dismiss()
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(selectedStudio == nil)
+                .disabled(selectedStudioId == nil)
             }
             .padding()
             .background(Color(nsColor: .windowBackgroundColor))
@@ -97,7 +95,7 @@ struct AssignGearSheet: View {
         }
         .onAppear {
             // Pre-select first studio if available
-            selectedStudioId = availableStudios.first?.id
+            selectedStudioId = studioOptions.first?.id
         }
     }
     
@@ -120,10 +118,10 @@ struct AssignGearSheet: View {
     
     @ViewBuilder
     private var studioListView: some View {
-        if availableStudios.isEmpty {
+        if studioOptions.isEmpty {
             emptyStateView
         } else {
-            List(availableStudios, id: \.id) { studio in
+            List(studioOptions) { studio in
                 studioRow(studio)
             }
             #if os(iOS)
@@ -150,17 +148,15 @@ struct AssignGearSheet: View {
         .padding()
     }
     
-    private func studioRow(_ studio: Studio) -> some View {
+    private func studioRow(_ studio: StudioOption) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(studio.name)
                     .font(.headline)
                 
-                if let deviceCount = studio.devices?.count {
-                    Text("\(deviceCount) device\(deviceCount == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("\(studio.deviceCount) device\(studio.deviceCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()

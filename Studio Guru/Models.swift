@@ -213,6 +213,16 @@ final class DeviceInstance {
     var lockerSourceDeviceId: UUID? = nil         // Reference to original locker device
     var isGhostDevice: Bool = false               // Documentation placeholder (returned to locker)
     var ghostOfDeviceId: UUID? = nil              // Reference to the locker device this is a ghost of
+    
+    // Asset Inventory tracking
+    var purchasePrice: Double = 0.0               // Original purchase price
+    var purchaseDate: Date? = nil                 // Date of purchase
+    var purchaseLocation: String = ""             // Where device was purchased
+    var receiptImagePath: String? = nil           // Path to receipt image
+    var warrantyExpirationDate: Date? = nil       // When warranty expires
+    var insurancePolicyNumber: String = ""        // Insurance policy number
+    var currentEstimatedValue: Double = 0.0       // Current depreciated value
+    var assetNotes: String = ""                   // General notes about the asset
 
     @Relationship(deleteRule: .cascade, inverse: \Port.device) var ports: [Port]? = []
     @Relationship(deleteRule: .cascade, inverse: \DocLink.device) var docs: [DocLink]? = []

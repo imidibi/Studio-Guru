@@ -146,6 +146,15 @@ struct StudioCanvasView: View {
     // Draft device location for Gear Locker
     @State private var draftDeviceLocation: DeviceLocation = .currentStudio
     
+    // Draft asset inventory fields
+    @State private var draftPurchasePrice: Double = 0.0
+    @State private var draftPurchaseDate: Date? = nil
+    @State private var draftPurchaseLocation: String = ""
+    @State private var draftWarrantyExpirationDate: Date? = nil
+    @State private var draftInsurancePolicyNumber: String = ""
+    @State private var draftCurrentEstimatedValue: Double = 0.0
+    @State private var draftAssetNotes: String = ""
+    
     // Gear Locker assignment workflow
     @State private var deviceToAssign: DeviceInstance? = nil
     @State private var assignmentData: AssignGearSheet.AssignmentData? = nil
@@ -1198,6 +1207,13 @@ struct StudioCanvasView: View {
                 isSelectingManual: $isSelectingManualForDraft,
                 deviceLocation: $draftDeviceLocation,
                 canAccessGearLocker: storeManager.canAccessGearLocker,
+                purchasePrice: $draftPurchasePrice,
+                purchaseDate: $draftPurchaseDate,
+                purchaseLocation: $draftPurchaseLocation,
+                warrantyExpirationDate: $draftWarrantyExpirationDate,
+                insurancePolicyNumber: $draftInsurancePolicyNumber,
+                currentEstimatedValue: $draftCurrentEstimatedValue,
+                assetNotes: $draftAssetNotes,
                 onCancel: { isShowingDeviceEditor = false },
                 onSave: { saveDeviceEdits(into: studio) }
             )
@@ -1244,6 +1260,15 @@ struct StudioCanvasView: View {
         draftDigitalOutputs = []
         draftComputerInterfaceCounts = [:]
         draftManualURL = nil
+        
+        // Reset asset inventory fields
+        draftPurchasePrice = 0.0
+        draftPurchaseDate = nil
+        draftPurchaseLocation = ""
+        draftWarrantyExpirationDate = nil
+        draftInsurancePolicyNumber = ""
+        draftCurrentEstimatedValue = 0.0
+        draftAssetNotes = ""
 
         isShowingDeviceEditor = true
     }
@@ -1282,6 +1307,15 @@ struct StudioCanvasView: View {
             counts[k] = max(0, v)
         }
         draftComputerInterfaceCounts = counts
+        
+        // Load asset inventory fields
+        draftPurchasePrice = d.purchasePrice
+        draftPurchaseDate = d.purchaseDate
+        draftPurchaseLocation = d.purchaseLocation
+        draftWarrantyExpirationDate = d.warrantyExpirationDate
+        draftInsurancePolicyNumber = d.insurancePolicyNumber
+        draftCurrentEstimatedValue = d.currentEstimatedValue
+        draftAssetNotes = d.assetNotes
 
         suppressNextInspectorPresentation = true
         isShowingDeviceEditor = true
@@ -1562,6 +1596,15 @@ struct StudioCanvasView: View {
         device.computerInterfaces = expandComputerInterfaces(
             from: draftComputerInterfaceCounts
         )
+        
+        // Save asset inventory fields
+        device.purchasePrice = draftPurchasePrice
+        device.purchaseDate = draftPurchaseDate
+        device.purchaseLocation = draftPurchaseLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        device.warrantyExpirationDate = draftWarrantyExpirationDate
+        device.insurancePolicyNumber = draftInsurancePolicyNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        device.currentEstimatedValue = draftCurrentEstimatedValue
+        device.assetNotes = draftAssetNotes.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Build ports from counts/formats for visualization and later connection tooling.
         device.ports = buildPorts(
@@ -6300,6 +6343,15 @@ private struct DeviceEditorSheet: View {
     
     @Binding var deviceLocation: DeviceLocation
     var canAccessGearLocker: Bool
+    
+    // Asset Inventory bindings
+    @Binding var purchasePrice: Double
+    @Binding var purchaseDate: Date?
+    @Binding var purchaseLocation: String
+    @Binding var warrantyExpirationDate: Date?
+    @Binding var insurancePolicyNumber: String
+    @Binding var currentEstimatedValue: Double
+    @Binding var assetNotes: String
 
     let onCancel: () -> Void
     let onSave: () -> Void
@@ -6664,6 +6716,76 @@ private struct DeviceEditorSheet: View {
                             }
                             .padding(8)
                         }
+                        
+                        GroupBox("Asset Inventory") {
+                            Grid(
+                                alignment: .leading,
+                                horizontalSpacing: 12,
+                                verticalSpacing: 10
+                            ) {
+                                GridRow {
+                                    Text("Purchase Price")
+                                    TextField("", value: $purchasePrice, format: .currency(code: "USD"))
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Purchase Date")
+                                    DatePicker("", selection: Binding(
+                                        get: { purchaseDate ?? Date() },
+                                        set: { purchaseDate = $0 }
+                                    ), displayedComponents: .date)
+                                    .labelsHidden()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    if purchaseDate != nil {
+                                        Button("Clear") {
+                                            purchaseDate = nil
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                                GridRow {
+                                    Text("Purchase Location")
+                                    TextField("Store or website", text: $purchaseLocation)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Warranty Expires")
+                                    DatePicker("", selection: Binding(
+                                        get: { warrantyExpirationDate ?? Date() },
+                                        set: { warrantyExpirationDate = $0 }
+                                    ), displayedComponents: .date)
+                                    .labelsHidden()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    if warrantyExpirationDate != nil {
+                                        Button("Clear") {
+                                            warrantyExpirationDate = nil
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                                GridRow {
+                                    Text("Insurance Policy")
+                                    TextField("Policy number", text: $insurancePolicyNumber)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Current Value")
+                                    TextField("", value: $currentEstimatedValue, format: .currency(code: "USD"))
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                GridRow {
+                                    Text("Notes")
+                                    TextEditor(text: $assetNotes)
+                                        .frame(height: 60)
+                                        .border(Color.gray.opacity(0.3))
+                                }
+                            }
+                            .padding(8)
+                        }
 
                         if let errorMessage {
                             Text(errorMessage)
@@ -6951,6 +7073,86 @@ private struct DeviceEditorSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                        }
+                    }
+                    
+                    Section("Asset Inventory") {
+                        HStack {
+                            Text("Purchase Price")
+                            Spacer()
+                            TextField("Amount", value: $purchasePrice, format: .currency(code: "USD"))
+                                .multilineTextAlignment(.trailing)
+                                #if os(iOS)
+                                .keyboardType(.decimalPad)
+                                #endif
+                        }
+                        
+                        HStack {
+                            Text("Purchase Date")
+                            Spacer()
+                            if let date = purchaseDate {
+                                DatePicker("", selection: Binding(
+                                    get: { date },
+                                    set: { purchaseDate = $0 }
+                                ), displayedComponents: .date)
+                                .labelsHidden()
+                                Button("Clear") {
+                                    purchaseDate = nil
+                                }
+                            } else {
+                                Button("Set Date") {
+                                    purchaseDate = Date()
+                                }
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Purchase Location")
+                            TextField("Store or website", text: $purchaseLocation)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        
+                        HStack {
+                            Text("Warranty Expires")
+                            Spacer()
+                            if let date = warrantyExpirationDate {
+                                DatePicker("", selection: Binding(
+                                    get: { date },
+                                    set: { warrantyExpirationDate = $0 }
+                                ), displayedComponents: .date)
+                                .labelsHidden()
+                                Button("Clear") {
+                                    warrantyExpirationDate = nil
+                                }
+                            } else {
+                                Button("Set Date") {
+                                    warrantyExpirationDate = Date()
+                                }
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Insurance Policy")
+                            TextField("Policy number", text: $insurancePolicyNumber)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        
+                        HStack {
+                            Text("Current Value")
+                            Spacer()
+                            TextField("Amount", value: $currentEstimatedValue, format: .currency(code: "USD"))
+                                .multilineTextAlignment(.trailing)
+                                #if os(iOS)
+                                .keyboardType(.decimalPad)
+                                #endif
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Notes")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            TextEditor(text: $assetNotes)
+                                .frame(minHeight: 80)
                         }
                     }
 

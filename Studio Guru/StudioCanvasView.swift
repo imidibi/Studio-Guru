@@ -1425,8 +1425,8 @@ struct StudioCanvasView: View {
             print("Failed to save device from locker: \(error)")
         }
         
-        // Select new device
-        selectionState.selection = .device(newDevice.id)
+        // Clear selection (don't auto-open inspector after placement)
+        selectionState.selection = nil
         
         // Exit placement mode
         isPlacingDeviceFromLocker = false
@@ -1759,6 +1759,19 @@ struct StudioCanvasView: View {
                 } ?? []
                 return np
             }
+            
+            // Set Gear Locker flags if moving to Gear Locker
+            if destination.isSystemStudio && destination.systemStudioType == "gear_locker" {
+                moved.isInGearLocker = true
+                moved.isAssignedFromLocker = false
+                moved.lockerSourceDeviceId = nil
+            } else {
+                // Moving to a regular studio
+                moved.isInGearLocker = false
+                moved.isAssignedFromLocker = false
+                moved.lockerSourceDeviceId = nil
+            }
+            
             if destination.devices == nil {
                 destination.devices = []
             }

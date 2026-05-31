@@ -58,34 +58,66 @@ class StoreManager: ObservableObject {
         // Use AppStorage to remember if we've already granted Pro to an original purchaser
         // This ensures we don't repeatedly check and honors original customers
         let hasCheckedKey = "hasGrantedOriginalPurchaserPro"
-        
+
         if UserDefaults.standard.bool(forKey: hasCheckedKey) {
             // Already granted Pro status to this user
             return true
         }
-        
+
         // For backwards compatibility during transition:
-        // Check if user has the app installed from before freemium launch
+        // Check if user has the app installed from before freemium launch (v1.22)
         // We'll use a version check - if they're upgrading from v1.21 or earlier, grant Pro
         let lastVersionKey = "lastKnownVersion"
         let lastVersion = UserDefaults.standard.string(forKey: lastVersionKey)
-        
-        // If this is their first launch of v1.22+ and they had a previous version, grant Pro
+
+        // If this is their first launch of v1.22+ and they had a previous version, validate it
         if let previous = lastVersion, !previous.isEmpty {
-            // They upgraded from an earlier version - mark as original purchaser
-            UserDefaults.standard.set(true, forKey: hasCheckedKey)
-            print("✅ Granting Pro status to original app purchaser (upgraded from v\(previous))")
-            return true
+            // SECURITY: Only grant Pro if they upgraded from v1.21 or earlier
+            // This prevents users from getting Pro by reinstalling
+            if isVersionEligibleForFreePro(previous) {
+                // They upgraded from a paid version - mark as original purchaser
+                UserDefaults.standard.set(true, forKey: hasCheckedKey)
+                print("✅ Granting Pro status to original app purchaser (upgraded from v\(previous))")
+                return true
+            } else {
+                // They had a newer version installed (v1.22+), not eligible for free Pro
+                print("ℹ️ User upgraded from v\(previous), not eligible for free Pro (freemium started at v1.22)")
+                return false
+            }
         }
-        
+
         // Store current version for future checks (only if no previous version was detected)
         // This prevents us from granting Pro status on fresh installs
         if lastVersion == nil {
             let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
             UserDefaults.standard.set(currentVersion, forKey: lastVersionKey)
         }
-        
+
         return false
+    }
+
+    // Helper function to check if a version is eligible for free Pro upgrade
+    // Versions 1.21 and earlier were paid, so those users get Pro for free
+    private func isVersionEligibleForFreePro(_ versionString: String) -> Bool {
+        // Parse version string (e.g., "1.21" -> [1, 21])
+        let components = versionString.split(separator: ".").compactMap { Int($0) }
+
+        guard components.count >= 2 else {
+            // Invalid version format, deny Pro
+            return false
+        }
+
+        let major = components[0]
+        let minor = components[1]
+
+        // Freemium started at v1.22, so v1.21 and earlier get free Pro
+        if major < 1 {
+            return true  // v0.x versions get Pro
+        } else if major == 1 && minor <= 21 {
+            return true  // v1.0 through v1.21 get Pro
+        } else {
+            return false  // v1.22+ do not get free Pro
+        }
     }
 
     init() {

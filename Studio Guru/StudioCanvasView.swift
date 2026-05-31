@@ -129,6 +129,8 @@ struct StudioCanvasView: View {
     @State private var draftAdatOutputPorts: Int = 0
     @State private var draftMadiInputPorts: Int = 0
     @State private var draftMadiOutputPorts: Int = 0
+    @State private var draftMidiInputPorts: Int = 0
+    @State private var draftMidiOutputPorts: Int = 0
     @State private var draftSampleRate: SampleRate =
         SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
 
@@ -1198,6 +1200,8 @@ struct StudioCanvasView: View {
                 adatOutputPorts: $draftAdatOutputPorts,
                 madiInputPorts: $draftMadiInputPorts,
                 madiOutputPorts: $draftMadiOutputPorts,
+                midiInputPorts: $draftMidiInputPorts,
+                midiOutputPorts: $draftMidiOutputPorts,
                 sampleRate: $draftSampleRate,
                 digitalInputs: $draftDigitalInputs,
                 digitalOutputs: $draftDigitalOutputs,
@@ -1255,6 +1259,8 @@ struct StudioCanvasView: View {
         draftAdatOutputPorts = 0
         draftMadiInputPorts = 0
         draftMadiOutputPorts = 0
+        draftMidiInputPorts = 0
+        draftMidiOutputPorts = 0
         if let first = SampleRate.allCases.first { draftSampleRate = first }
         draftDigitalInputs = []
         draftDigitalOutputs = []
@@ -1295,6 +1301,8 @@ struct StudioCanvasView: View {
         draftAdatOutputPorts = max(0, d.adatOutputPortsCount)
         draftMadiInputPorts = max(0, d.madiInputPortsCount)
         draftMadiOutputPorts = max(0, d.madiOutputPortsCount)
+        draftMidiInputPorts = max(0, d.midiInputPortsCount)
+        draftMidiOutputPorts = max(0, d.midiOutputPortsCount)
         if let sr = SampleRate(rawValue: d.sampleRateRaw) {
             draftSampleRate = sr
         }
@@ -1547,6 +1555,8 @@ struct StudioCanvasView: View {
                 adatOutputPortsCount: max(0, draftAdatOutputPorts),
                 madiInputPortsCount: max(0, draftMadiInputPorts),
                 madiOutputPortsCount: max(0, draftMadiOutputPorts),
+                midiInputPortsCount: max(0, draftMidiInputPorts),
+                midiOutputPortsCount: max(0, draftMidiOutputPorts),
                 ethernetPortsCount: 0,
                 sampleRate: draftSampleRate,
                 digitalInputs: Array(draftDigitalInputs),
@@ -1590,6 +1600,8 @@ struct StudioCanvasView: View {
         device.adatOutputPortsCount = max(0, draftAdatOutputPorts)
         device.madiInputPortsCount = max(0, draftMadiInputPorts)
         device.madiOutputPortsCount = max(0, draftMadiOutputPorts)
+        device.midiInputPortsCount = max(0, draftMidiInputPorts)
+        device.midiOutputPortsCount = max(0, draftMidiOutputPorts)
         device.sampleRateRaw = draftSampleRate.rawValue
         device.digitalInputs = Array(draftDigitalInputs)
         device.digitalOutputs = Array(draftDigitalOutputs)
@@ -1616,6 +1628,8 @@ struct StudioCanvasView: View {
             adatOutputPorts: device.adatOutputPortsCount,
             madiInputPorts: device.madiInputPortsCount,
             madiOutputPorts: device.madiOutputPortsCount,
+            midiInputPorts: device.midiInputPortsCount,
+            midiOutputPorts: device.midiOutputPortsCount,
             computerInterfaceCounts: device.computerInterfaceCounts,
             sampleRate: draftSampleRate
         )
@@ -1857,6 +1871,8 @@ struct StudioCanvasView: View {
         adatOutputPorts: Int,
         madiInputPorts: Int,
         madiOutputPorts: Int,
+        midiInputPorts: Int,
+        midiOutputPorts: Int,
         computerInterfaceCounts: [ComputerInterface: Int],
         sampleRate: SampleRate
     ) -> [Port] {
@@ -1899,6 +1915,37 @@ struct StudioCanvasView: View {
                 )
             }
             ports.append(p)
+        }
+        
+        // MIDI DIN 5-pin ports (each port is independent, unlike ADAT)
+        // MIDI Input Ports
+        if midiInputPorts > 0 {
+            for i in 1...midiInputPorts {
+                let p = Port(name: "MIDI In \(i)", type: .midiIn, direction: .input)
+                p.channels = [
+                    Channel(
+                        index: 1,
+                        nameLong: "MIDI In \(i)",
+                        nameShort: "In\(i)"
+                    )
+                ]
+                ports.append(p)
+            }
+        }
+        
+        // MIDI Output Ports
+        if midiOutputPorts > 0 {
+            for i in 1...midiOutputPorts {
+                let p = Port(name: "MIDI Out \(i)", type: .midiOut, direction: .output)
+                p.channels = [
+                    Channel(
+                        index: 1,
+                        nameLong: "MIDI Out \(i)",
+                        nameShort: "Out\(i)"
+                    )
+                ]
+                ports.append(p)
+            }
         }
 
         func digitalPort(
@@ -1967,10 +2014,11 @@ struct StudioCanvasView: View {
                 ]
                 ports.append(p)
             case .midi:
+                // MIDI over USB (bidirectional - appears in both inputs and outputs)
                 ports.append(
                     digitalPort(
                         type: .midiIn,
-                        name: "MIDI In",
+                        name: "MIDI over USB In",
                         direction: .input,
                         channels: 1
                     )
@@ -2044,10 +2092,11 @@ struct StudioCanvasView: View {
                 ]
                 ports.append(p)
             case .midi:
+                // MIDI over USB (bidirectional - appears in both inputs and outputs)
                 ports.append(
                     digitalPort(
                         type: .midiOut,
-                        name: "MIDI Out",
+                        name: "MIDI over USB Out",
                         direction: .output,
                         channels: 1
                     )
@@ -3794,6 +3843,11 @@ struct StudioCanvasView: View {
             print("   ℹ️ Sample connection: \(studio.connections?.first?.label ?? "no label")")
         }
         #endif
+        
+        // Mark studio as modified to trigger iCloud sync
+        if validCount > 0 {
+            studio.markAsModified()
+        }
         
         // Save to persist the connections
         try? modelContext.save()
@@ -6292,6 +6346,7 @@ extension DeviceInstance {
         case .keyboard: return "pianokeys"
         case .microphone: return "mic"
         case .midiDevice: return "pianokeys.inverse"
+        case .midiInterface: return "cable.connector.horizontal"
         case .mixer: return "dial.medium"
         case .monitor: return "speaker.wave.2"
         case .multi: return "square.stack.3d.up"
@@ -6330,6 +6385,8 @@ private struct DeviceEditorSheet: View {
     @Binding var adatOutputPorts: Int
     @Binding var madiInputPorts: Int
     @Binding var madiOutputPorts: Int
+    @Binding var midiInputPorts: Int
+    @Binding var midiOutputPorts: Int
     @Binding var sampleRate: SampleRate
 
     @Binding var digitalInputs: Set<DigitalFormat>
@@ -6629,6 +6686,24 @@ private struct DeviceEditorSheet: View {
                                     }
                                 }
 
+                                Stepper(value: $midiInputPorts, in: 0...32) {
+                                    HStack {
+                                        Text("MIDI Input Ports")
+                                        Spacer()
+                                        Text("\(midiInputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Stepper(value: $midiOutputPorts, in: 0...32) {
+                                    HStack {
+                                        Text("MIDI Output Ports")
+                                        Spacer()
+                                        Text("\(midiOutputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
                             }
                             .padding(8)
                         }
@@ -6644,8 +6719,16 @@ private struct DeviceEditorSheet: View {
                                             set: { isOn in
                                                 if isOn {
                                                     digitalInputs.insert(f)
+                                                    // MIDI over USB is bidirectional - auto-add to outputs
+                                                    if f == .midi {
+                                                        digitalOutputs.insert(f)
+                                                    }
                                                 } else {
                                                     digitalInputs.remove(f)
+                                                    // MIDI over USB is bidirectional - auto-remove from outputs
+                                                    if f == .midi {
+                                                        digitalOutputs.remove(f)
+                                                    }
                                                 }
                                             }
                                         )
@@ -6666,8 +6749,16 @@ private struct DeviceEditorSheet: View {
                                             set: { isOn in
                                                 if isOn {
                                                     digitalOutputs.insert(f)
+                                                    // MIDI over USB is bidirectional - auto-add to inputs
+                                                    if f == .midi {
+                                                        digitalInputs.insert(f)
+                                                    }
                                                 } else {
                                                     digitalOutputs.remove(f)
+                                                    // MIDI over USB is bidirectional - auto-remove from inputs
+                                                    if f == .midi {
+                                                        digitalInputs.remove(f)
+                                                    }
                                                 }
                                             }
                                         )
@@ -7008,6 +7099,26 @@ private struct DeviceEditorSheet: View {
                             }
                         }
 
+                        Stepper(value: $midiInputPorts, in: 0...32) {
+                            HStack {
+                                Text("MIDI Input Ports")
+                                Spacer()
+                                Text("\(midiInputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+
+                        Stepper(value: $midiOutputPorts, in: 0...32) {
+                            HStack {
+                                Text("MIDI Output Ports")
+                                Spacer()
+                                Text("\(midiOutputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+
                     }
 
                     Section("Digital Inputs") {
@@ -7019,8 +7130,16 @@ private struct DeviceEditorSheet: View {
                                     set: { isOn in
                                         if isOn {
                                             digitalInputs.insert(f)
+                                            // MIDI over USB is bidirectional - auto-add to outputs
+                                            if f == .midi {
+                                                digitalOutputs.insert(f)
+                                            }
                                         } else {
                                             digitalInputs.remove(f)
+                                            // MIDI over USB is bidirectional - auto-remove from outputs
+                                            if f == .midi {
+                                                digitalOutputs.remove(f)
+                                            }
                                         }
                                     }
                                 )
@@ -7037,8 +7156,16 @@ private struct DeviceEditorSheet: View {
                                     set: { isOn in
                                         if isOn {
                                             digitalOutputs.insert(f)
+                                            // MIDI over USB is bidirectional - auto-add to inputs
+                                            if f == .midi {
+                                                digitalInputs.insert(f)
+                                            }
                                         } else {
                                             digitalOutputs.remove(f)
+                                            // MIDI over USB is bidirectional - auto-remove from inputs
+                                            if f == .midi {
+                                                digitalInputs.remove(f)
+                                            }
                                         }
                                     }
                                 )
@@ -8152,7 +8279,7 @@ private struct ConnectionLegendView: View {
                     LegendRow(
                         color: .orange,
                         title: "Computer / Bidirectional",
-                        description: "USB, Thunderbolt, Ethernet (two arrows)"
+                        description: "USB, Thunderbolt, Bluetooth, Ethernet (two arrows)"
                     )
                 }
 

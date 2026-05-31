@@ -249,6 +249,7 @@ struct GearLockerDeviceRow: View {
         case .keyboard: return "pianokeys"
         case .microphone: return "mic"
         case .midiDevice: return "pianokeys.inverse"
+        case .midiInterface: return "cable.connector.horizontal"
         case .mixer: return "dial.medium"
         case .monitor: return "speaker.wave.2"
         case .multi: return "square.stack.3d.up"

@@ -51,6 +51,7 @@ enum DeviceCategory: String, Codable, CaseIterable {
     case keyboard = "Keyboard"
     case microphone = "Microphone"
     case midiDevice = "MIDI Device"
+    case midiInterface = "MIDI Interface"
     case mixer = "Mixer"
     case monitor = "Studio Monitor"
     case multi = "Multi"
@@ -68,7 +69,7 @@ enum DigitalFormat: String, Codable, CaseIterable {
     case aesebu = "AES/EBU"
     case dante = "Dante"
     case madi = "MADI"
-    case midi = "MIDI"
+    case midi = "MIDI over USB"
     case spdif = "S/PDIF"
     case wordClock = "Word Clock"
 }
@@ -174,6 +175,10 @@ final class DeviceInstance {
     var adatOutputPortsCount: Int = 0
     var madiInputPortsCount: Int = 0
     var madiOutputPortsCount: Int = 0
+    
+    // MIDI DIN 5-pin port counts (physical connectors)
+    var midiInputPortsCount: Int = 0
+    var midiOutputPortsCount: Int = 0
 
     // Networking / control ports (used for Dante, remote control, etc.)
     var ethernetPortsCount: Int = 0
@@ -241,6 +246,8 @@ final class DeviceInstance {
          adatOutputPortsCount: Int = 0,
          madiInputPortsCount: Int = 0,
          madiOutputPortsCount: Int = 0,
+         midiInputPortsCount: Int = 0,
+         midiOutputPortsCount: Int = 0,
          ethernetPortsCount: Int = 0,
          sampleRate: SampleRate = .hz48000,
          digitalInputs: [DigitalFormat] = [],
@@ -270,6 +277,8 @@ final class DeviceInstance {
         self.adatOutputPortsCount = adatOutputPortsCount
         self.madiInputPortsCount = madiInputPortsCount
         self.madiOutputPortsCount = madiOutputPortsCount
+        self.midiInputPortsCount = midiInputPortsCount
+        self.midiOutputPortsCount = midiOutputPortsCount
 
         self.ethernetPortsCount = ethernetPortsCount
 
@@ -432,6 +441,9 @@ final class Connection {
     var label: String = ""
     var notes: String?
     
+    // Modification tracking for iCloud sync
+    var modifiedAt: Date = Date()
+    
     var studio: Studio?
 
     init(fromDeviceId: UUID,
@@ -453,6 +465,11 @@ final class Connection {
         self.cableRaw = cable.rawValue
         self.label = label
         self.notes = notes
+        self.modifiedAt = Date()
+    }
+
+    func markAsModified() {
+        self.modifiedAt = Date()
     }
 
     var cable: CableType { CableType(rawValue: cableRaw) ?? .other }
@@ -823,6 +840,7 @@ struct CategoryColorSettings {
         case .keyboard: return Color(hex: "#C0392B") ?? .red
         case .microphone: return Color(hex: "#16A085") ?? .teal
         case .midiDevice: return Color(hex: "#2980B9") ?? .blue
+        case .midiInterface: return Color(hex: "#5DADE2") ?? .blue
         case .mixer: return Color(hex: "#27AE60") ?? .green
         case .monitor: return Color(hex: "#F1C40F") ?? .yellow
         case .multi: return Color(hex: "#34495E") ?? .gray

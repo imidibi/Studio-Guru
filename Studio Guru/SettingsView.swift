@@ -40,6 +40,7 @@ struct SettingsView: View {
     @AppStorage("categoryColor_Keyboard") private var keyboardColor = "#C0392B"
     @AppStorage("categoryColor_Microphone") private var microphoneColor = "#16A085"
     @AppStorage("categoryColor_MIDIDevice") private var midiDeviceColor = "#2980B9"
+    @AppStorage("categoryColor_MIDIInterface") private var midiInterfaceColor = "#5DADE2"
     @AppStorage("categoryColor_Mixer") private var mixerColor = "#27AE60"
     @AppStorage("categoryColor_StudioMonitor") private var monitorColor = "#F1C40F"
     @AppStorage("categoryColor_Multi") private var multiColor = "#34495E"
@@ -78,6 +79,7 @@ struct SettingsView: View {
         case .keyboard: hex = keyboardColor
         case .microphone: hex = microphoneColor
         case .midiDevice: hex = midiDeviceColor
+        case .midiInterface: hex = midiInterfaceColor
         case .mixer: hex = mixerColor
         case .monitor: hex = monitorColor
         case .multi: hex = multiColor
@@ -111,6 +113,7 @@ struct SettingsView: View {
         case .keyboard: keyboardColor = hex
         case .microphone: microphoneColor = hex
         case .midiDevice: midiDeviceColor = hex
+        case .midiInterface: midiInterfaceColor = hex
         case .mixer: mixerColor = hex
         case .monitor: monitorColor = hex
         case .multi: multiColor = hex

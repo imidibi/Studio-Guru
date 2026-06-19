@@ -23,6 +23,8 @@ struct SettingsView: View {
     @State private var showingRestartAlert = false
     @State private var isSyncing = false
     @State private var lastSyncMessage: String?
+    @StateObject private var diagnostics = iCloudDiagnostics()
+    @State private var showingDiagnostics = false
     
     // Category color settings (stored as hex strings)
     @AppStorage("categoryColor_ADATExpander") private var adatExpanderColor = "#9B59B6"
@@ -341,6 +343,20 @@ struct SettingsView: View {
                     } label: {
                         Label("Reset Sync & Use This Device's Data", systemImage: "arrow.triangle.2.circlepath.icloud")
                     }
+                    
+                    Divider()
+                    
+                    Button {
+                        showingDiagnostics = true
+                    } label: {
+                        Label("Run iCloud Diagnostics", systemImage: "stethoscope")
+                    }
+                    
+                    if let logURL = Studio_GuruApp.getDiagnosticsLogURL() {
+                        ShareLink(item: logURL) {
+                            Label("Share Diagnostics Log", systemImage: "square.and.arrow.up")
+                        }
+                    }
                 } header: {
                     Text("Troubleshooting")
                 } footer: {
@@ -599,6 +615,9 @@ struct SettingsView: View {
             .sheet(isPresented: $isShowingPaywall) {
                 PaywallView(reason: paywallReason)
                     .environmentObject(storeManager)
+            }
+            .sheet(isPresented: $showingDiagnostics) {
+                iCloudDiagnosticsView(diagnostics: diagnostics)
             }
         }
     }

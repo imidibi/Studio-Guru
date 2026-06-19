@@ -486,6 +486,12 @@ final class DocLink {
     var urlString: String?
     var localBookmarkData: Data?
     
+    // iCloud-stored document path (relative to app's iCloud container)
+    var iCloudDocumentPath: String?
+    
+    // Modification tracking for iCloud sync
+    var modifiedAt: Date = Date()
+    
     var device: DeviceInstance?
 
     init(title: String, kind: DocKind, url: URL) {
@@ -494,6 +500,8 @@ final class DocLink {
         self.kindRaw = kind.rawValue
         self.urlString = url.absoluteString
         self.localBookmarkData = nil
+        self.iCloudDocumentPath = nil
+        self.modifiedAt = Date()
     }
 
     init(title: String, kind: DocKind, bookmarkData: Data) {
@@ -502,6 +510,22 @@ final class DocLink {
         self.kindRaw = kind.rawValue
         self.urlString = nil
         self.localBookmarkData = bookmarkData
+        self.iCloudDocumentPath = nil
+        self.modifiedAt = Date()
+    }
+    
+    init(title: String, kind: DocKind, iCloudPath: String) {
+        self.id = UUID()
+        self.title = title
+        self.kindRaw = kind.rawValue
+        self.urlString = nil
+        self.localBookmarkData = nil
+        self.iCloudDocumentPath = iCloudPath
+        self.modifiedAt = Date()
+    }
+    
+    func markAsModified() {
+        self.modifiedAt = Date()
     }
 
     var kind: DocKind { DocKind(rawValue: kindRaw) ?? .other }

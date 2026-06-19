@@ -246,8 +246,33 @@ private struct PDFKitView: UXViewRepresentable {
 // MARK: - Manual Storage Helper
 
 enum ManualStorage {
-    /// Copies a picked PDF into Application Support and returns the destination URL and bookmark data.
+    /// Stores a picked PDF in iCloud Drive and returns the iCloud path, plus legacy bookmark data for backwards compatibility
     static func copyPDFIntoAppSupport(pickedURL: URL, deviceId: UUID) throws -> (url: URL, bookmarkData: Data) {
+        // Check if iCloud sync is enabled
+        let iCloudSyncEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+        
+        if iCloudSyncEnabled && iCloudDocumentManager.isiCloudAvailable() {
+            // Store in iCloud Drive for cross-device sync
+            let originalName = pickedURL.lastPathComponent
+            let sanitized = sanitizeFileName(originalName.isEmpty ? "Manual.pdf" : originalName)
+            
+            let iCloudPath = try iCloudDocumentManager.storeFileIniCloud(
+                localURL: pickedURL,
+                fileName: sanitized
+            )
+            
+            // Return a placeholder URL and empty bookmark data
+            // The actual file is in iCloud, referenced by iCloudPath
+            let placeholderURL = URL(fileURLWithPath: "/iCloud/\(iCloudPath)")
+            return (placeholderURL, Data())
+        } else {
+            // Fallback to local Application Support storage (legacy behavior)
+            return try copyPDFToLocalStorage(pickedURL: pickedURL, deviceId: deviceId)
+        }
+    }
+    
+    /// Legacy method: Copies PDF to local Application Support (used when iCloud is disabled)
+    private static func copyPDFToLocalStorage(pickedURL: URL, deviceId: UUID) throws -> (url: URL, bookmarkData: Data) {
         let fm = FileManager.default
         let appSupport = try fm.url(
             for: .applicationSupportDirectory,
@@ -285,9 +310,6 @@ enum ManualStorage {
             try fm.removeItem(at: dest)
         }
         try fm.copyItem(at: pickedURL, to: dest)
-        
-        // print("📁 File copied to: \(dest.path)")
-        // print("📁 File exists after copy: \(fm.fileExists(atPath: dest.path))")
 
         // Create a security-scoped bookmark for the file
         let bookmarkData = try dest.bookmarkData(
@@ -295,8 +317,6 @@ enum ManualStorage {
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
-        
-        // print("📁 Bookmark created: \(bookmarkData.count) bytes")
 
         return (dest, bookmarkData)
     }
@@ -316,6 +336,30 @@ enum ManualStorage {
         // }
         
         return url
+    }
+    
+    /// Resolves a DocLink to a URL, handling both iCloud and local storage
+    static func resolveDocLink(_ doc: DocLink) throws -> URL {
+        // First try iCloud path (new method)
+        if let iCloudPath = doc.iCloudDocumentPath, !iCloudPath.isEmpty {
+            if let url = iCloudDocumentManager.getFileFromiCloud(relativePath: iCloudPath) {
+                return url
+            } else {
+                throw iCloudDocumentError.fileNotFound
+            }
+        }
+        
+        // Try local bookmark (legacy method)
+        if let bookmarkData = doc.localBookmarkData, !bookmarkData.isEmpty {
+            return try resolveBookmark(bookmarkData)
+        }
+        
+        // Try URL string (oldest legacy method for web URLs)
+        if let urlString = doc.urlString, let url = URL(string: urlString) {
+            return url
+        }
+        
+        throw iCloudDocumentError.fileNotFound
     }
 
     private static func sanitizeFileName(_ s: String) -> String {

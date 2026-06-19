@@ -7,11 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5F02DB072FE3081200CA8F43 /* iCloudDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F02DB062FE3081200CA8F43 /* iCloudDiagnostics.swift */; };
+		5F2C600B2FE590D1000F29AE /* iCloudDocumentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F2C600A2FE590D1000F29AE /* iCloudDocumentManager.swift */; };
 		5F4B730C2FC91176006E135F /* AssignGearSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4B730B2FC91176006E135F /* AssignGearSheet.swift */; };
 		5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5F02DB062FE3081200CA8F43 /* iCloudDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudDiagnostics.swift; sourceTree = "<group>"; };
+		5F2C600A2FE590D1000F29AE /* iCloudDocumentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudDocumentManager.swift; sourceTree = "<group>"; };
 		5F4B730B2FC91176006E135F /* AssignGearSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssignGearSheet.swift; sourceTree = "<group>"; };
 		5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAnnotations.swift; sourceTree = "<group>"; };
 		5FFE5C962F37D70900EB00B9 /* Studio Guru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Studio Guru.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -43,6 +47,8 @@
 				5FFE5C972F37D70900EB00B9 /* Products */,
 				5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */,
 				5F4B730B2FC91176006E135F /* AssignGearSheet.swift */,
+				5F02DB062FE3081200CA8F43 /* iCloudDiagnostics.swift */,
+				5F2C600A2FE590D1000F29AE /* iCloudDocumentManager.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -128,6 +134,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5F02DB072FE3081200CA8F43 /* iCloudDiagnostics.swift in Sources */,
+				5F2C600B2FE590D1000F29AE /* iCloudDocumentManager.swift in Sources */,
 				5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */,
 				5F4B730C2FC91176006E135F /* AssignGearSheet.swift in Sources */,
 			);
@@ -260,7 +268,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -310,7 +318,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

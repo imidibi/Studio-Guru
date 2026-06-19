@@ -141,8 +141,8 @@ struct StudioCanvasView: View {
         [:]
     @State private var deviceEditorError: String? = nil
     
-    // Draft manual for device editor
-    @State private var draftManualURL: URL? = nil
+    // Draft manuals for device editor (supports multiple)
+    @State private var draftManualURLs: [URL] = []
     @State private var isSelectingManualForDraft: Bool = false
     
     // Draft device location for Gear Locker
@@ -671,8 +671,7 @@ struct StudioCanvasView: View {
             
             // Right side: App actions (consolidated into single group with constant items)
             ToolbarItemGroup(placement: .automatic) {
-                #if os(iOS)
-                // Clear Annotations - always visible on iPad, enabled when annotations exist
+                // Clear Annotations - visible on all platforms when annotations exist
                 if let studio = currentStudio, !(studio.isSystemStudio && studio.systemStudioType == "gear_locker") {
                     Button(role: .destructive) {
                         studio.canvasDrawingData = nil
@@ -684,7 +683,6 @@ struct StudioCanvasView: View {
                     .disabled(studio.canvasDrawingData == nil)
                     .opacity(studio.canvasDrawingData != nil ? 1.0 : 0.3)
                 }
-                #endif
                 
                 Button {
                     isShowingGuru = true
@@ -1207,7 +1205,7 @@ struct StudioCanvasView: View {
                 digitalOutputs: $draftDigitalOutputs,
                 computerInterfaceCounts: $draftComputerInterfaceCounts,
                 errorMessage: $deviceEditorError,
-                manualURL: $draftManualURL,
+                manualURLs: $draftManualURLs,
                 isSelectingManual: $isSelectingManualForDraft,
                 deviceLocation: $draftDeviceLocation,
                 canAccessGearLocker: storeManager.canAccessGearLocker,
@@ -1265,7 +1263,7 @@ struct StudioCanvasView: View {
         draftDigitalInputs = []
         draftDigitalOutputs = []
         draftComputerInterfaceCounts = [:]
-        draftManualURL = nil
+        draftManualURLs = []
         
         // Reset asset inventory fields
         draftPurchasePrice = 0.0
@@ -1324,6 +1322,9 @@ struct StudioCanvasView: View {
         draftInsurancePolicyNumber = d.insurancePolicyNumber
         draftCurrentEstimatedValue = d.currentEstimatedValue
         draftAssetNotes = d.assetNotes
+        
+        // Clear draft manuals (existing device manuals are already saved, new ones can be added)
+        draftManualURLs = []
 
         suppressNextInspectorPresentation = true
         isShowingDeviceEditor = true
@@ -1634,26 +1635,45 @@ struct StudioCanvasView: View {
             sampleRate: draftSampleRate
         )
         
-        // Handle manual PDF if one was selected
-        if let pickedURL = draftManualURL {
-            do {
-                let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
-                    pickedURL: pickedURL,
-                    deviceId: device.id
-                )
-                
-                let doc = DocLink(
-                    title: storedURL.lastPathComponent,
-                    kind: .manual,
-                    bookmarkData: bookmarkData
-                )
-                if device.docs == nil {
-                    device.docs = []
+        // Handle manual PDFs if any were selected (supports multiple)
+        if !draftManualURLs.isEmpty {
+            if device.docs == nil {
+                device.docs = []
+            }
+            
+            for pickedURL in draftManualURLs {
+                do {
+                    let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
+                        pickedURL: pickedURL,
+                        deviceId: device.id
+                    )
+                    
+                    let doc: DocLink
+                    // Check if this is an iCloud-stored document (path starts with /iCloud/)
+                    if storedURL.path.hasPrefix("/iCloud/") {
+                        let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
+                        // Extract original filename (removes UUID prefix) and remove extension
+                        let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
+                        let title = (fullFilename as NSString).deletingPathExtension
+                        doc = DocLink(
+                            title: title,
+                            kind: .manual,
+                            iCloudPath: iCloudPath
+                        )
+                    } else {
+                        // Legacy local storage
+                        doc = DocLink(
+                            title: storedURL.lastPathComponent,
+                            kind: .manual,
+                            bookmarkData: bookmarkData
+                        )
+                    }
+                    
+                    device.docs?.append(doc)
+                } catch {
+                    print("❌ Manual import failed for \(pickedURL.lastPathComponent): \(error)")
+                    // Don't fail the entire save operation if one manual import fails
                 }
-                device.docs?.append(doc)
-            } catch {
-                print("Manual import failed during device save: \(error)")
-                // Don't fail the entire save operation if manual import fails
             }
         }
 
@@ -5236,40 +5256,14 @@ private struct InspectorPanel: View {
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        // print("📱 Manual tapped: \(doc.title)")
-                                        // print("📱 Has bookmark: \(doc.localBookmarkData != nil)")
-                                        // print("📱 Has URL string: \(doc.urlString != nil)")
-
-                                        // Try bookmark first, fall back to URL string for legacy docs
-                                        if let bookmarkData = doc
-                                            .localBookmarkData
-                                        {
-                                            // print("📱 Attempting to resolve bookmark...")
-                                            do {
-                                                let url =
-                                                    try ManualStorage
-                                                    .resolveBookmark(
-                                                        bookmarkData
-                                                    )
-                                                // print("📱 ✅ Bookmark resolved to: \(url.path)")
-                                                manualViewerItem =
-                                                    IdentifiableURL(url: url)
-                                            } catch {
-                                                print(
-                                                    "📱 ❌ Bookmark resolution failed: \(error)"
-                                                )
-                                            }
-                                        } else if let urlString = doc.urlString,
-                                            let url = URL(string: urlString)
-                                        {
-                                            // print("📱 Using legacy URL string: \(urlString)")
-                                            manualViewerItem = IdentifiableURL(
-                                                url: url
-                                            )
-                                        } else {
-                                            print(
-                                                "📱 ❌ No bookmark or URL available"
-                                            )
+                                        // Try to migrate to iCloud if needed (one-time automatic migration)
+                                        _ = iCloudDocumentManager.migrateDocLinkToiCloud(doc)
+                                        
+                                        do {
+                                            let url = try ManualStorage.resolveDocLink(doc)
+                                            manualViewerItem = IdentifiableURL(url: url, title: doc.title)
+                                        } catch {
+                                            print("❌ Failed to resolve manual: \(error)")
                                         }
                                     }
                                 }
@@ -5361,15 +5355,35 @@ private struct InspectorPanel: View {
                                     deviceId: device.id
                                 )
 
-                            let doc = DocLink(
-                                title: storedURL.lastPathComponent,
-                                kind: .manual,
-                                bookmarkData: bookmarkData
-                            )
+                            let doc: DocLink
+                            // Check if this is an iCloud-stored document (path starts with /iCloud/)
+                            if storedURL.path.hasPrefix("/iCloud/") {
+                                let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
+                                // Extract original filename (removes UUID prefix) and remove extension
+                                let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
+                                let title = (fullFilename as NSString).deletingPathExtension
+                                doc = DocLink(
+                                    title: title,
+                                    kind: .manual,
+                                    iCloudPath: iCloudPath
+                                )
+                            } else {
+                                // Legacy local storage
+                                doc = DocLink(
+                                    title: storedURL.lastPathComponent,
+                                    kind: .manual,
+                                    bookmarkData: bookmarkData
+                                )
+                            }
+                            
                             if device.docs == nil {
                                 device.docs = []
                             }
                             device.docs?.append(doc)
+                            
+                            // Mark device and studio as modified
+                            device.markAsModified()
+                            studio.markAsModified()
                         } catch {
                             print("Manual import failed: \(error)")
                         }
@@ -5378,14 +5392,14 @@ private struct InspectorPanel: View {
                         .fullScreenCover(item: $manualViewerItem) { item in
                             ManualPDFViewer(
                                 url: item.url,
-                                title: item.url.lastPathComponent
+                                title: item.title
                             )
                         }
                     #else
                         .sheet(item: $manualViewerItem) { item in
                             ManualPDFViewer(
                                 url: item.url,
-                                title: item.url.lastPathComponent
+                                title: item.title
                             )
                         }
                     #endif
@@ -6395,7 +6409,7 @@ private struct DeviceEditorSheet: View {
 
     @Binding var errorMessage: String?
     
-    @Binding var manualURL: URL?
+    @Binding var manualURLs: [URL]
     @Binding var isSelectingManual: Bool
     
     @Binding var deviceLocation: DeviceLocation
@@ -6581,28 +6595,30 @@ private struct DeviceEditorSheet: View {
                             .padding(8)
                         }
                         
-                        GroupBox("Manual") {
+                        GroupBox("Manuals") {
                             VStack(alignment: .leading, spacing: 10) {
-                                if let url = manualURL {
-                                    HStack {
-                                        Image(systemName: "doc.richtext.fill")
-                                            .foregroundStyle(.blue)
-                                        Text(url.lastPathComponent)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Button(role: .destructive) {
-                                            manualURL = nil
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .buttonStyle(.borderless)
-                                    }
-                                    .padding(.vertical, 4)
-                                } else {
-                                    Text("No manual attached")
+                                if manualURLs.isEmpty {
+                                    Text("No manuals attached")
                                         .foregroundStyle(.secondary)
                                         .font(.caption)
+                                } else {
+                                    ForEach(Array(manualURLs.enumerated()), id: \.offset) { index, url in
+                                        HStack {
+                                            Image(systemName: "doc.richtext.fill")
+                                                .foregroundStyle(.blue)
+                                            Text(url.lastPathComponent)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Button(role: .destructive) {
+                                                manualURLs.remove(at: index)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            .buttonStyle(.borderless)
+                                        }
+                                        .padding(.vertical, 4)
+                                    }
                                 }
                                 
                                 Button {
@@ -6925,14 +6941,12 @@ private struct DeviceEditorSheet: View {
                 .fileImporter(
                     isPresented: $isSelectingManual,
                     allowedContentTypes: [.pdf],
-                    allowsMultipleSelection: false
+                    allowsMultipleSelection: true
                 ) { result in
-                    guard case .success(let urls) = result,
-                          let pickedURL = urls.first
-                    else { return }
+                    guard case .success(let urls) = result else { return }
                     
-                    // Store the URL - it will be processed when saving
-                    manualURL = pickedURL
+                    // Append all selected URLs - they will be processed when saving
+                    manualURLs.append(contentsOf: urls)
                 }
             #else
                 Form {
@@ -7006,25 +7020,27 @@ private struct DeviceEditorSheet: View {
                         .keyboardType(.URL)
                     }
                     
-                    Section("Manual") {
-                        if let url = manualURL {
-                            HStack {
-                                Image(systemName: "doc.richtext.fill")
-                                    .foregroundStyle(.blue)
-                                Text(url.lastPathComponent)
-                                    .lineLimit(1)
-                                Spacer()
-                                Button(role: .destructive) {
-                                    manualURL = nil
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        } else {
-                            Text("No manual attached")
+                    Section("Manuals") {
+                        if manualURLs.isEmpty {
+                            Text("No manuals attached")
                                 .foregroundStyle(.secondary)
                                 .font(.caption)
+                        } else {
+                            ForEach(Array(manualURLs.enumerated()), id: \.offset) { index, url in
+                                HStack {
+                                    Image(systemName: "doc.richtext.fill")
+                                        .foregroundStyle(.blue)
+                                    Text(url.lastPathComponent)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Button(role: .destructive) {
+                                        manualURLs.remove(at: index)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
                         
                         Button {
@@ -7322,14 +7338,12 @@ private struct DeviceEditorSheet: View {
                 .fileImporter(
                     isPresented: $isSelectingManual,
                     allowedContentTypes: [.pdf],
-                    allowsMultipleSelection: false
+                    allowsMultipleSelection: true
                 ) { result in
-                    guard case .success(let urls) = result,
-                          let pickedURL = urls.first
-                    else { return }
+                    guard case .success(let urls) = result else { return }
                     
-                    // Store the URL - it will be processed when saving
-                    manualURL = pickedURL
+                    // Append all selected URLs - they will be processed when saving
+                    manualURLs.append(contentsOf: urls)
                 }
             #endif
         }
@@ -7345,6 +7359,7 @@ private struct IdentifiableUUID: Identifiable {
 private struct IdentifiableURL: Identifiable {
     let id = UUID()
     let url: URL
+    let title: String
 }
 
 private struct DeviceInspectorOverlay: View {
@@ -7530,40 +7545,14 @@ private struct DeviceInspectorOverlay: View {
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        // print("📱 Manual tapped: \(doc.title)")
-                                        // print("📱 Has bookmark: \(doc.localBookmarkData != nil)")
-                                        // print("📱 Has URL string: \(doc.urlString != nil)")
-
-                                        // Try bookmark first, fall back to URL string for legacy docs
-                                        if let bookmarkData = doc
-                                            .localBookmarkData
-                                        {
-                                            // print("📱 Attempting to resolve bookmark...")
-                                            do {
-                                                let url =
-                                                    try ManualStorage
-                                                    .resolveBookmark(
-                                                        bookmarkData
-                                                    )
-                                                // print("📱 ✅ Bookmark resolved to: \(url.path)")
-                                                manualViewerItem =
-                                                    IdentifiableURL(url: url)
-                                            } catch {
-                                                print(
-                                                    "📱 ❌ Bookmark resolution failed: \(error)"
-                                                )
-                                            }
-                                        } else if let urlString = doc.urlString,
-                                            let url = URL(string: urlString)
-                                        {
-                                            // print("📱 Using legacy URL string: \(urlString)")
-                                            manualViewerItem = IdentifiableURL(
-                                                url: url
-                                            )
-                                        } else {
-                                            print(
-                                                "📱 ❌ No bookmark or URL available"
-                                            )
+                                        // Try to migrate to iCloud if needed (one-time automatic migration)
+                                        _ = iCloudDocumentManager.migrateDocLinkToiCloud(doc)
+                                        
+                                        do {
+                                            let url = try ManualStorage.resolveDocLink(doc)
+                                            manualViewerItem = IdentifiableURL(url: url, title: doc.title)
+                                        } catch {
+                                            print("❌ Failed to resolve manual: \(error)")
                                         }
                                     }
                                 }
@@ -7639,15 +7628,35 @@ private struct DeviceInspectorOverlay: View {
                                     deviceId: device.id
                                 )
 
-                            let doc = DocLink(
-                                title: storedURL.lastPathComponent,
-                                kind: .manual,
-                                bookmarkData: bookmarkData
-                            )
+                            let doc: DocLink
+                            // Check if this is an iCloud-stored document (path starts with /iCloud/)
+                            if storedURL.path.hasPrefix("/iCloud/") {
+                                let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
+                                // Extract original filename (removes UUID prefix) and remove extension
+                                let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
+                                let title = (fullFilename as NSString).deletingPathExtension
+                                doc = DocLink(
+                                    title: title,
+                                    kind: .manual,
+                                    iCloudPath: iCloudPath
+                                )
+                            } else {
+                                // Legacy local storage
+                                doc = DocLink(
+                                    title: storedURL.lastPathComponent,
+                                    kind: .manual,
+                                    bookmarkData: bookmarkData
+                                )
+                            }
+                            
                             if device.docs == nil {
                                 device.docs = []
                             }
                             device.docs?.append(doc)
+                            
+                            // Mark device and studio as modified
+                            device.markAsModified()
+                            studio.markAsModified()
                         } catch {
                             print("Manual import failed: \(error)")
                         }
@@ -7656,14 +7665,14 @@ private struct DeviceInspectorOverlay: View {
                         .fullScreenCover(item: $manualViewerItem) { item in
                             ManualPDFViewer(
                                 url: item.url,
-                                title: item.url.lastPathComponent
+                                title: item.title
                             )
                         }
                     #else
                         .sheet(item: $manualViewerItem) { item in
                             ManualPDFViewer(
                                 url: item.url,
-                                title: item.url.lastPathComponent
+                                title: item.title
                             )
                         }
                     #endif

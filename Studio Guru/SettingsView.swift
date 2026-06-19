@@ -311,7 +311,7 @@ struct SettingsView: View {
                     } header: {
                         Text("Manual Sync")
                     } footer: {
-                        Text("Forces an immediate sync with iCloud. Changes from all devices will be merged. If conflicts occur, the most recently modified data wins.")
+                        Text("Uploads any local changes to iCloud immediately. Changes from other devices sync automatically in the background (usually within 1-2 minutes). Device manuals are stored in iCloud Drive and sync separately.")
                     }
                 }
                 
@@ -632,22 +632,32 @@ struct SettingsView: View {
         print("🔄 Manual sync started for \(studios.count) studios")
         for studio in studios {
             print("  📱 Studio: '\(studio.name)' - Modified: \(studio.modifiedAt)")
+            if let devices = studio.devices {
+                for device in devices {
+                    print("    🎛️ Device: '\(device.nickname)' - Docs: \(device.docs?.count ?? 0)")
+                }
+            }
         }
         #endif
         
-        // Force a save to trigger CloudKit sync
-        // SwiftData automatically syncs changed records to CloudKit
+        // Force a save to push local changes to CloudKit
+        // Note: SwiftData automatically syncs in the background, but this ensures
+        // any pending local changes are pushed up immediately
         do {
             try modelContext.save()
             
-            // Give CloudKit time to process the sync
-            try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+            #if DEBUG
+            print("✅ Local changes saved to CloudKit")
+            #endif
+            
+            // Give CloudKit time to process
+            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             
             await MainActor.run {
                 isSyncing = false
                 let formatter = DateFormatter()
                 formatter.timeStyle = .short
-                lastSyncMessage = "Sync initiated at \(formatter.string(from: Date())). Changes may take a few moments to appear on other devices."
+                lastSyncMessage = "Local changes uploaded at \(formatter.string(from: Date())). New changes from other devices will sync automatically in the background. This can take 1-2 minutes."
             }
             
             #if DEBUG

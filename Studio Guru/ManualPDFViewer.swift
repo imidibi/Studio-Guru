@@ -31,6 +31,8 @@ struct ManualPDFViewer: View {
     @State private var matches: [PDFSelection] = []
     @State private var currentMatchIndex: Int = 0
     @State private var document: PDFDocument? = nil
+    @State private var loadingStatus: String = "Loading PDF..."
+    @State private var isDownloading: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -80,8 +82,14 @@ struct ManualPDFViewer: View {
                 if document == nil {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("Loading PDF...")
+                            .scaleEffect(1.2)
+                        Text(loadingStatus)
                             .foregroundStyle(.secondary)
+                        if isDownloading {
+                            Text("This may take a few moments...")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -111,43 +119,90 @@ struct ManualPDFViewer: View {
     
     private func loadDocument() {
         if document == nil {
-            // print("📄 PDF loading attempt...")
-            // print("📄 URL: \(url)")
-            // print("📄 URL path: \(url.path)")
-            // print("📄 URL scheme: \(url.scheme ?? "none")")
-            // print("📄 File exists: \(FileManager.default.fileExists(atPath: url.path))")
+            // Check if this is an iCloud file by looking at the URL
+            let isiCloudFile = url.path.contains("Mobile Documents") || url.path.contains("iCloud~")
+            
+            if isiCloudFile {
+                loadingStatus = "Downloading from iCloud..."
+                isDownloading = true
+            } else {
+                loadingStatus = "Loading PDF..."
+                isDownloading = false
+            }
             
             // Try to access security-scoped resource for saved files
             let needsScoped = url.startAccessingSecurityScopedResource()
             defer {
                 if needsScoped {
                     // Keep access during viewing - don't stop here
-                    // print("📄 Security-scoped access granted")
                 }
             }
             
-            // Load the document
-            document = PDFDocument(url: url)
-            
-            // print("📄 Document loaded: \(document != nil)")
-            if let doc = document {
-                // print("📄 ✅ Success! Page count: \(doc.pageCount)")
-                _ = doc // Silence unused variable warning
+            // For iCloud files, ensure download is started and wait a bit
+            if isiCloudFile {
+                do {
+                    try FileManager.default.startDownloadingUbiquitousItem(at: url)
+                    
+                    // Give it a moment to start downloading
+                    Task {
+                        // Check download status periodically
+                        var attempts = 0
+                        while attempts < 50 { // Max 5 seconds (50 * 0.1s)
+                            attempts += 1
+                            
+                            // Check if file is downloaded
+                            if let values = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
+                               let status = values.ubiquitousItemDownloadingStatus {
+                                
+                                if status == .current {
+                                    // File is downloaded, load it
+                                    await MainActor.run {
+                                        loadingStatus = "Opening PDF..."
+                                        loadPDFDocument()
+                                    }
+                                    return
+                                } else if status == .downloaded {
+                                    // File is already downloaded
+                                    await MainActor.run {
+                                        loadPDFDocument()
+                                    }
+                                    return
+                                }
+                            }
+                            
+                            // Wait a bit before checking again
+                            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                        }
+                        
+                        // Timeout - try to load anyway
+                        await MainActor.run {
+                            loadingStatus = "Opening PDF..."
+                            loadPDFDocument()
+                        }
+                    }
+                } catch {
+                    // If startDownloadingUbiquitousItem fails, try loading anyway
+                    loadPDFDocument()
+                }
             } else {
-                // print("📄 ❌ Failed to load PDF")
-                
-                // Try alternative loading method
-                if let data = try? Data(contentsOf: url) {
-                    // print("📄 Trying to load from Data... (\(data.count) bytes)")
-                    document = PDFDocument(data: data)
-                    // if document != nil {
-                    //     print("📄 ✅ Loaded from Data!")
-                    // }
-                } // else {
-                    // print("📄 ❌ Could not read file data")
-                // }
+                // Local file, load immediately
+                loadPDFDocument()
             }
         }
+    }
+    
+    private func loadPDFDocument() {
+        // Load the document
+        document = PDFDocument(url: url)
+        
+        if document == nil {
+            // Try alternative loading method
+            if let data = try? Data(contentsOf: url) {
+                document = PDFDocument(data: data)
+            }
+        }
+        
+        isDownloading = false
     }
 
     private func performSearch() {

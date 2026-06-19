@@ -145,9 +145,15 @@ class iCloudDocumentManager {
     static func migrateLocalBookmarkToiCloud(bookmarkData: Data, fileName: String) throws -> String {
         var isStale = false
         
-        // Resolve bookmark
+        // Resolve bookmark with platform-specific options
+        #if os(macOS)
+        let options: URL.BookmarkResolutionOptions = .withSecurityScope
+        #else
+        let options: URL.BookmarkResolutionOptions = []
+        #endif
+        
         guard let url = try? URL(resolvingBookmarkData: bookmarkData,
-                                  options: .withSecurityScope,
+                                  options: options,
                                   relativeTo: nil,
                                   bookmarkDataIsStale: &isStale) else {
             throw iCloudDocumentError.fileNotFound

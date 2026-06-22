@@ -1679,6 +1679,16 @@ struct StudioCanvasView: View {
         device.markAsModified()
         targetStudio.markAsModified()
         
+        // Force save to push large PDF data to CloudKit immediately
+        do {
+            try modelContext.save()
+            #if DEBUG
+            print("✅ Device saved with \(device.docs?.count ?? 0) manuals")
+            #endif
+        } catch {
+            print("❌ Failed to save device: \(error)")
+        }
+        
         // Only set selection if device was saved to current studio AND it's not a system studio
         // System studios (like Gear Locker) use list views and don't need canvas selection
         if targetStudio.id == studio.id && !targetStudio.isSystemStudio {

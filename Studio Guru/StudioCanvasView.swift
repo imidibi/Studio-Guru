@@ -1643,25 +1643,27 @@ struct StudioCanvasView: View {
             
             for pickedURL in draftManualURLs {
                 do {
-                    let (pdfData, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
+                    let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
                         pickedURL: pickedURL,
                         deviceId: device.id
                     )
                     
                     let doc: DocLink
-                    let title = (pickedURL.lastPathComponent as NSString).deletingPathExtension
-                    
-                    if let pdfData = pdfData {
-                        // CloudKit storage (iCloud sync enabled)
+                    // Check if this is an iCloud-stored document (path starts with /iCloud/)
+                    if storedURL.path.hasPrefix("/iCloud/") {
+                        let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
+                        // Extract original filename (removes UUID prefix) and remove extension
+                        let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
+                        let title = (fullFilename as NSString).deletingPathExtension
                         doc = DocLink(
                             title: title,
                             kind: .manual,
-                            pdfData: pdfData
+                            iCloudPath: iCloudPath
                         )
                     } else {
-                        // Local storage (iCloud sync disabled)
+                        // Legacy local storage
                         doc = DocLink(
-                            title: title,
+                            title: storedURL.lastPathComponent,
                             kind: .manual,
                             bookmarkData: bookmarkData
                         )
@@ -1678,16 +1680,6 @@ struct StudioCanvasView: View {
         // Mark device and target studio as modified for iCloud sync
         device.markAsModified()
         targetStudio.markAsModified()
-        
-        // Force save to push large PDF data to CloudKit immediately
-        do {
-            try modelContext.save()
-            #if DEBUG
-            print("✅ Device saved with \(device.docs?.count ?? 0) manuals")
-            #endif
-        } catch {
-            print("❌ Failed to save device: \(error)")
-        }
         
         // Only set selection if device was saved to current studio AND it's not a system studio
         // System studios (like Gear Locker) use list views and don't need canvas selection
@@ -5357,26 +5349,28 @@ private struct InspectorPanel: View {
                         else { return }
 
                         do {
-                            let (pdfData, bookmarkData) =
+                            let (storedURL, bookmarkData) =
                                 try ManualStorage.copyPDFIntoAppSupport(
                                     pickedURL: pickedURL,
                                     deviceId: device.id
                                 )
 
                             let doc: DocLink
-                            let title = (pickedURL.lastPathComponent as NSString).deletingPathExtension
-                            
-                            if let pdfData = pdfData {
-                                // CloudKit storage (iCloud sync enabled)
+                            // Check if this is an iCloud-stored document (path starts with /iCloud/)
+                            if storedURL.path.hasPrefix("/iCloud/") {
+                                let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
+                                // Extract original filename (removes UUID prefix) and remove extension
+                                let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
+                                let title = (fullFilename as NSString).deletingPathExtension
                                 doc = DocLink(
                                     title: title,
                                     kind: .manual,
-                                    pdfData: pdfData
+                                    iCloudPath: iCloudPath
                                 )
                             } else {
-                                // Local storage (iCloud sync disabled)
+                                // Legacy local storage
                                 doc = DocLink(
-                                    title: title,
+                                    title: storedURL.lastPathComponent,
                                     kind: .manual,
                                     bookmarkData: bookmarkData
                                 )
@@ -7628,26 +7622,28 @@ private struct DeviceInspectorOverlay: View {
                         else { return }
 
                         do {
-                            let (pdfData, bookmarkData) =
+                            let (storedURL, bookmarkData) =
                                 try ManualStorage.copyPDFIntoAppSupport(
                                     pickedURL: pickedURL,
                                     deviceId: device.id
                                 )
 
                             let doc: DocLink
-                            let title = (pickedURL.lastPathComponent as NSString).deletingPathExtension
-                            
-                            if let pdfData = pdfData {
-                                // CloudKit storage (iCloud sync enabled)
+                            // Check if this is an iCloud-stored document (path starts with /iCloud/)
+                            if storedURL.path.hasPrefix("/iCloud/") {
+                                let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
+                                // Extract original filename (removes UUID prefix) and remove extension
+                                let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
+                                let title = (fullFilename as NSString).deletingPathExtension
                                 doc = DocLink(
                                     title: title,
                                     kind: .manual,
-                                    pdfData: pdfData
+                                    iCloudPath: iCloudPath
                                 )
                             } else {
-                                // Local storage (iCloud sync disabled)
+                                // Legacy local storage
                                 doc = DocLink(
-                                    title: title,
+                                    title: storedURL.lastPathComponent,
                                     kind: .manual,
                                     bookmarkData: bookmarkData
                                 )

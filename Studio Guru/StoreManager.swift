@@ -50,7 +50,29 @@ class StoreManager: ObservableObject {
             return true
         }
         
-        return purchasedProductIDs.contains(proProductID)
+        // Check for Pro upgrade IAP
+        if purchasedProductIDs.contains(proProductID) {
+            return true
+        }
+        
+        // Check if user bought the original paid app
+        // When the app was paid, the transaction product ID was the bundle ID
+        if purchasedProductIDs.contains("com.ianmiller.studioguru") {
+            print("✅ User has paid app purchase - granting Pro")
+            return true
+        }
+        
+        // Check if user has ANY purchase at all (legacy support)
+        // Some users who bought the paid app might have it under a different ID
+        if !purchasedProductIDs.isEmpty {
+            // Log what we found to help diagnose
+            print("ℹ️ User has purchases but not Pro IAP: \(purchasedProductIDs)")
+            // For now, grant Pro if they have any purchase
+            // This ensures paid app buyers aren't locked out
+            return true
+        }
+        
+        return false
     }
     
     // Check if user purchased the app before it went freemium
@@ -208,7 +230,8 @@ class StoreManager: ObservableObject {
     private func updatePurchasedProducts() async {
         var purchased = Set<String>()
 
-        // Iterate through all transactions
+        // Iterate through all transactions to check for ANY purchase
+        // This includes the original paid app AND the Pro upgrade IAP
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else {
                 continue
@@ -217,11 +240,23 @@ class StoreManager: ObservableObject {
             // Add to purchased set if not revoked
             if transaction.revocationDate == nil {
                 purchased.insert(transaction.productID)
+                
+                #if DEBUG
+                print("📱 Found transaction: \(transaction.productID)")
+                print("   Purchase date: \(transaction.purchaseDate)")
+                print("   Transaction ID: \(transaction.id)")
+                #endif
             }
         }
 
         purchasedProductIDs = purchased
         print("✅ Updated purchased products: \(purchased)")
+        
+        // IMPORTANT: If user has ANY purchase (paid app OR Pro IAP), they should have Pro
+        // The paid app transaction will have the bundle ID as product ID
+        if !purchased.isEmpty {
+            print("ℹ️ User has at least one purchase - checking for Pro eligibility")
+        }
     }
 
     // Observe transaction updates

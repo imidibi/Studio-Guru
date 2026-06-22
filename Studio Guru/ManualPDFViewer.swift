@@ -301,28 +301,37 @@ private struct PDFKitView: UXViewRepresentable {
 // MARK: - Manual Storage Helper
 
 enum ManualStorage {
-    /// Stores a picked PDF in iCloud Drive and returns the iCloud path, plus legacy bookmark data for backwards compatibility
-    static func copyPDFIntoAppSupport(pickedURL: URL, deviceId: UUID) throws -> (url: URL, bookmarkData: Data) {
+    /// Stores a picked PDF by reading it into Data for CloudKit sync
+    static func copyPDFIntoAppSupport(pickedURL: URL, deviceId: UUID) throws -> (pdfData: Data?, bookmarkData: Data) {
         // Check if iCloud sync is enabled
         let iCloudSyncEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
         
-        if iCloudSyncEnabled && iCloudDocumentManager.isiCloudAvailable() {
-            // Store in iCloud Drive for cross-device sync
-            let originalName = pickedURL.lastPathComponent
-            let sanitized = sanitizeFileName(originalName.isEmpty ? "Manual.pdf" : originalName)
+        if iCloudSyncEnabled {
+            // Read PDF data for CloudKit storage (with @Attribute(.externalStorage))
+            let needsScoped = pickedURL.startAccessingSecurityScopedResource()
+            defer {
+                if needsScoped { pickedURL.stopAccessingSecurityScopedResource() }
+            }
             
-            let iCloudPath = try iCloudDocumentManager.storeFileIniCloud(
-                localURL: pickedURL,
-                fileName: sanitized
-            )
+            guard FileManager.default.fileExists(atPath: pickedURL.path) else {
+                throw iCloudDocumentError.fileNotFound
+            }
             
-            // Return a placeholder URL and empty bookmark data
-            // The actual file is in iCloud, referenced by iCloudPath
-            let placeholderURL = URL(fileURLWithPath: "/iCloud/\(iCloudPath)")
-            return (placeholderURL, Data())
+            let data = try Data(contentsOf: pickedURL)
+            
+            #if DEBUG
+            print("📄 Read PDF for CloudKit storage: \(pickedURL.lastPathComponent)")
+            print("   Size: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))")
+            #endif
+            
+            // Return PDF data for CloudKit storage
+            return (pdfData: data, bookmarkData: Data())
         } else {
             // Fallback to local Application Support storage (legacy behavior)
-            return try copyPDFToLocalStorage(pickedURL: pickedURL, deviceId: deviceId)
+            let (url, bookmarkData) = try copyPDFToLocalStorage(pickedURL: pickedURL, deviceId: deviceId)
+            
+            // For local storage, we don't store pdfData
+            return (pdfData: nil, bookmarkData: bookmarkData)
         }
     }
     
@@ -393,35 +402,51 @@ enum ManualStorage {
         return url
     }
     
-    /// Resolves a DocLink to a URL, handling both iCloud and local storage
+    /// Resolves a DocLink to a URL, handling CloudKit data, iCloud Drive, and local storage
     static func resolveDocLink(_ doc: DocLink) throws -> URL {
         #if DEBUG
         print("📄 Resolving DocLink: '\(doc.title)'")
+        print("   pdfData: \(doc.pdfData != nil ? "present (\(ByteCountFormatter.string(fromByteCount: Int64(doc.pdfData?.count ?? 0), countStyle: .file)))" : "nil")")
         print("   iCloudPath: \(doc.iCloudDocumentPath ?? "nil")")
         print("   localBookmark: \(doc.localBookmarkData != nil ? "present" : "nil")")
         print("   urlString: \(doc.urlString ?? "nil")")
         #endif
         
-        // First try iCloud path (new method)
+        // Primary: Check for CloudKit-stored PDF data
+        if let pdfData = doc.pdfData, !pdfData.isEmpty {
+            #if DEBUG
+            print("   ✅ Using CloudKit-synced PDF data")
+            #endif
+            
+            // Write to temporary file for PDFKit to display
+            let tempDir = FileManager.default.temporaryDirectory
+            let tempFile = tempDir.appendingPathComponent("\(doc.id.uuidString).pdf")
+            
+            try pdfData.write(to: tempFile, options: .atomic)
+            return tempFile
+        }
+        
+        // Legacy: Try iCloud Drive path (for old data, will auto-migrate)
         if let iCloudPath = doc.iCloudDocumentPath, !iCloudPath.isEmpty {
             #if DEBUG
-            print("   Attempting iCloud retrieval for: \(iCloudPath)")
+            print("   Attempting legacy iCloud Drive retrieval for: \(iCloudPath)")
             #endif
             
             if let url = iCloudDocumentManager.getFileFromiCloud(relativePath: iCloudPath) {
                 #if DEBUG
-                print("   ✅ iCloud URL resolved: \(url.path)")
+                print("   ✅ Legacy iCloud Drive URL resolved: \(url.path)")
+                print("   ⚠️ Consider migrating to CloudKit storage")
                 #endif
                 return url
             } else {
                 #if DEBUG
-                print("   ❌ iCloud file not accessible")
+                print("   ❌ iCloud Drive file not accessible")
                 #endif
                 throw iCloudDocumentError.fileNotFound
             }
         }
         
-        // Try local bookmark (legacy method)
+        // Legacy: Try local bookmark (for users without iCloud sync)
         if let bookmarkData = doc.localBookmarkData, !bookmarkData.isEmpty {
             #if DEBUG
             print("   Attempting local bookmark resolution")
@@ -429,7 +454,7 @@ enum ManualStorage {
             return try resolveBookmark(bookmarkData)
         }
         
-        // Try URL string (oldest legacy method for web URLs)
+        // Legacy: Try URL string (for web URLs)
         if let urlString = doc.urlString, let url = URL(string: urlString) {
             #if DEBUG
             print("   Using URL string: \(urlString)")

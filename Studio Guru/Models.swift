@@ -486,8 +486,12 @@ final class DocLink {
     var urlString: String?
     var localBookmarkData: Data?
     
-    // iCloud-stored document path (relative to app's iCloud container)
+    // Legacy: iCloud Drive document path (deprecated in favor of pdfData)
     var iCloudDocumentPath: String?
+    
+    // Primary: PDF data stored in CloudKit with external storage (up to 250 MB)
+    // This ensures reliable bidirectional sync across all devices
+    @Attribute(.externalStorage) var pdfData: Data?
     
     // Modification tracking for iCloud sync
     var modifiedAt: Date = Date()
@@ -501,6 +505,7 @@ final class DocLink {
         self.urlString = url.absoluteString
         self.localBookmarkData = nil
         self.iCloudDocumentPath = nil
+        self.pdfData = nil
         self.modifiedAt = Date()
     }
 
@@ -511,9 +516,11 @@ final class DocLink {
         self.urlString = nil
         self.localBookmarkData = bookmarkData
         self.iCloudDocumentPath = nil
+        self.pdfData = nil
         self.modifiedAt = Date()
     }
     
+    // Legacy initializer for iCloud Drive (deprecated)
     init(title: String, kind: DocKind, iCloudPath: String) {
         self.id = UUID()
         self.title = title
@@ -521,6 +528,19 @@ final class DocLink {
         self.urlString = nil
         self.localBookmarkData = nil
         self.iCloudDocumentPath = iCloudPath
+        self.pdfData = nil
+        self.modifiedAt = Date()
+    }
+    
+    // Primary initializer for CloudKit-synced PDFs
+    init(title: String, kind: DocKind, pdfData: Data) {
+        self.id = UUID()
+        self.title = title
+        self.kindRaw = kind.rawValue
+        self.urlString = nil
+        self.localBookmarkData = nil
+        self.iCloudDocumentPath = nil
+        self.pdfData = pdfData
         self.modifiedAt = Date()
     }
     

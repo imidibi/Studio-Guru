@@ -1643,27 +1643,25 @@ struct StudioCanvasView: View {
             
             for pickedURL in draftManualURLs {
                 do {
-                    let (storedURL, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
+                    let (pdfData, bookmarkData) = try ManualStorage.copyPDFIntoAppSupport(
                         pickedURL: pickedURL,
                         deviceId: device.id
                     )
                     
                     let doc: DocLink
-                    // Check if this is an iCloud-stored document (path starts with /iCloud/)
-                    if storedURL.path.hasPrefix("/iCloud/") {
-                        let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
-                        // Extract original filename (removes UUID prefix) and remove extension
-                        let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
-                        let title = (fullFilename as NSString).deletingPathExtension
+                    let title = (pickedURL.lastPathComponent as NSString).deletingPathExtension
+                    
+                    if let pdfData = pdfData {
+                        // CloudKit storage (iCloud sync enabled)
                         doc = DocLink(
                             title: title,
                             kind: .manual,
-                            iCloudPath: iCloudPath
+                            pdfData: pdfData
                         )
                     } else {
-                        // Legacy local storage
+                        // Local storage (iCloud sync disabled)
                         doc = DocLink(
-                            title: storedURL.lastPathComponent,
+                            title: title,
                             kind: .manual,
                             bookmarkData: bookmarkData
                         )
@@ -5349,28 +5347,26 @@ private struct InspectorPanel: View {
                         else { return }
 
                         do {
-                            let (storedURL, bookmarkData) =
+                            let (pdfData, bookmarkData) =
                                 try ManualStorage.copyPDFIntoAppSupport(
                                     pickedURL: pickedURL,
                                     deviceId: device.id
                                 )
 
                             let doc: DocLink
-                            // Check if this is an iCloud-stored document (path starts with /iCloud/)
-                            if storedURL.path.hasPrefix("/iCloud/") {
-                                let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
-                                // Extract original filename (removes UUID prefix) and remove extension
-                                let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
-                                let title = (fullFilename as NSString).deletingPathExtension
+                            let title = (pickedURL.lastPathComponent as NSString).deletingPathExtension
+                            
+                            if let pdfData = pdfData {
+                                // CloudKit storage (iCloud sync enabled)
                                 doc = DocLink(
                                     title: title,
                                     kind: .manual,
-                                    iCloudPath: iCloudPath
+                                    pdfData: pdfData
                                 )
                             } else {
-                                // Legacy local storage
+                                // Local storage (iCloud sync disabled)
                                 doc = DocLink(
-                                    title: storedURL.lastPathComponent,
+                                    title: title,
                                     kind: .manual,
                                     bookmarkData: bookmarkData
                                 )
@@ -7622,28 +7618,26 @@ private struct DeviceInspectorOverlay: View {
                         else { return }
 
                         do {
-                            let (storedURL, bookmarkData) =
+                            let (pdfData, bookmarkData) =
                                 try ManualStorage.copyPDFIntoAppSupport(
                                     pickedURL: pickedURL,
                                     deviceId: device.id
                                 )
 
                             let doc: DocLink
-                            // Check if this is an iCloud-stored document (path starts with /iCloud/)
-                            if storedURL.path.hasPrefix("/iCloud/") {
-                                let iCloudPath = String(storedURL.path.dropFirst("/iCloud/".count))
-                                // Extract original filename (removes UUID prefix) and remove extension
-                                let fullFilename = iCloudDocumentManager.extractOriginalFilename(from: iCloudPath)
-                                let title = (fullFilename as NSString).deletingPathExtension
+                            let title = (pickedURL.lastPathComponent as NSString).deletingPathExtension
+                            
+                            if let pdfData = pdfData {
+                                // CloudKit storage (iCloud sync enabled)
                                 doc = DocLink(
                                     title: title,
                                     kind: .manual,
-                                    iCloudPath: iCloudPath
+                                    pdfData: pdfData
                                 )
                             } else {
-                                // Legacy local storage
+                                // Local storage (iCloud sync disabled)
                                 doc = DocLink(
-                                    title: storedURL.lastPathComponent,
+                                    title: title,
                                     kind: .manual,
                                     bookmarkData: bookmarkData
                                 )

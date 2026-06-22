@@ -126,20 +126,30 @@ class iCloudDiagnostics: ObservableObject {
         
         let container = CKContainer(identifier: containerIdentifier)
         
-        // Check if we can query the database
+        // Check if we can access the database by fetching user record
+        // This is safer than querying records which may not be queryable
         do {
             let database = container.privateCloudDatabase
-            let query = CKQuery(recordType: "CD_Studio", predicate: NSPredicate(value: true))
             
-            // Just check if we have permission - don't fetch actual results
-            _ = try await database.records(matching: query, resultsLimit: 1)
-            diagnosticResults.append("✅ Private database is accessible")
-        } catch let error as CKError {
-            if error.code == .unknownItem {
-                diagnosticResults.append("✅ Private database is accessible (no data yet)")
-            } else {
-                diagnosticResults.append("⚠️ Database access issue: \(error.localizedDescription)")
+            // Try to access the database by getting the user record
+            // This verifies permissions without querying potentially non-indexed fields
+            _ = try await container.userRecordID()
+            
+            // Try a simple fetch operation (not a query)
+            // This checks database access without requiring queryable indexes
+            let recordID = CKRecord.ID(recordName: "test-permission-check")
+            do {
+                _ = try await database.record(for: recordID)
+            } catch let fetchError as CKError {
+                // Expected - record doesn't exist, but we verified database access
+                if fetchError.code == .unknownItem {
+                    diagnosticResults.append("✅ Private database is accessible")
+                } else {
+                    diagnosticResults.append("⚠️ Database access issue: \(fetchError.localizedDescription)")
+                }
             }
+        } catch let error as CKError {
+            diagnosticResults.append("⚠️ Database access issue: \(error.localizedDescription)")
         } catch {
             diagnosticResults.append("⚠️ Database check failed: \(error.localizedDescription)")
         }

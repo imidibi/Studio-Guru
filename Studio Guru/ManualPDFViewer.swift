@@ -395,25 +395,51 @@ enum ManualStorage {
     
     /// Resolves a DocLink to a URL, handling both iCloud and local storage
     static func resolveDocLink(_ doc: DocLink) throws -> URL {
+        #if DEBUG
+        print("📄 Resolving DocLink: '\(doc.title)'")
+        print("   iCloudPath: \(doc.iCloudDocumentPath ?? "nil")")
+        print("   localBookmark: \(doc.localBookmarkData != nil ? "present" : "nil")")
+        print("   urlString: \(doc.urlString ?? "nil")")
+        #endif
+        
         // First try iCloud path (new method)
         if let iCloudPath = doc.iCloudDocumentPath, !iCloudPath.isEmpty {
+            #if DEBUG
+            print("   Attempting iCloud retrieval for: \(iCloudPath)")
+            #endif
+            
             if let url = iCloudDocumentManager.getFileFromiCloud(relativePath: iCloudPath) {
+                #if DEBUG
+                print("   ✅ iCloud URL resolved: \(url.path)")
+                #endif
                 return url
             } else {
+                #if DEBUG
+                print("   ❌ iCloud file not accessible")
+                #endif
                 throw iCloudDocumentError.fileNotFound
             }
         }
         
         // Try local bookmark (legacy method)
         if let bookmarkData = doc.localBookmarkData, !bookmarkData.isEmpty {
+            #if DEBUG
+            print("   Attempting local bookmark resolution")
+            #endif
             return try resolveBookmark(bookmarkData)
         }
         
         // Try URL string (oldest legacy method for web URLs)
         if let urlString = doc.urlString, let url = URL(string: urlString) {
+            #if DEBUG
+            print("   Using URL string: \(urlString)")
+            #endif
             return url
         }
         
+        #if DEBUG
+        print("   ❌ No valid path found for manual")
+        #endif
         throw iCloudDocumentError.fileNotFound
     }
 

@@ -100,23 +100,27 @@ class iCloudDocumentManager {
         
         let fileURL = iCloudDocsURL.appendingPathComponent(relativePath)
         
-        // Check if file exists
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            #if DEBUG
-            print("⚠️ File not found in iCloud: \(relativePath)")
-            #endif
-            return nil
-        }
-        
-        // Start downloading if not yet downloaded
+        // Start downloading from iCloud if not yet downloaded
+        // Note: The file may not exist locally yet but will be downloaded automatically
         do {
             try FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+            
+            #if DEBUG
+            // Check download status for debugging
+            if let values = try? fileURL.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]),
+               let status = values.ubiquitousItemDownloadingStatus {
+                print("📥 iCloud file status for \(relativePath): \(status.rawValue)")
+            }
+            #endif
         } catch {
             #if DEBUG
-            print("⚠️ Could not start downloading: \(error)")
+            print("⚠️ Could not start downloading \(relativePath): \(error)")
             #endif
+            // Don't return nil - the file might still be accessible
         }
         
+        // Return the URL even if file isn't downloaded yet
+        // The system will download it when accessed
         return fileURL
     }
     

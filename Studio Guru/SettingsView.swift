@@ -25,6 +25,11 @@ struct SettingsView: View {
     @State private var lastSyncMessage: String?
     @StateObject private var diagnostics = iCloudDiagnostics()
     @State private var showingDiagnostics = false
+    @StateObject private var backupManager = BackupManager()
+    @State private var showingBackupsList = false
+    @State private var showingRestoreConfirmation = false
+    @State private var backupToRestore: BackupManager.BackupInfo?
+    @State private var showingRestartForRestore = false
     
     // Category color settings (stored as hex strings)
     @AppStorage("categoryColor_ADATExpander") private var adatExpanderColor = "#9B59B6"
@@ -389,6 +394,64 @@ struct SettingsView: View {
                     Text("Exported files can be shared via email, AirDrop, or cloud storage services.")
                 }
                 
+                Section {
+                    Button {
+                        Task {
+                            do {
+                                let container = modelContext.container
+                                try await backupManager.createBackup(container: container)
+                            } catch {
+                                backupManager.lastError = error.localizedDescription
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Label("Create Backup Now", systemImage: "arrow.down.doc")
+                            Spacer()
+                            if backupManager.isCreatingBackup {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                        }
+                    }
+                    .disabled(backupManager.isCreatingBackup)
+                    
+                    if !backupManager.availableBackups.isEmpty {
+                        Button {
+                            showingBackupsList = true
+                        } label: {
+                            HStack {
+                                Label("View & Restore Backups", systemImage: "clock.arrow.circlepath")
+                                Spacer()
+                                Text("\(backupManager.availableBackups.count)")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    
+                    if let error = backupManager.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    
+                    if let lastBackup = backupManager.availableBackups.first {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Last backup:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(lastBackup.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Automatic Backups")
+                } footer: {
+                    Text("Studio Guru automatically backs up your entire database. The last 5 backups are kept locally (not in iCloud). Backups are created on app launch if 24 hours have passed since the last backup.")
+                }
+                
                 if iCloudSyncEnabled && !studios.isEmpty {
                     Section {
                         ForEach(studios) { studio in
@@ -619,6 +682,36 @@ struct SettingsView: View {
             .sheet(isPresented: $showingDiagnostics) {
                 iCloudDiagnosticsView(diagnostics: diagnostics)
             }
+            .sheet(isPresented: $showingBackupsList) {
+                BackupsListView(backupManager: backupManager, backupToRestore: $backupToRestore, showingRestoreConfirmation: $showingRestoreConfirmation)
+            }
+            .alert("Restore Backup?", isPresented: $showingRestoreConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Restore", role: .destructive) {
+                    if let backup = backupToRestore {
+                        Task {
+                            do {
+                                let container = modelContext.container
+                                try await backupManager.restoreFromBackup(backup, container: container)
+                                showingRestartForRestore = true
+                            } catch {
+                                backupManager.lastError = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+            } message: {
+                if let backup = backupToRestore {
+                    Text("This will replace all current data with the backup from \(backup.displayName). The app must restart after restoring.\n\nThis cannot be undone! Consider creating a backup of your current data first.")
+                }
+            }
+            .alert("Restore Complete", isPresented: $showingRestartForRestore) {
+                Button("Quit App") {
+                    exit(0)
+                }
+            } message: {
+                Text("The backup has been restored. Please relaunch Studio Guru for the changes to take effect.")
+            }
         }
     }
     
@@ -707,6 +800,86 @@ struct SettingsView: View {
             #if DEBUG
             print("❌ Sync reset failed: \(error)")
             #endif
+        }
+    }
+}
+
+// MARK: - Backups List View
+
+struct BackupsListView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var backupManager: BackupManager
+    @Binding var backupToRestore: BackupManager.BackupInfo?
+    @Binding var showingRestoreConfirmation: Bool
+    @State private var backupToDelete: BackupManager.BackupInfo?
+    @State private var showingDeleteConfirmation = false
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                if backupManager.availableBackups.isEmpty {
+                    ContentUnavailableView(
+                        "No Backups",
+                        systemImage: "clock.arrow.circlepath",
+                        description: Text("Create a backup to get started")
+                    )
+                } else {
+                    ForEach(backupManager.availableBackups) { backup in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(backup.displayName)
+                                        .font(.headline)
+                                    Text(backup.fileSizeFormatted)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Button {
+                                    backupToRestore = backup
+                                    dismiss()
+                                    showingRestoreConfirmation = true
+                                } label: {
+                                    Label("Restore", systemImage: "arrow.counterclockwise")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                backupToDelete = backup
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Backups")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .alert("Delete Backup?", isPresented: $showingDeleteConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    if let backup = backupToDelete {
+                        try? backupManager.deleteBackup(backup)
+                    }
+                }
+            } message: {
+                if let backup = backupToDelete {
+                    Text("Delete backup from \(backup.displayName)? This cannot be undone.")
+                }
+            }
         }
     }
 }

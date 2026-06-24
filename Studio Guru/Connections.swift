@@ -235,13 +235,22 @@ final class ConnectionsStore: ObservableObject {
                 )
                 if let bundleToDelete = try? context.fetch(descriptor).first {
                     context.delete(bundleToDelete)
-                    try? context.save()
                 }
+
+                // Mark parent Studio as modified to trigger CloudKit sync
+                let studioDescriptor = FetchDescriptor<Studio>(
+                    predicate: #Predicate { $0.id == studioId }
+                )
+                if let studio = try? context.fetch(studioDescriptor).first {
+                    studio.markAsModified()
+                }
+
+                try? context.save()
             } else {
                 // Fallback to UserDefaults
                 persistToUserDefaults(studioId: studioId)
             }
-            
+
             // objectWillChange.send() not needed - @Published handles this automatically
         }
         return removed
@@ -604,9 +613,9 @@ final class ConnectionsStore: ObservableObject {
             persistToUserDefaults(studioId: studioId)
             return
         }
-        
+
         guard let bundles = bundlesByStudio[studioId] else { return }
-        
+
         // Delete existing bundles for this studio
         let descriptor = FetchDescriptor<ConnectionBundleModel>(
             predicate: #Predicate { $0.studioId == studioId }
@@ -616,12 +625,20 @@ final class ConnectionsStore: ObservableObject {
                 context.delete(bundle)
             }
         }
-        
+
         // Insert new bundles
         for (_, bundle) in bundles {
             saveBundleToSwiftData(studioId: studioId, bundle: bundle, context: context)
         }
-        
+
+        // Mark parent Studio as modified to trigger CloudKit sync
+        let studioDescriptor = FetchDescriptor<Studio>(
+            predicate: #Predicate { $0.id == studioId }
+        )
+        if let studio = try? context.fetch(studioDescriptor).first {
+            studio.markAsModified()
+        }
+
         try? context.save()
     }
     

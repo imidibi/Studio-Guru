@@ -10,6 +10,7 @@
 		5F02DB072FE3081200CA8F43 /* iCloudDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F02DB062FE3081200CA8F43 /* iCloudDiagnostics.swift */; };
 		5F2C600B2FE590D1000F29AE /* iCloudDocumentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F2C600A2FE590D1000F29AE /* iCloudDocumentManager.swift */; };
 		5F4B730C2FC91176006E135F /* AssignGearSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4B730B2FC91176006E135F /* AssignGearSheet.swift */; };
+		5F847FB62FEC614700200571 /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F847FB52FEC614700200571 /* BackupManager.swift */; };
 		5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */; };
 /* End PBXBuildFile section */
 
@@ -17,6 +18,7 @@
 		5F02DB062FE3081200CA8F43 /* iCloudDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudDiagnostics.swift; sourceTree = "<group>"; };
 		5F2C600A2FE590D1000F29AE /* iCloudDocumentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudDocumentManager.swift; sourceTree = "<group>"; };
 		5F4B730B2FC91176006E135F /* AssignGearSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssignGearSheet.swift; sourceTree = "<group>"; };
+		5F847FB52FEC614700200571 /* BackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupManager.swift; sourceTree = "<group>"; };
 		5FF331D82F9EF13200303C39 /* CanvasAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAnnotations.swift; sourceTree = "<group>"; };
 		5FFE5C962F37D70900EB00B9 /* Studio Guru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Studio Guru.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -49,6 +51,7 @@
 				5F4B730B2FC91176006E135F /* AssignGearSheet.swift */,
 				5F02DB062FE3081200CA8F43 /* iCloudDiagnostics.swift */,
 				5F2C600A2FE590D1000F29AE /* iCloudDocumentManager.swift */,
+				5F847FB52FEC614700200571 /* BackupManager.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -137,6 +140,7 @@
 				5F02DB072FE3081200CA8F43 /* iCloudDiagnostics.swift in Sources */,
 				5F2C600B2FE590D1000F29AE /* iCloudDocumentManager.swift in Sources */,
 				5FF331D92F9EF13200303C39 /* CanvasAnnotations.swift in Sources */,
+				5F847FB62FEC614700200571 /* BackupManager.swift in Sources */,
 				5F4B730C2FC91176006E135F /* AssignGearSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -268,7 +272,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -292,7 +296,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.29;
+				MARKETING_VERSION = 1.31;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ianmiller.studioguru;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -318,7 +322,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -342,7 +346,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.29;
+				MARKETING_VERSION = 1.31;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ianmiller.studioguru;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

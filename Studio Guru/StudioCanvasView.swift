@@ -380,6 +380,23 @@ struct StudioCanvasView: View {
                 StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)
             }
             
+            // Create automatic backup if needed (every 24 hours)
+            Task {
+                let backupManager = BackupManager()
+                if backupManager.shouldCreateAutomaticBackup() {
+                    do {
+                        try await backupManager.createBackup(container: modelContext.container)
+                        #if DEBUG
+                        print("✅ Automatic backup created successfully")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("❌ Automatic backup failed: \(error)")
+                        #endif
+                    }
+                }
+            }
+            
             #if DEBUG
             // print("📱 StudioCanvasView appeared - Studios count: \(studios.count)")
             // if !studios.isEmpty {
@@ -712,6 +729,10 @@ struct StudioCanvasView: View {
     @ViewBuilder
     private func studioDetailView(_ studio: Studio) -> some View {
         studioDetailBase(for: studio)
+            .onChange(of: studio.modifiedAt) { _, _ in
+                // Reload connections when studio is modified (including CloudKit sync)
+                connectionsStore.load(studioId: studio.id)
+            }
             .sheet(isPresented: $isShowingDeviceEditor) {
                 deviceEditorSheetContent
             }
@@ -1701,6 +1722,7 @@ struct StudioCanvasView: View {
 
         studio.devices?.remove(at: idx)
         studio.markAsModified()
+        try? modelContext.save()
         deviceIdPendingDelete = nil
         selectionState.selection = nil
     }
@@ -1749,6 +1771,7 @@ struct StudioCanvasView: View {
         studio.devices?.append(newDevice)
         newDevice.markAsModified()
         studio.markAsModified()
+        try? modelContext.save()
         selectionState.selection = .device(newDevice.id)
     }
 
@@ -5066,6 +5089,7 @@ private struct InspectorPanel: View {
     let onCloneDevice: (DeviceInstance) -> Void
     let onRequestMoveDevice: (DeviceInstance) -> Void
     @EnvironmentObject var selection: SelectionState
+    @Environment(\.modelContext) private var modelContext
 
     @State private var isImportingManual: Bool = false
     @State private var manualViewerItem: IdentifiableURL? = nil
@@ -5243,16 +5267,7 @@ private struct InspectorPanel: View {
                                         Text(doc.title)
                                             .lineLimit(1)
                                         Spacer()
-                                        Button(role: .destructive) {
-                                            if let idx = d.docs?.firstIndex(
-                                                where: { $0.id == doc.id })
-                                            {
-                                                d.docs?.remove(at: idx)
-                                            }
-                                        } label: {
-                                            Image(systemName: "trash")
-                                        }
-                                        .buttonStyle(.borderless)
+                                        deleteManualButton(doc: doc, device: d, studio: studio, context: modelContext)
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
@@ -5422,6 +5437,21 @@ private struct InspectorPanel: View {
                 .padding()
             }
         }
+    }
+
+    @ViewBuilder
+    private func deleteManualButton(doc: DocLink, device: DeviceInstance, studio: Studio, context: ModelContext) -> some View {
+        Button(role: .destructive) {
+            if let idx = device.docs?.firstIndex(where: { $0.id == doc.id }) {
+                device.docs?.remove(at: idx)
+                device.markAsModified()
+                studio.markAsModified()
+                try? context.save()
+            }
+        } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
     }
 }
 
@@ -7371,6 +7401,7 @@ private struct DeviceInspectorOverlay: View {
     let onRequestMoveDevice: (DeviceInstance) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     @State private var isImportingManual: Bool = false
     @State private var manualViewerItem: IdentifiableURL? = nil
@@ -7532,16 +7563,7 @@ private struct DeviceInspectorOverlay: View {
                                         Text(doc.title)
                                             .lineLimit(1)
                                         Spacer()
-                                        Button(role: .destructive) {
-                                            if let idx = d.docs?.firstIndex(
-                                                where: { $0.id == doc.id })
-                                            {
-                                                d.docs?.remove(at: idx)
-                                            }
-                                        } label: {
-                                            Image(systemName: "trash")
-                                        }
-                                        .buttonStyle(.borderless)
+                                        deleteManualButton(doc: doc, device: d, studio: studio, context: modelContext)
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
@@ -7901,6 +7923,21 @@ private struct DeviceInspectorOverlay: View {
             return p1.direction == .input
         }
         return p1.name < p2.name
+    }
+
+    @ViewBuilder
+    private func deleteManualButton(doc: DocLink, device: DeviceInstance, studio: Studio, context: ModelContext) -> some View {
+        Button(role: .destructive) {
+            if let idx = device.docs?.firstIndex(where: { $0.id == doc.id }) {
+                device.docs?.remove(at: idx)
+                device.markAsModified()
+                studio.markAsModified()
+                try? context.save()
+            }
+        } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
     }
 }
 

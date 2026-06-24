@@ -20,6 +20,7 @@ enum PortType: String, Codable, CaseIterable {
     case usbAudio, thunderboltAudio
     case midiIn, midiOut
     case wordClockIn, wordClockOut
+    case cvIn, cvOut
     case ethernet
     case headphoneOut
     case computerHost
@@ -29,7 +30,7 @@ enum PortDirection: String, Codable, CaseIterable { case input, output, bidirect
 
 enum ChannelGrouping: String, Codable, CaseIterable { case mono, stereoPairable, fixedStereoPair }
 
-enum CableType: String, Codable, CaseIterable { case trs, xlr, ts, opticalADAT, usb, thunderbolt, midiDIN, usbMIDI, wordClockBNC, ethernet, other }
+enum CableType: String, Codable, CaseIterable { case trs, xlr, ts, opticalADAT, usb, thunderbolt, midiDIN, usbMIDI, wordClockBNC, cv, ethernet, other }
 
 enum DocKind: String, Codable, CaseIterable { case manual, driver, firmware, support, other }
 
@@ -179,6 +180,10 @@ final class DeviceInstance {
     // MIDI DIN 5-pin port counts (physical connectors)
     var midiInputPortsCount: Int = 0
     var midiOutputPortsCount: Int = 0
+    
+    // CV (Control Voltage) port counts
+    var cvInputPortsCount: Int = 0
+    var cvOutputPortsCount: Int = 0
 
     // Networking / control ports (used for Dante, remote control, etc.)
     var ethernetPortsCount: Int = 0
@@ -248,6 +253,8 @@ final class DeviceInstance {
          madiOutputPortsCount: Int = 0,
          midiInputPortsCount: Int = 0,
          midiOutputPortsCount: Int = 0,
+         cvInputPortsCount: Int = 0,
+         cvOutputPortsCount: Int = 0,
          ethernetPortsCount: Int = 0,
          sampleRate: SampleRate = .hz48000,
          digitalInputs: [DigitalFormat] = [],
@@ -279,6 +286,8 @@ final class DeviceInstance {
         self.madiOutputPortsCount = madiOutputPortsCount
         self.midiInputPortsCount = midiInputPortsCount
         self.midiOutputPortsCount = midiOutputPortsCount
+        self.cvInputPortsCount = cvInputPortsCount
+        self.cvOutputPortsCount = cvOutputPortsCount
 
         self.ethernetPortsCount = ethernetPortsCount
 
@@ -595,6 +604,10 @@ struct ExportableDevice: Codable, Sendable {
     let adatOutputPortsCount: Int
     let madiInputPortsCount: Int
     let madiOutputPortsCount: Int
+    let midiInputPortsCount: Int
+    let midiOutputPortsCount: Int
+    let cvInputPortsCount: Int
+    let cvOutputPortsCount: Int
     let ethernetPortsCount: Int
     let sampleRateRaw: Int
     let digitalInputsRaw: [String]
@@ -623,6 +636,10 @@ struct ExportableDevice: Codable, Sendable {
         self.adatOutputPortsCount = device.adatOutputPortsCount
         self.madiInputPortsCount = device.madiInputPortsCount
         self.madiOutputPortsCount = device.madiOutputPortsCount
+        self.midiInputPortsCount = device.midiInputPortsCount
+        self.midiOutputPortsCount = device.midiOutputPortsCount
+        self.cvInputPortsCount = device.cvInputPortsCount
+        self.cvOutputPortsCount = device.cvOutputPortsCount
         self.ethernetPortsCount = device.ethernetPortsCount
         self.sampleRateRaw = device.sampleRateRaw
         self.digitalInputsRaw = device.digitalInputsRaw

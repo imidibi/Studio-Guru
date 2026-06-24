@@ -123,7 +123,13 @@ class BackupManager: ObservableObject {
         try cleanupOldBackups()
         
         // Reload available backups
-        loadAvailableBackups()
+        await MainActor.run {
+            loadAvailableBackups()
+            #if DEBUG
+            print("✅ Backup created successfully at: \(backupURL.path)")
+            print("📋 Total backups available: \(availableBackups.count)")
+            #endif
+        }
     }
     
     /// Restore from a backup
@@ -214,25 +220,58 @@ class BackupManager: ObservableObject {
     private func loadAvailableBackups() {
         guard let backupDir = backupDirectory else {
             availableBackups = []
+            #if DEBUG
+            print("❌ Backup directory not available")
+            #endif
             return
         }
+        
+        #if DEBUG
+        print("📂 Backup directory: \(backupDir.path)")
+        #endif
         
         // Load metadata file
         let metadataURL = backupDir.appendingPathComponent("backups_metadata.json")
         
         guard FileManager.default.fileExists(atPath: metadataURL.path) else {
             availableBackups = []
+            #if DEBUG
+            print("⚠️ No backup metadata file found at: \(metadataURL.path)")
+            #endif
             return
         }
         
-        guard let data = try? Data(contentsOf: metadataURL),
-              let metadata = try? JSONDecoder().decode([BackupInfo].self, from: data) else {
+        guard let data = try? Data(contentsOf: metadataURL) else {
             availableBackups = []
+            #if DEBUG
+            print("❌ Failed to read backup metadata file")
+            #endif
+            return
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        guard let metadata = try? decoder.decode([BackupInfo].self, from: data) else {
+            availableBackups = []
+            #if DEBUG
+            print("❌ Failed to decode backup metadata")
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("   Raw JSON: \(jsonString)")
+            }
+            #endif
             return
         }
         
         // Sort by timestamp descending (newest first)
         availableBackups = metadata.sorted { $0.timestamp > $1.timestamp }
+        
+        #if DEBUG
+        print("✅ Loaded \(availableBackups.count) backups from metadata")
+        for backup in availableBackups {
+            print("  📦 \(backup.displayName) - \(backup.fileSizeFormatted)")
+        }
+        #endif
     }
     
     private func saveBackupMetadata(_ backup: BackupInfo) throws {
@@ -246,7 +285,9 @@ class BackupManager: ObservableObject {
         var metadata: [BackupInfo] = []
         if FileManager.default.fileExists(atPath: metadataURL.path),
            let data = try? Data(contentsOf: metadataURL) {
-            metadata = (try? JSONDecoder().decode([BackupInfo].self, from: data)) ?? []
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            metadata = (try? decoder.decode([BackupInfo].self, from: data)) ?? []
         }
         
         // Add new backup
@@ -270,8 +311,14 @@ class BackupManager: ObservableObject {
             return
         }
         
-        guard let data = try? Data(contentsOf: metadataURL),
-              var metadata = try? JSONDecoder().decode([BackupInfo].self, from: data) else {
+        guard let data = try? Data(contentsOf: metadataURL) else {
+            return
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        guard var metadata = try? decoder.decode([BackupInfo].self, from: data) else {
             return
         }
         

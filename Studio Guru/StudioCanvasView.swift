@@ -131,6 +131,8 @@ struct StudioCanvasView: View {
     @State private var draftMadiOutputPorts: Int = 0
     @State private var draftMidiInputPorts: Int = 0
     @State private var draftMidiOutputPorts: Int = 0
+    @State private var draftCvInputPorts: Int = 0
+    @State private var draftCvOutputPorts: Int = 0
     @State private var draftSampleRate: SampleRate =
         SampleRate.allCases.first ?? SampleRate(rawValue: 0)!
 
@@ -1221,6 +1223,8 @@ struct StudioCanvasView: View {
                 madiOutputPorts: $draftMadiOutputPorts,
                 midiInputPorts: $draftMidiInputPorts,
                 midiOutputPorts: $draftMidiOutputPorts,
+                cvInputPorts: $draftCvInputPorts,
+                cvOutputPorts: $draftCvOutputPorts,
                 sampleRate: $draftSampleRate,
                 digitalInputs: $draftDigitalInputs,
                 digitalOutputs: $draftDigitalOutputs,
@@ -1280,6 +1284,8 @@ struct StudioCanvasView: View {
         draftMadiOutputPorts = 0
         draftMidiInputPorts = 0
         draftMidiOutputPorts = 0
+        draftCvInputPorts = 0
+        draftCvOutputPorts = 0
         if let first = SampleRate.allCases.first { draftSampleRate = first }
         draftDigitalInputs = []
         draftDigitalOutputs = []
@@ -1322,6 +1328,8 @@ struct StudioCanvasView: View {
         draftMadiOutputPorts = max(0, d.madiOutputPortsCount)
         draftMidiInputPorts = max(0, d.midiInputPortsCount)
         draftMidiOutputPorts = max(0, d.midiOutputPortsCount)
+        draftCvInputPorts = max(0, d.cvInputPortsCount)
+        draftCvOutputPorts = max(0, d.cvOutputPortsCount)
         if let sr = SampleRate(rawValue: d.sampleRateRaw) {
             draftSampleRate = sr
         }
@@ -1579,6 +1587,8 @@ struct StudioCanvasView: View {
                 madiOutputPortsCount: max(0, draftMadiOutputPorts),
                 midiInputPortsCount: max(0, draftMidiInputPorts),
                 midiOutputPortsCount: max(0, draftMidiOutputPorts),
+                cvInputPortsCount: max(0, draftCvInputPorts),
+                cvOutputPortsCount: max(0, draftCvOutputPorts),
                 ethernetPortsCount: 0,
                 sampleRate: draftSampleRate,
                 digitalInputs: Array(draftDigitalInputs),
@@ -1624,6 +1634,8 @@ struct StudioCanvasView: View {
         device.madiOutputPortsCount = max(0, draftMadiOutputPorts)
         device.midiInputPortsCount = max(0, draftMidiInputPorts)
         device.midiOutputPortsCount = max(0, draftMidiOutputPorts)
+        device.cvInputPortsCount = max(0, draftCvInputPorts)
+        device.cvOutputPortsCount = max(0, draftCvOutputPorts)
         device.sampleRateRaw = draftSampleRate.rawValue
         device.digitalInputs = Array(draftDigitalInputs)
         device.digitalOutputs = Array(draftDigitalOutputs)
@@ -1652,6 +1664,8 @@ struct StudioCanvasView: View {
             madiOutputPorts: device.madiOutputPortsCount,
             midiInputPorts: device.midiInputPortsCount,
             midiOutputPorts: device.midiOutputPortsCount,
+            cvInputPorts: device.cvInputPortsCount,
+            cvOutputPorts: device.cvOutputPortsCount,
             computerInterfaceCounts: device.computerInterfaceCounts,
             sampleRate: draftSampleRate
         )
@@ -1830,6 +1844,10 @@ struct StudioCanvasView: View {
                 adatOutputPortsCount: removed.adatOutputPortsCount,
                 madiInputPortsCount: removed.madiInputPortsCount,
                 madiOutputPortsCount: removed.madiOutputPortsCount,
+                midiInputPortsCount: removed.midiInputPortsCount,
+                midiOutputPortsCount: removed.midiOutputPortsCount,
+                cvInputPortsCount: removed.cvInputPortsCount,
+                cvOutputPortsCount: removed.cvOutputPortsCount,
                 sampleRate: SampleRate(rawValue: removed.sampleRateRaw)
                     ?? (SampleRate.allCases.first ?? SampleRate(rawValue: 0)!),
                 digitalInputs: removed.digitalInputs,
@@ -1916,6 +1934,8 @@ struct StudioCanvasView: View {
         madiOutputPorts: Int,
         midiInputPorts: Int,
         midiOutputPorts: Int,
+        cvInputPorts: Int,
+        cvOutputPorts: Int,
         computerInterfaceCounts: [ComputerInterface: Int],
         sampleRate: SampleRate
     ) -> [Port] {
@@ -1984,6 +2004,37 @@ struct StudioCanvasView: View {
                     Channel(
                         index: 1,
                         nameLong: "MIDI Out \(i)",
+                        nameShort: "Out\(i)"
+                    )
+                ]
+                ports.append(p)
+            }
+        }
+        
+        // CV (Control Voltage) ports
+        // CV Input Ports
+        if cvInputPorts > 0 {
+            for i in 1...cvInputPorts {
+                let p = Port(name: "CV In \(i)", type: .cvIn, direction: .input)
+                p.channels = [
+                    Channel(
+                        index: 1,
+                        nameLong: "CV In \(i)",
+                        nameShort: "In\(i)"
+                    )
+                ]
+                ports.append(p)
+            }
+        }
+        
+        // CV Output Ports
+        if cvOutputPorts > 0 {
+            for i in 1...cvOutputPorts {
+                let p = Port(name: "CV Out \(i)", type: .cvOut, direction: .output)
+                p.channels = [
+                    Channel(
+                        index: 1,
+                        nameLong: "CV Out \(i)",
                         nameShort: "Out\(i)"
                     )
                 ]
@@ -3965,6 +4016,10 @@ struct StudioCanvasView: View {
                     adatOutputPortsCount: exportableDevice.adatOutputPortsCount,
                     madiInputPortsCount: exportableDevice.madiInputPortsCount,
                     madiOutputPortsCount: exportableDevice.madiOutputPortsCount,
+                    midiInputPortsCount: exportableDevice.midiInputPortsCount,
+                    midiOutputPortsCount: exportableDevice.midiOutputPortsCount,
+                    cvInputPortsCount: exportableDevice.cvInputPortsCount,
+                    cvOutputPortsCount: exportableDevice.cvOutputPortsCount,
                     ethernetPortsCount: exportableDevice.ethernetPortsCount,
                     sampleRate: SampleRate(
                         rawValue: exportableDevice.sampleRateRaw
@@ -5877,6 +5932,7 @@ enum ConnectionVisualType {
     case analog  // Blue
     case digital  // Green
     case midi  // Purple
+    case cv  // Yellow/Red
     case computer  // Orange
     case unknown  // Gray
 
@@ -5885,6 +5941,7 @@ enum ConnectionVisualType {
         case .analog: return .blue
         case .digital: return .green
         case .midi: return .purple
+        case .cv: return .yellow
         case .computer: return .orange
         case .unknown: return .secondary
         }
@@ -5899,6 +5956,8 @@ enum ConnectionVisualType {
             return .digital
         case .midiIn, .midiOut:
             return .midi
+        case .cvIn, .cvOut:
+            return .cv
         case .usbAudio, .thunderboltAudio, .ethernet, .computerHost:
             return .computer
         }
@@ -6431,6 +6490,8 @@ private struct DeviceEditorSheet: View {
     @Binding var madiOutputPorts: Int
     @Binding var midiInputPorts: Int
     @Binding var midiOutputPorts: Int
+    @Binding var cvInputPorts: Int
+    @Binding var cvOutputPorts: Int
     @Binding var sampleRate: SampleRate
 
     @Binding var digitalInputs: Set<DigitalFormat>
@@ -6746,6 +6807,24 @@ private struct DeviceEditorSheet: View {
                                         Text("MIDI Output Ports")
                                         Spacer()
                                         Text("\(midiOutputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Stepper(value: $cvInputPorts, in: 0...64) {
+                                    HStack {
+                                        Text("CV Input Ports")
+                                        Spacer()
+                                        Text("\(cvInputPorts)")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Stepper(value: $cvOutputPorts, in: 0...64) {
+                                    HStack {
+                                        Text("CV Output Ports")
+                                        Spacer()
+                                        Text("\(cvOutputPorts)")
                                             .foregroundStyle(.secondary)
                                     }
                                 }
@@ -7160,6 +7239,26 @@ private struct DeviceEditorSheet: View {
                                 Text("MIDI Output Ports")
                                 Spacer()
                                 Text("\(midiOutputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+
+                        Stepper(value: $cvInputPorts, in: 0...64) {
+                            HStack {
+                                Text("CV Input Ports")
+                                Spacer()
+                                Text("\(cvInputPorts)").foregroundStyle(
+                                    .secondary
+                                )
+                            }
+                        }
+
+                        Stepper(value: $cvOutputPorts, in: 0...64) {
+                            HStack {
+                                Text("CV Output Ports")
+                                Spacer()
+                                Text("\(cvOutputPorts)").foregroundStyle(
                                     .secondary
                                 )
                             }
@@ -8323,6 +8422,11 @@ private struct ConnectionLegendView: View {
                         description: "MIDI In/Out connections"
                     )
                     LegendRow(
+                        color: .yellow,
+                        title: "CV",
+                        description: "Control Voltage connections"
+                    )
+                    LegendRow(
                         color: .orange,
                         title: "Computer / Bidirectional",
                         description: "USB, Thunderbolt, Bluetooth, Ethernet (two arrows)"
@@ -8681,6 +8785,7 @@ private struct ConnectionMatrixView: View {
                         legendItem(color: .blue, label: "Analog")
                         legendItem(color: .green, label: "Digital (ADAT/MADI/S/PDIF)")
                         legendItem(color: .purple, label: "MIDI")
+                        legendItem(color: .yellow, label: "CV")
                         legendItem(color: .orange, label: "Computer (USB/Thunderbolt/Ethernet)")
                     }
                     HStack {
@@ -9087,6 +9192,9 @@ private struct ConnectionMatrixView: View {
                     case .midi: 
                         bgColor = "#e1bee7"  // Light purple
                         textColor = "#4a148c"  // Dark purple
+                    case .cv:
+                        bgColor = "#fff9c4"  // Light yellow
+                        textColor = "#f57f17"  // Dark yellow
                     case .computer: 
                         bgColor = "#ffe0b2"  // Light orange
                         textColor = "#e65100"  // Dark orange
@@ -9100,6 +9208,7 @@ private struct ConnectionMatrixView: View {
                         case .analog: return "Analog"
                         case .digital: return "Digital"
                         case .midi: return "MIDI"
+                        case .cv: return "CV"
                         case .computer: return "Computer"
                         case .unknown: return "Unknown"
                         }

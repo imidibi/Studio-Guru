@@ -30,6 +30,7 @@ struct SettingsView: View {
     @State private var showingRestoreConfirmation = false
     @State private var backupToRestore: BackupManager.BackupInfo?
     @State private var showingRestartForRestore = false
+    @State private var backupSuccessMessage: String?
     
     // Category color settings (stored as hex strings)
     @AppStorage("categoryColor_ADATExpander") private var adatExpanderColor = "#9B59B6"
@@ -397,9 +398,17 @@ struct SettingsView: View {
                 Section {
                     Button {
                         Task {
+                            backupSuccessMessage = nil
                             do {
                                 let container = modelContext.container
                                 try await backupManager.createBackup(container: container)
+                                backupSuccessMessage = "Backup created successfully"
+                                
+                                // Clear success message after 3 seconds
+                                Task {
+                                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                                    backupSuccessMessage = nil
+                                }
                             } catch {
                                 backupManager.lastError = error.localizedDescription
                             }
@@ -430,10 +439,24 @@ struct SettingsView: View {
                         }
                     }
                     
+                    if let successMessage = backupSuccessMessage {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(successMessage)
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    
                     if let error = backupManager.lastError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
                     
                     if let lastBackup = backupManager.availableBackups.first {
@@ -684,6 +707,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingBackupsList) {
                 BackupsListView(backupManager: backupManager, backupToRestore: $backupToRestore, showingRestoreConfirmation: $showingRestoreConfirmation)
+                    .frame(minWidth: 500, minHeight: 400)
+                    .onAppear {
+                        #if DEBUG
+                        print("🔵 Sheet presented - backupManager has \(backupManager.availableBackups.count) backups")
+                        #endif
+                    }
             }
             .alert("Restore Backup?", isPresented: $showingRestoreConfirmation) {
                 Button("Cancel", role: .cancel) {}
@@ -816,51 +845,48 @@ struct BackupsListView: View {
     
     var body: some View {
         NavigationStack {
-            List {
-                if backupManager.availableBackups.isEmpty {
-                    ContentUnavailableView(
-                        "No Backups",
-                        systemImage: "clock.arrow.circlepath",
-                        description: Text("Create a backup to get started")
-                    )
-                } else {
-                    ForEach(backupManager.availableBackups) { backup in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(backup.displayName)
-                                        .font(.headline)
-                                    Text(backup.fileSizeFormatted)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                Button {
-                                    backupToRestore = backup
-                                    dismiss()
-                                    showingRestoreConfirmation = true
-                                } label: {
-                                    Label("Restore", systemImage: "arrow.counterclockwise")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.bordered)
+            VStack {
+                List(backupManager.availableBackups) { backup in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(backup.displayName)
+                                .font(.headline)
+                            Text(backup.fileSizeFormatted)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             }
+                        
+                        Spacer()
+                        
+                        Button {
+                            backupToRestore = backup
+                            dismiss()
+                            showingRestoreConfirmation = true
+                        } label: {
+                            Label("Restore", systemImage: "arrow.counterclockwise")
+                                .font(.caption)
                         }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                backupToDelete = backup
-                                showingDeleteConfirmation = true
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
+                        .buttonStyle(.bordered)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            backupToDelete = backup
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
             }
+            .onAppear {
+                #if DEBUG
+                print("📋 BackupsListView appeared with \(backupManager.availableBackups.count) backups")
+                #endif
+            }
             .navigationTitle("Backups")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {

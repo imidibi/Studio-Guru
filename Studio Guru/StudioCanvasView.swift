@@ -376,30 +376,19 @@ struct StudioCanvasView: View {
         .onAppear {
             #if DEBUG
             print("🔵 StudioCanvasView.onAppear - START")
-            for studio in studios {
-                print("  Studio '\(studio.name)': \(studio.connections?.count ?? 0) connections in SwiftData")
-            }
             #endif
             
             // Set up model context for ConnectionsStore (enables iCloud sync)
             connectionsStore.setModelContext(modelContext)
             
-            // Load existing connections from SwiftData into ConnectionsStore for all studios
+            // Load existing connection bundles from SwiftData for all studios
             for studio in studios {
-                let beforeCount = studio.connections?.count ?? 0
-                connectionsStore.rebuildFromConnections(studio: studio)
-                let afterCount = studio.connections?.count ?? 0
+                connectionsStore.load(studioId: studio.id)
                 
                 #if DEBUG
-                print("📱 Studio '\(studio.name)':")
-                print("   Before: \(beforeCount) connections in SwiftData")
-                print("   After rebuildFromConnections: \(afterCount) connections in SwiftData")
-                print("   ConnectionsStore bundles: \(connectionsStore.links(for: studio.id).count)")
+                let bundleCount = connectionsStore.links(for: studio.id).count
+                print("📱 Loaded \(bundleCount) connection bundles for studio '\(studio.name)'")
                 #endif
-                
-                if beforeCount != afterCount {
-                    print("⚠️⚠️⚠️ WARNING: Connection count changed! Before: \(beforeCount), After: \(afterCount)")
-                }
             }
             
             #if DEBUG

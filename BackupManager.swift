@@ -215,6 +215,26 @@ class BackupManager: ObservableObject {
         return hoursSinceLastBackup >= 24
     }
     
+    /// Check if this is the first launch of a new app version
+    func shouldCreateVersionBackup() -> Bool {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        let versionKey = "LastBackupVersion"
+        let buildKey = "LastBackupBuild"
+        
+        let lastVersion = UserDefaults.standard.string(forKey: versionKey)
+        let lastBuild = UserDefaults.standard.string(forKey: buildKey)
+        
+        // If version or build changed, create a backup
+        if lastVersion != currentVersion || lastBuild != currentBuild {
+            UserDefaults.standard.set(currentVersion, forKey: versionKey)
+            UserDefaults.standard.set(currentBuild, forKey: buildKey)
+            return true
+        }
+        
+        return false
+    }
+    
     // MARK: - Private Methods
     
     private func loadAvailableBackups() {

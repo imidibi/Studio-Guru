@@ -400,14 +400,23 @@ struct StudioCanvasView: View {
                 StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)
             }
             
-            // Create automatic backup if needed (every 24 hours)
+            // Create automatic backup if needed
             Task {
                 let backupManager = BackupManager()
-                if backupManager.shouldCreateAutomaticBackup() {
+                
+                // Check if this is first launch of new version - create backup for safety
+                let isNewVersion = backupManager.shouldCreateVersionBackup()
+                let needsTimeBasedBackup = backupManager.shouldCreateAutomaticBackup()
+                
+                if isNewVersion || needsTimeBasedBackup {
                     do {
                         try await backupManager.createBackup(container: modelContext.container)
                         #if DEBUG
-                        print("✅ Automatic backup created successfully")
+                        if isNewVersion {
+                            print("✅ Version upgrade backup created successfully")
+                        } else {
+                            print("✅ Automatic backup created successfully (24hr)")
+                        }
                         #endif
                     } catch {
                         #if DEBUG

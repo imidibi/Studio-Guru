@@ -377,6 +377,14 @@ struct StudioCanvasView: View {
             // Set up model context for ConnectionsStore (enables iCloud sync)
             connectionsStore.setModelContext(modelContext)
             
+            // Load existing connections from SwiftData into ConnectionsStore for all studios
+            for studio in studios {
+                connectionsStore.rebuildFromConnections(studio: studio)
+                #if DEBUG
+                print("📱 Loaded \(studio.connections?.count ?? 0) connections for studio '\(studio.name)' into ConnectionsStore")
+                #endif
+            }
+            
             // Initialize Gear Locker for Pro users
             if storeManager.isPro {
                 StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)

@@ -33,6 +33,8 @@ struct ManualPDFViewer: View {
     @State private var document: PDFDocument? = nil
     @State private var loadingStatus: String = "Loading PDF..."
     @State private var isDownloading: Bool = false
+    @State private var loadingFailed: Bool = false
+    @State private var errorMessage: String = ""
 
     var body: some View {
         NavigationStack {
@@ -79,7 +81,30 @@ struct ManualPDFViewer: View {
 
                 Divider()
 
-                if document == nil {
+                if loadingFailed {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.orange)
+                        Text("Unable to Load Manual")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text(errorMessage)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Close")
+                                .frame(minWidth: 100)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else if document == nil {
                     VStack(spacing: 12) {
                         ProgressView()
                             .scaleEffect(1.2)
@@ -174,10 +199,16 @@ struct ManualPDFViewer: View {
                             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
                         }
                         
-                        // Timeout - try to load anyway
+                        // Timeout - try to load anyway, or show error if still not available
                         await MainActor.run {
                             loadingStatus = "Opening PDF..."
                             loadPDFDocument()
+                            
+                            // If document is still nil after timeout, it's likely the file doesn't exist
+                            if document == nil && !loadingFailed {
+                                loadingFailed = true
+                                errorMessage = "Unable to download the PDF from iCloud. The file may have been deleted or iCloud sync may be unavailable."
+                            }
                         }
                     }
                 } catch {
@@ -203,6 +234,19 @@ struct ManualPDFViewer: View {
         }
         
         isDownloading = false
+        
+        // If still nil after all attempts, show error
+        if document == nil {
+            loadingFailed = true
+            
+            // Check if file exists
+            let fileExists = FileManager.default.fileExists(atPath: url.path)
+            if !fileExists {
+                errorMessage = "The PDF file could not be found. It may have been deleted from iCloud Drive or local storage."
+            } else {
+                errorMessage = "The PDF file appears to be corrupted or in an unsupported format."
+            }
+        }
     }
 
     private func performSearch() {

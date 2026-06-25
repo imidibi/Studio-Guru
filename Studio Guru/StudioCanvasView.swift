@@ -5181,6 +5181,10 @@ private struct InspectorPanel: View {
 
     @State private var isImportingManual: Bool = false
     @State private var manualViewerItem: IdentifiableURL? = nil
+    @State private var manualErrorMessage: String? = nil
+    @State private var isShowingManualError: Bool = false
+    @State private var brokenManualDocLink: DocLink? = nil
+    @State private var brokenManualDevice: DeviceInstance? = nil
 
     var body: some View {
         Group {
@@ -5367,6 +5371,10 @@ private struct InspectorPanel: View {
                                             manualViewerItem = IdentifiableURL(url: url, title: doc.title)
                                         } catch {
                                             print("❌ Failed to resolve manual: \(error)")
+                                            manualErrorMessage = "Manual not found. The PDF file may have been deleted from iCloud Drive."
+                                            brokenManualDocLink = doc
+                                            brokenManualDevice = d
+                                            isShowingManualError = true
                                         }
                                     }
                                 }
@@ -5506,6 +5514,28 @@ private struct InspectorPanel: View {
                             )
                         }
                     #endif
+                        .alert("Manual Not Available", isPresented: $isShowingManualError) {
+                            Button("Cancel", role: .cancel) { 
+                                brokenManualDocLink = nil
+                                brokenManualDevice = nil
+                            }
+                            Button("Remove Link", role: .destructive) {
+                                if let doc = brokenManualDocLink,
+                                   let device = brokenManualDevice,
+                                   let idx = device.docs?.firstIndex(where: { $0.id == doc.id }) {
+                                    device.docs?.remove(at: idx)
+                                    device.markAsModified()
+                                    studio.markAsModified()
+                                    try? modelContext.save()
+                                    brokenManualDocLink = nil
+                                    brokenManualDevice = nil
+                                }
+                            }
+                        } message: {
+                            if let errorMessage = manualErrorMessage {
+                                Text(errorMessage + "\n\nWould you like to remove this broken manual link?")
+                            }
+                        }
                 } else {
                     Text("Device not found")
                         .padding()
@@ -7537,6 +7567,10 @@ private struct DeviceInspectorOverlay: View {
 
     @State private var isImportingManual: Bool = false
     @State private var manualViewerItem: IdentifiableURL? = nil
+    @State private var manualErrorMessage: String? = nil
+    @State private var isShowingManualError: Bool = false
+    @State private var brokenManualDocLink: DocLink? = nil
+    @State private var brokenManualDevice: DeviceInstance? = nil
 
     var body: some View {
         NavigationStack {
@@ -7707,6 +7741,10 @@ private struct DeviceInspectorOverlay: View {
                                             manualViewerItem = IdentifiableURL(url: url, title: doc.title)
                                         } catch {
                                             print("❌ Failed to resolve manual: \(error)")
+                                            manualErrorMessage = "Manual not found. The PDF file may have been deleted from iCloud Drive."
+                                            brokenManualDocLink = doc
+                                            brokenManualDevice = d
+                                            isShowingManualError = true
                                         }
                                     }
                                 }
@@ -7830,6 +7868,28 @@ private struct DeviceInspectorOverlay: View {
                             )
                         }
                     #endif
+                        .alert("Manual Not Available", isPresented: $isShowingManualError) {
+                            Button("Cancel", role: .cancel) { 
+                                brokenManualDocLink = nil
+                                brokenManualDevice = nil
+                            }
+                            Button("Remove Link", role: .destructive) {
+                                if let doc = brokenManualDocLink,
+                                   let device = brokenManualDevice,
+                                   let idx = device.docs?.firstIndex(where: { $0.id == doc.id }) {
+                                    device.docs?.remove(at: idx)
+                                    device.markAsModified()
+                                    studio.markAsModified()
+                                    try? modelContext.save()
+                                    brokenManualDocLink = nil
+                                    brokenManualDevice = nil
+                                }
+                            }
+                        } message: {
+                            if let errorMessage = manualErrorMessage {
+                                Text(errorMessage + "\n\nWould you like to remove this broken manual link?")
+                            }
+                        }
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "questionmark.circle")

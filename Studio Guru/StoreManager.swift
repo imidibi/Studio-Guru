@@ -62,16 +62,7 @@ class StoreManager: ObservableObject {
             return true
         }
         
-        // Check if user has ANY purchase at all (legacy support)
-        // Some users who bought the paid app might have it under a different ID
-        if !purchasedProductIDs.isEmpty {
-            // Log what we found to help diagnose
-            print("ℹ️ User has purchases but not Pro IAP: \(purchasedProductIDs)")
-            // For now, grant Pro if they have any purchase
-            // This ensures paid app buyers aren't locked out
-            return true
-        }
-        
+        // Default to free tier
         return false
     }
     

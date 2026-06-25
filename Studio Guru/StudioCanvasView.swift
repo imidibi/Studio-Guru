@@ -4309,6 +4309,10 @@ private func ioSummary(from ports: [Port]?) -> String {
     let madiout = chCount(.madiOut, .output)
     let spdifin = chCount(.spdifIn, .input)
     let spdifout = chCount(.spdifOut, .output)
+    let midiin = chCount(.midiIn, .input)
+    let midiout = chCount(.midiOut, .output)
+    let cvin = chCount(.cvIn, .input)
+    let cvout = chCount(.cvOut, .output)
 
     var parts: [String] = []
     if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
@@ -4317,6 +4321,8 @@ private func ioSummary(from ports: [Port]?) -> String {
     if spdifin > 0 || spdifout > 0 {
         parts.append("S/PDIF \(spdifin)/\(spdifout)")
     }
+    if midiin > 0 || midiout > 0 { parts.append("MIDI \(midiin)/\(midiout)") }
+    if cvin > 0 || cvout > 0 { parts.append("CV \(cvin)/\(cvout)") }
 
     return parts.isEmpty ? "I/O: None" : parts.joined(separator: " • ")
 }
@@ -8893,16 +8899,13 @@ private struct ConnectionMatrixView: View {
             parts.append("MADI \(madiIn)/\(madiOut)")
         }
         
-        // Digital I/O (MIDI, S/PDIF, etc.) - exclude word clock as it's sync only
+        // S/PDIF and AES/EBU
         var digitalIns = 0
         var digitalOuts = 0
-        var hasWordClock = false
         for input in device.digitalInputs {
             switch input {
             case .spdif: digitalIns += 2
             case .aesebu: digitalIns += 2
-            case .midi: digitalIns += 1
-            case .wordClock: hasWordClock = true
             default: break
             }
         }
@@ -8910,18 +8913,21 @@ private struct ConnectionMatrixView: View {
             switch output {
             case .spdif: digitalOuts += 2
             case .aesebu: digitalOuts += 2
-            case .midi: digitalOuts += 1
-            case .wordClock: hasWordClock = true
             default: break
             }
         }
         if digitalIns > 0 || digitalOuts > 0 {
-            parts.append("Digital \(digitalIns)/\(digitalOuts)")
+            parts.append("S/PDIF \(digitalIns)/\(digitalOuts)")
         }
         
-        // Word Clock (sync only, not audio channels)
-        if hasWordClock {
-            parts.append("WC")
+        // MIDI
+        if device.midiInputPortsCount > 0 || device.midiOutputPortsCount > 0 {
+            parts.append("MIDI \(device.midiInputPortsCount)/\(device.midiOutputPortsCount)")
+        }
+        
+        // CV (Control Voltage)
+        if device.cvInputPortsCount > 0 || device.cvOutputPortsCount > 0 {
+            parts.append("CV \(device.cvInputPortsCount)/\(device.cvOutputPortsCount)")
         }
         
         return parts.isEmpty ? "I/O: Unknown" : parts.joined(separator: " • ")

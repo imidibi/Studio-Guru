@@ -1270,14 +1270,76 @@ struct ConnectionsDialogView: View {
         let outR = resolveEndpoint(output)
         let inR = resolveEndpoint(input)
 
-        // --- MADI: only MADI Out -> MADI In ---
+        // Get port types if both endpoints are device ports
         if case let .devicePort(type: outType, portName: _) = outR.kind,
            case let .devicePort(type: inType, portName: _) = inR.kind {
+            
+            // Helper to get the connection type family
+            func connectionFamily(_ type: PortType) -> String? {
+                switch type {
+                case .analogIn, .analogOut:
+                    return "analog"
+                case .adatIn, .adatOut:
+                    return "adat"
+                case .madiIn, .madiOut:
+                    return "madi"
+                case .spdifIn, .spdifOut:
+                    return "spdif"
+                case .midiIn, .midiOut:
+                    return "midi"
+                case .cvIn, .cvOut:
+                    return "cv"
+                case .usbAudio, .thunderboltAudio:
+                    return "digital_audio"
+                case .headphoneOut:
+                    return "analog" // Headphone outputs can connect to analog inputs
+                default:
+                    return nil
+                }
+            }
+            
+            // Get connection families for both ports
+            let outFamily = connectionFamily(outType)
+            let inFamily = connectionFamily(inType)
+            
+            // If both have defined families, they must match
+            if let outFamily = outFamily, let inFamily = inFamily, outFamily != inFamily {
+                let outName = outType.rawValue.replacingOccurrences(of: "In", with: "").replacingOccurrences(of: "Out", with: "")
+                let inName = inType.rawValue.replacingOccurrences(of: "In", with: "").replacingOccurrences(of: "Out", with: "")
+                return "\(outName.capitalized) outputs can only connect to \(outName.lowercased()) inputs, not \(inName.lowercased()) inputs."
+            }
+            
+            // Specific validation: MADI must be output to input
             let usesMadi = (outType == .madiOut || outType == .madiIn || inType == .madiOut || inType == .madiIn)
             if usesMadi && !(outType == .madiOut && inType == .madiIn) {
                 return "MADI connections must go from a MADI output to a MADI input."
             }
+            
+            // Specific validation: ADAT must be output to input
+            let usesAdat = (outType == .adatOut || outType == .adatIn || inType == .adatOut || inType == .adatIn)
+            if usesAdat && !(outType == .adatOut && inType == .adatIn) {
+                return "ADAT connections must go from an ADAT output to an ADAT input."
+            }
+            
+            // Specific validation: S/PDIF must be output to input
+            let usesSpdif = (outType == .spdifOut || outType == .spdifIn || inType == .spdifOut || inType == .spdifIn)
+            if usesSpdif && !(outType == .spdifOut && inType == .spdifIn) {
+                return "S/PDIF connections must go from an S/PDIF output to an S/PDIF input."
+            }
+            
+            // Specific validation: MIDI must be output to input
+            let usesMidi = (outType == .midiOut || outType == .midiIn || inType == .midiOut || inType == .midiIn)
+            if usesMidi && !(outType == .midiOut && inType == .midiIn) {
+                return "MIDI connections must go from a MIDI output to a MIDI input."
+            }
+            
+            // Specific validation: CV must be output to input
+            let usesCv = (outType == .cvOut || outType == .cvIn || inType == .cvOut || inType == .cvIn)
+            if usesCv && !(outType == .cvOut && inType == .cvIn) {
+                return "CV connections must go from a CV output to a CV input."
+            }
         } else {
+            // One or both endpoints are not device ports - check for MADI
             if case let .devicePort(type: outType, portName: _) = outR.kind, (outType == .madiOut || outType == .madiIn) {
                 return "MADI connections must go from a MADI output to a MADI input."
             }

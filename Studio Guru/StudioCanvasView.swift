@@ -374,16 +374,37 @@ struct StudioCanvasView: View {
             isShowingHelp = true
         }
         .onAppear {
+            #if DEBUG
+            print("🔵 StudioCanvasView.onAppear - START")
+            for studio in studios {
+                print("  Studio '\(studio.name)': \(studio.connections?.count ?? 0) connections in SwiftData")
+            }
+            #endif
+            
             // Set up model context for ConnectionsStore (enables iCloud sync)
             connectionsStore.setModelContext(modelContext)
             
             // Load existing connections from SwiftData into ConnectionsStore for all studios
             for studio in studios {
+                let beforeCount = studio.connections?.count ?? 0
                 connectionsStore.rebuildFromConnections(studio: studio)
+                let afterCount = studio.connections?.count ?? 0
+                
                 #if DEBUG
-                print("📱 Loaded \(studio.connections?.count ?? 0) connections for studio '\(studio.name)' into ConnectionsStore")
+                print("📱 Studio '\(studio.name)':")
+                print("   Before: \(beforeCount) connections in SwiftData")
+                print("   After rebuildFromConnections: \(afterCount) connections in SwiftData")
+                print("   ConnectionsStore bundles: \(connectionsStore.links(for: studio.id).count)")
                 #endif
+                
+                if beforeCount != afterCount {
+                    print("⚠️⚠️⚠️ WARNING: Connection count changed! Before: \(beforeCount), After: \(afterCount)")
+                }
             }
+            
+            #if DEBUG
+            print("🔵 StudioCanvasView.onAppear - END")
+            #endif
             
             // Initialize Gear Locker for Pro users
             if storeManager.isPro {
@@ -2637,7 +2658,7 @@ struct StudioCanvasView: View {
         try? modelContext.save()
         
         // Rebuild ConnectionsStore from the copied connections
-        connectionsStore.rebuildFromConnections(studio: copy)
+        connectionsStore.rebuildFromConnections(studio: copy, markAsModified: true)
         
         selectedStudioId = copy.id
     }
@@ -4236,7 +4257,7 @@ struct StudioCanvasView: View {
             #endif
             
             // Rebuild ConnectionsStore from the imported connections
-            connectionsStore.rebuildFromConnections(studio: studio)
+            connectionsStore.rebuildFromConnections(studio: studio, markAsModified: true)
             
             #if DEBUG
             // Verify the rebuild worked

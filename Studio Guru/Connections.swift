@@ -656,7 +656,7 @@ final class ConnectionsStore: ObservableObject {
     }
     
     /// Rebuild ConnectionsStore from SwiftData Connection objects (used after import)
-    func rebuildFromConnections(studio: Studio) {
+    func rebuildFromConnections(studio: Studio, markAsModified: Bool = false) {
         let studioId = studio.id
         var bundles: [String: ConnectionBundle] = [:]
         
@@ -707,7 +707,15 @@ final class ConnectionsStore: ObservableObject {
         }
         
         bundlesByStudio[studioId] = bundles
-        persist(studioId: studioId)
+        
+        // Only persist and mark as modified when explicitly requested (e.g., after import)
+        // Don't persist on initial load to avoid triggering iCloud sync conflicts
+        if markAsModified {
+            persist(studioId: studioId)
+        } else {
+            // Just save to UserDefaults without marking studio as modified
+            persistToUserDefaults(studioId: studioId)
+        }
     }
 
     private func normalizedPairKey(_ a: UUID, _ b: UUID) -> String {

@@ -168,6 +168,7 @@ struct StudioCanvasView: View {
     @State private var assignmentData: AssignGearSheet.AssignmentData? = nil
     @State private var isPlacingDeviceFromLocker: Bool = false
     @State private var deviceToPlaceId: UUID? = nil  // Store ID instead of object to avoid stale references
+    @State private var deviceToPlaceName: String = ""  // Store device name for placement UI
     
     // Auto-arrange undo
     @State private var savedDevicePositions: [UUID: (x: Double, y: Double)] = [:]
@@ -1018,6 +1019,12 @@ struct StudioCanvasView: View {
                     onPlaceDevice: { location in
                         placeDeviceFromLocker(at: location)
                     },
+                    onCancelPlacement: {
+                        isPlacingDeviceFromLocker = false
+                        deviceToPlaceId = nil
+                        deviceToPlaceName = ""
+                    },
+                    deviceToPlaceName: deviceToPlaceName,
                     canvasSize: $canvasSize
                 )
                 .environmentObject(selectionState)
@@ -1454,8 +1461,9 @@ struct StudioCanvasView: View {
         print("   Target studio: '\(targetStudio.name)' (ID: \(targetStudio.id))")
         #endif
         
-        // Store device ID to look up fresh in new context
+        // Store device ID and name to look up fresh in new context
         deviceToPlaceId = device.id
+        deviceToPlaceName = device.nickname
         isPlacingDeviceFromLocker = true
         
         #if DEBUG
@@ -1621,6 +1629,7 @@ struct StudioCanvasView: View {
         // Exit placement mode
         isPlacingDeviceFromLocker = false
         deviceToPlaceId = nil
+        deviceToPlaceName = ""
         
         #if DEBUG
         print("✅ Placement complete - exited placement mode")
@@ -4515,6 +4524,8 @@ private struct DetailCanvas: View {
     @Binding var isDrawingMode: Bool
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
+    let onCancelPlacement: (() -> Void)?
+    let deviceToPlaceName: String
     @EnvironmentObject var selectionState: SelectionState
     @Binding var canvasSize: CGSize
 
@@ -4537,7 +4548,9 @@ private struct DetailCanvas: View {
             onClearAutoArrangeUndo: onClearAutoArrangeUndo,
             isDrawingMode: $isDrawingMode,
             isPlacingDeviceFromLocker: $isPlacingDeviceFromLocker,
-            onPlaceDevice: onPlaceDevice
+            onPlaceDevice: onPlaceDevice,
+            onCancelPlacement: onCancelPlacement,
+            deviceToPlaceName: deviceToPlaceName
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
@@ -4699,6 +4712,8 @@ private struct CanvasSurfaceView: View {
     @Binding var isDrawingMode: Bool
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
+    let onCancelPlacement: (() -> Void)?
+    let deviceToPlaceName: String
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -4779,17 +4794,30 @@ private struct CanvasSurfaceView: View {
                 .overlay(
                     Group {
                         if isPlacingDeviceFromLocker {
-                            VStack {
-                                Text("Click anywhere to place device")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.white)
-                                    .padding()
-                                    .background(Color.accentColor)
-                                    .cornerRadius(12)
-                                    .shadow(radius: 8)
+                            VStack(spacing: 12) {
+                                VStack(spacing: 8) {
+                                    Text("Place '\(deviceToPlaceName)'")
+                                        .font(.title2)
+                                        .fontWeight(.semibold)
+                                    
+                                    Text("Click anywhere on the canvas")
+                                        .font(.body)
+                                    
+                                    Text("Press ESC to cancel")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.accentColor)
+                                        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+                                )
                             }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .padding(.top, 60)
                             .allowsHitTesting(false)
                         }
                     }
@@ -4846,6 +4874,14 @@ private struct CanvasSurfaceView: View {
                     }
                     lastKnownWidth = newSize.width
                 }
+            }
+            .onKeyPress(.escape) {
+                if isPlacingDeviceFromLocker {
+                    // Cancel device placement from Gear Locker
+                    onCancelPlacement?()
+                    return .handled
+                }
+                return .ignored
             }
         }
     }

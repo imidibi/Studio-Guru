@@ -167,7 +167,7 @@ struct StudioCanvasView: View {
     @State private var deviceToAssign: DeviceInstance? = nil
     @State private var assignmentData: AssignGearSheet.AssignmentData? = nil
     @State private var isPlacingDeviceFromLocker: Bool = false
-    @State private var deviceToPlace: DeviceInstance? = nil
+    @State private var deviceToPlaceId: UUID? = nil  // Store ID instead of object to avoid stale references
     
     // Auto-arrange undo
     @State private var savedDevicePositions: [UUID: (x: Double, y: Double)] = [:]
@@ -1449,17 +1449,26 @@ struct StudioCanvasView: View {
     }
     
     private func assignDeviceToStudio(_ device: DeviceInstance, targetStudio: Studio) {
-        // Switch to target studio
-        selectedStudioId = targetStudio.id
-        
-        // Enter click-to-place mode
-        deviceToPlace = device
+        // Store device ID to look up fresh in new context
+        deviceToPlaceId = device.id
         isPlacingDeviceFromLocker = true
+        
+        // Switch to target studio (do this AFTER setting state to avoid race conditions)
+        selectedStudioId = targetStudio.id
     }
     
     private func placeDeviceFromLocker(at location: CGPoint) {
-        guard let sourceDevice = deviceToPlace,
+        guard let deviceId = deviceToPlaceId,
               let targetStudio = currentStudio else { return }
+        
+        // Find the Gear Locker studio and look up the source device by ID
+        guard let gearLocker = studios.first(where: { $0.isSystemStudio && $0.systemStudioType == "gear_locker" }),
+              let sourceDevice = gearLocker.devices?.first(where: { $0.id == deviceId }) else {
+            #if DEBUG
+            print("❌ Failed to find source device in Gear Locker")
+            #endif
+            return
+        }
         
         // Create new device instance (independent copy)
         let newDevice = DeviceInstance(
@@ -1549,7 +1558,7 @@ struct StudioCanvasView: View {
         
         // Exit placement mode
         isPlacingDeviceFromLocker = false
-        deviceToPlace = nil
+        deviceToPlaceId = nil
     }
     
     @MainActor

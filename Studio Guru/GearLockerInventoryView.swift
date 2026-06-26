@@ -86,7 +86,11 @@ struct GearLockerInventoryView: View {
     
     // Check if a device is available (not assigned to a studio)
     private func isDeviceAvailable(_ lockerDevice: DeviceInstance) -> Bool {
-        guard lockerDevice.isInGearLocker else { return false }
+        // First check: device should be marked as in gear locker OR actually be in the gear locker studio
+        let isInLocker = lockerDevice.isInGearLocker || 
+                        (studio.isSystemStudio && studio.systemStudioType == "gear_locker")
+        
+        guard isInLocker else { return false }
         
         // Check if any studio device references this locker device
         for studio in allStudios where !studio.isSystemStudio {

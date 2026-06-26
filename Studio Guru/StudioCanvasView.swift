@@ -489,7 +489,7 @@ struct StudioCanvasView: View {
             if selectedStudioId == nil {
                 selectedStudioId = studios.first?.id
             }
-            
+
             // Defer state-modifying operations to avoid "Modifying state during view update" warning
             if let sid = selectedStudioId,
                 let studio = studios.first(where: { $0.id == sid })

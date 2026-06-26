@@ -1449,26 +1449,76 @@ struct StudioCanvasView: View {
     }
     
     private func assignDeviceToStudio(_ device: DeviceInstance, targetStudio: Studio) {
+        #if DEBUG
+        print("🎯 assignDeviceToStudio - Device: '\(device.nickname)' (ID: \(device.id))")
+        print("   Target studio: '\(targetStudio.name)' (ID: \(targetStudio.id))")
+        #endif
+        
         // Store device ID to look up fresh in new context
         deviceToPlaceId = device.id
         isPlacingDeviceFromLocker = true
         
+        #if DEBUG
+        print("   State set: deviceToPlaceId=\(device.id), isPlacingDeviceFromLocker=true")
+        #endif
+        
         // Switch to target studio (do this AFTER setting state to avoid race conditions)
         selectedStudioId = targetStudio.id
+        
+        #if DEBUG
+        print("   Switched to studio: \(targetStudio.id)")
+        print("   🖱️ Now tap the canvas to place the device")
+        #endif
     }
     
     private func placeDeviceFromLocker(at location: CGPoint) {
-        guard let deviceId = deviceToPlaceId,
-              let targetStudio = currentStudio else { return }
+        #if DEBUG
+        print("📍 placeDeviceFromLocker called at location: \(location)")
+        print("   deviceToPlaceId: \(String(describing: deviceToPlaceId))")
+        print("   currentStudio: \(String(describing: currentStudio?.name))")
+        #endif
         
-        // Find the Gear Locker studio and look up the source device by ID
-        guard let gearLocker = studios.first(where: { $0.isSystemStudio && $0.systemStudioType == "gear_locker" }),
-              let sourceDevice = gearLocker.devices?.first(where: { $0.id == deviceId }) else {
+        guard let deviceId = deviceToPlaceId else {
             #if DEBUG
-            print("❌ Failed to find source device in Gear Locker")
+            print("❌ No deviceToPlaceId set")
             #endif
             return
         }
+        
+        guard let targetStudio = currentStudio else {
+            #if DEBUG
+            print("❌ No currentStudio")
+            #endif
+            return
+        }
+        
+        #if DEBUG
+        print("   Looking for Gear Locker in \(studios.count) studios...")
+        #endif
+        
+        // Find the Gear Locker studio and look up the source device by ID
+        guard let gearLocker = studios.first(where: { $0.isSystemStudio && $0.systemStudioType == "gear_locker" }) else {
+            #if DEBUG
+            print("❌ Failed to find Gear Locker studio")
+            #endif
+            return
+        }
+        
+        #if DEBUG
+        print("   Found Gear Locker with \(gearLocker.devices?.count ?? 0) devices")
+        #endif
+        
+        guard let sourceDevice = gearLocker.devices?.first(where: { $0.id == deviceId }) else {
+            #if DEBUG
+            print("❌ Failed to find source device with ID \(deviceId) in Gear Locker")
+            #endif
+            return
+        }
+        
+        #if DEBUG
+        print("✅ Found source device: '\(sourceDevice.nickname)'")
+        print("   Creating new device instance...")
+        #endif
         
         // Create new device instance (independent copy)
         let newDevice = DeviceInstance(
@@ -1546,11 +1596,23 @@ struct StudioCanvasView: View {
         targetStudio.devices?.append(newDevice)
         targetStudio.markAsModified()
         
+        #if DEBUG
+        print("   Device added to studio '\(targetStudio.name)'")
+        print("   Studio now has \(targetStudio.devices?.count ?? 0) devices")
+        #endif
+        
         // Save
         do {
             try modelContext.save()
+            #if DEBUG
+            print("✅ Device saved successfully")
+            #endif
         } catch {
+            #if DEBUG
+            print("❌ Failed to save device from locker: \(error)")
+            #else
             print("Failed to save device from locker: \(error)")
+            #endif
         }
         
         // Clear selection (don't auto-open inspector after placement)
@@ -1559,6 +1621,10 @@ struct StudioCanvasView: View {
         // Exit placement mode
         isPlacingDeviceFromLocker = false
         deviceToPlaceId = nil
+        
+        #if DEBUG
+        print("✅ Placement complete - exited placement mode")
+        #endif
     }
     
     @MainActor
@@ -4711,11 +4777,22 @@ private struct CanvasSurfaceView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { location in
+                    #if DEBUG
+                    print("🖱️ Canvas tapped at: \(location)")
+                    print("   isPlacingDeviceFromLocker: \(isPlacingDeviceFromLocker)")
+                    #endif
+                    
                     if isPlacingDeviceFromLocker {
                         // In click-to-place mode, place the device at tap location
+                        #if DEBUG
+                        print("   Calling onPlaceDevice")
+                        #endif
                         onPlaceDevice?(location)
                     } else {
                         // Normal mode: clear selection
+                        #if DEBUG
+                        print("   Normal mode - clearing selection")
+                        #endif
                         selection.selection = nil
                     }
                 }

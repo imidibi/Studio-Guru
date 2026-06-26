@@ -403,6 +403,16 @@ struct StudioCanvasView: View {
             
             // Create automatic backup if needed
             Task {
+                // CRITICAL: Update timestamps after restore (if needed)
+                // This must happen before any iCloud sync to ensure restored data wins
+                do {
+                    try await BackupManager.updateRestoredTimestampsIfNeeded(container: modelContext.container)
+                } catch {
+                    #if DEBUG
+                    print("❌ Failed to update restored timestamps: \(error)")
+                    #endif
+                }
+                
                 let backupManager = BackupManager()
                 
                 // Check if this is first launch of new version - create backup for safety

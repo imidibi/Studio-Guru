@@ -182,9 +182,14 @@ class BackupManager: ObservableObject {
             try? FileManager.default.copyItem(at: backupShmURL, to: shmURL)
         }
         
-        // CRITICAL: Update all modifiedAt timestamps to "now" to ensure restored data wins in iCloud sync
-        // This prevents iCloud from overwriting the restored backup with newer (but unwanted) data
-        try await updateRestoredTimestamps(storeURL: storeURL)
+        // CRITICAL: Mark that we need to update timestamps on next app launch
+        // We can't do it now because the database was just copied and the main container might still have locks
+        // The timestamp update will happen in updateRestoredTimestampsIfNeeded() on app startup
+        UserDefaults.standard.set(true, forKey: "needsTimestampUpdateAfterRestore")
+        
+        #if DEBUG
+        print("✅ Backup restored - timestamps will be updated on next app launch")
+        #endif
         
         // Note: The app will need to restart for changes to take effect
         // We'll show this in the UI
@@ -192,33 +197,18 @@ class BackupManager: ObservableObject {
     
     /// Updates all modifiedAt timestamps in the restored database to the current date
     /// This ensures the restored data is treated as "newer" than iCloud data during sync
-    private func updateRestoredTimestamps(storeURL: URL) async throws {
+    /// This is called on app startup after a restore, not during the restore itself
+    static func updateRestoredTimestampsIfNeeded(container: ModelContainer) async throws {
+        // Check if we need to update timestamps
+        guard UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") else {
+            return
+        }
+        
         #if DEBUG
         print("⏰ Updating timestamps in restored database for iCloud sync compatibility...")
         #endif
         
-        // Create a temporary ModelConfiguration pointing to the restored store
-        let schema = Schema([
-            Studio.self,
-            DeviceInstance.self,
-            Port.self,
-            Channel.self,
-            Connection.self,
-            DocLink.self,
-            ConnectionBundleModel.self,
-            ConnectionEdgeModel.self,
-            EndpointNameModel.self
-        ])
-        
-        let config = ModelConfiguration(
-            schema: schema,
-            url: storeURL,
-            cloudKitDatabase: .none  // Don't sync during this operation
-        )
-        
-        let tempContainer = try ModelContainer(for: schema, configurations: [config])
-        let context = ModelContext(tempContainer)
-        
+        let context = ModelContext(container)
         let now = Date()
         var updatedCount = 0
         
@@ -273,6 +263,9 @@ class BackupManager: ObservableObject {
         
         // Save all changes
         try context.save()
+        
+        // Clear the flag now that we're done
+        UserDefaults.standard.removeObject(forKey: "needsTimestampUpdateAfterRestore")
         
         #if DEBUG
         print("✅ Updated \(updatedCount) object timestamps to \(now)")

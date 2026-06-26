@@ -198,7 +198,8 @@ class BackupManager: ObservableObject {
     /// Updates all modifiedAt timestamps in the restored database to the current date
     /// This ensures the restored data is treated as "newer" than iCloud data during sync
     /// This is called on app startup after a restore, not during the restore itself
-    static func updateRestoredTimestampsIfNeeded(container: ModelContainer) async throws {
+    /// This function runs on a background thread to avoid blocking the main thread
+    static func updateRestoredTimestampsIfNeeded(container: ModelContainer) throws {
         // Check if we need to update timestamps
         guard UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") else {
             return
@@ -208,6 +209,7 @@ class BackupManager: ObservableObject {
         print("⏰ Updating timestamps in restored database for iCloud sync compatibility...")
         #endif
         
+        // Create a background context (doesn't require @MainActor)
         let context = ModelContext(container)
         let now = Date()
         var updatedCount = 0

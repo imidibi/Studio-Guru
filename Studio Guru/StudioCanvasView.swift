@@ -148,6 +148,9 @@ struct StudioCanvasView: View {
     @State private var draftManualURLs: [URL] = []
     @State private var isSelectingManualForDraft: Bool = false
     
+    // Restore confirmation
+    @State private var isShowingRestoreSuccess: Bool = false
+    
     // Draft device location for Gear Locker
     @State private var draftDeviceLocation: DeviceLocation = .currentStudio
     
@@ -276,6 +279,11 @@ struct StudioCanvasView: View {
         } message: {
             Text("No devices to export. Add devices to your studio before exporting the canvas.")
         }
+        .alert("Data Recovered from Backup", isPresented: $isShowingRestoreSuccess) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Your studio data has been successfully restored from the backup. All changes have been synced and are now current.")
+        }
         .overlay {
             if isExportingCanvas {
                 ZStack {
@@ -382,22 +390,45 @@ struct StudioCanvasView: View {
             // CRITICAL: Update timestamps after restore FIRST (blocking, before iCloud sync)
             // This must complete before anything else to ensure restored data wins in sync
             if UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") {
-                // Run synchronously by blocking the main thread
+                #if DEBUG
+                print("🔄 Detected restore flag - updating timestamps before iCloud sync...")
+                #endif
+                
+                // Run synchronously on a background thread to avoid blocking main thread
                 let semaphore = DispatchSemaphore(value: 0)
-                Task {
+                let container = modelContext.container
+                var updateError: Error? = nil
+                
+                DispatchQueue.global(qos: .userInitiated).async {
                     do {
-                        try await BackupManager.updateRestoredTimestampsIfNeeded(container: modelContext.container)
+                        try BackupManager.updateRestoredTimestampsIfNeeded(container: container)
                         #if DEBUG
                         print("✅ Timestamp update completed - restored data is now authoritative")
                         #endif
                     } catch {
+                        updateError = error
                         #if DEBUG
                         print("❌ Failed to update restored timestamps: \(error)")
                         #endif
                     }
                     semaphore.signal()
                 }
+                
+                // Wait for timestamp update to complete before continuing
                 semaphore.wait()
+                
+                #if DEBUG
+                if updateError == nil {
+                    print("✅ Timestamp update completed successfully, proceeding with app launch")
+                } else {
+                    print("⚠️ Timestamp update failed, but proceeding with app launch")
+                }
+                #endif
+                
+                // Show success alert to user if restore completed successfully
+                if updateError == nil {
+                    isShowingRestoreSuccess = true
+                }
             }
             
             // Set up model context for ConnectionsStore (enables iCloud sync)

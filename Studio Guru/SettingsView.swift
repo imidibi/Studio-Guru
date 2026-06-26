@@ -731,7 +731,11 @@ struct SettingsView: View {
                 }
             } message: {
                 if let backup = backupToRestore {
-                    Text("This will replace all current data with the backup from \(backup.displayName). The app must restart after restoring.\n\nThis cannot be undone! Consider creating a backup of your current data first.")
+                    if iCloudSyncEnabled {
+                        Text("This will replace all current data with the backup from \(backup.displayName).\n\n⚠️ IMPORTANT: iCloud Sync is enabled. The restored data will become the current version and will sync to ALL your devices, replacing any newer data on those devices.\n\nThe app must restart after restoring. This cannot be undone! Consider creating a backup of your current data first.")
+                    } else {
+                        Text("This will replace all current data with the backup from \(backup.displayName). The app must restart after restoring.\n\nThis cannot be undone! Consider creating a backup of your current data first.")
+                    }
                 }
             }
             .alert("Restore Complete", isPresented: $showingRestartForRestore) {
@@ -739,7 +743,11 @@ struct SettingsView: View {
                     exit(0)
                 }
             } message: {
-                Text("The backup has been restored. Please relaunch Studio Guru for the changes to take effect.")
+                if iCloudSyncEnabled {
+                    Text("The backup has been restored and prepared for iCloud sync. When you relaunch Studio Guru, the restored data will sync to all your devices.\n\nPlease relaunch Studio Guru now.")
+                } else {
+                    Text("The backup has been restored. Please relaunch Studio Guru for the changes to take effect.")
+                }
             }
         }
     }

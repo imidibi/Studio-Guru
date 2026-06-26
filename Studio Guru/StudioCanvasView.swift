@@ -67,6 +67,7 @@ struct StudioCanvasView: View {
     @State private var exportResultMessage: String = ""
     @State private var isShowingExportPicker: Bool = false
     @State private var exportDocument: StudioDocument? = nil
+    @State private var exportFilename: String = "Studio.studioguru"
 
     // Import
     @State private var isShowingImportPicker: Bool = false
@@ -359,7 +360,7 @@ struct StudioCanvasView: View {
             isPresented: $isShowingExportPicker,
             document: exportDocument,
             contentType: .studioGuru,
-            defaultFilename: "Studio.studioguru"
+            defaultFilename: exportFilename
         ) { result in
             handleExportResult(result)
         }
@@ -2689,6 +2690,21 @@ struct StudioCanvasView: View {
         print("   Connections in exportable: \(exportable.connections.count)")
         print("   Devices in exportable: \(exportable.devices.count)")
         #endif
+
+        // Generate filename with studio name and date
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: Date())
+        
+        // Sanitize studio name for filename (remove invalid characters)
+        let sanitizedName = studio.name
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let filename = "\(sanitizedName) \(dateString).studioguru"
+        exportFilename = filename
 
         // Create document
         exportDocument = StudioDocument(exportableStudio: exportable)

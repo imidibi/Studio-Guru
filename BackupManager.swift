@@ -182,8 +182,102 @@ class BackupManager: ObservableObject {
             try? FileManager.default.copyItem(at: backupShmURL, to: shmURL)
         }
         
+        // CRITICAL: Update all modifiedAt timestamps to "now" to ensure restored data wins in iCloud sync
+        // This prevents iCloud from overwriting the restored backup with newer (but unwanted) data
+        try await updateRestoredTimestamps(storeURL: storeURL)
+        
         // Note: The app will need to restart for changes to take effect
         // We'll show this in the UI
+    }
+    
+    /// Updates all modifiedAt timestamps in the restored database to the current date
+    /// This ensures the restored data is treated as "newer" than iCloud data during sync
+    private func updateRestoredTimestamps(storeURL: URL) async throws {
+        #if DEBUG
+        print("⏰ Updating timestamps in restored database for iCloud sync compatibility...")
+        #endif
+        
+        // Create a temporary ModelConfiguration pointing to the restored store
+        let schema = Schema([
+            Studio.self,
+            DeviceInstance.self,
+            Port.self,
+            Channel.self,
+            Connection.self,
+            DocLink.self,
+            ConnectionBundleModel.self,
+            ConnectionEdgeModel.self,
+            EndpointNameModel.self
+        ])
+        
+        let config = ModelConfiguration(
+            schema: schema,
+            url: storeURL,
+            cloudKitDatabase: .none  // Don't sync during this operation
+        )
+        
+        let tempContainer = try ModelContainer(for: schema, configurations: [config])
+        let context = ModelContext(tempContainer)
+        
+        let now = Date()
+        var updatedCount = 0
+        
+        // Update Studio objects
+        let studios = try context.fetch(FetchDescriptor<Studio>())
+        for studio in studios {
+            studio.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Update DeviceInstance objects
+        let devices = try context.fetch(FetchDescriptor<DeviceInstance>())
+        for device in devices {
+            device.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Update Connection objects
+        let connections = try context.fetch(FetchDescriptor<Connection>())
+        for connection in connections {
+            connection.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Update DocLink objects
+        let docLinks = try context.fetch(FetchDescriptor<DocLink>())
+        for docLink in docLinks {
+            docLink.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Update ConnectionBundleModel objects
+        let bundles = try context.fetch(FetchDescriptor<ConnectionBundleModel>())
+        for bundle in bundles {
+            bundle.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Update ConnectionEdgeModel objects
+        let edges = try context.fetch(FetchDescriptor<ConnectionEdgeModel>())
+        for edge in edges {
+            edge.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Update EndpointNameModel objects
+        let endpointNames = try context.fetch(FetchDescriptor<EndpointNameModel>())
+        for endpointName in endpointNames {
+            endpointName.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        // Save all changes
+        try context.save()
+        
+        #if DEBUG
+        print("✅ Updated \(updatedCount) object timestamps to \(now)")
+        print("   This ensures restored data wins in iCloud sync conflict resolution")
+        #endif
     }
     
     /// Delete a specific backup
@@ -365,6 +459,7 @@ class BackupManager: ObservableObject {
         case directoryCreationFailed
         case storeNotFound
         case backupNotFound
+        case timestampUpdateFailed
         
         var errorDescription: String? {
             switch self {
@@ -374,6 +469,8 @@ class BackupManager: ObservableObject {
                 return "SwiftData store not found"
             case .backupNotFound:
                 return "Backup file not found"
+            case .timestampUpdateFailed:
+                return "Failed to update timestamps for iCloud sync"
             }
         }
     }

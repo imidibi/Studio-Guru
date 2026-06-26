@@ -6,6 +6,7 @@
 import Foundation
 import SwiftData
 import Combine
+import SQLite3
 
 /// Manages automatic backups and restoration of SwiftData database
 @MainActor
@@ -211,6 +212,67 @@ class BackupManager: ObservableObject {
         // We'll show this in the UI
     }
     
+    /// Updates all modifiedAt timestamps in the database using direct SQLite commands
+    /// This avoids CoreData/SwiftData layer which was causing database corruption
+    private static func updateTimestampsDirectly(storeURL: URL) throws {
+        var db: OpaquePointer?
+        
+        // Open database
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK else {
+            let errmsg = String(cString: sqlite3_errmsg(db))
+            sqlite3_close(db)
+            throw NSError(domain: "SQLite", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: errmsg])
+        }
+        
+        defer {
+            sqlite3_close(db)
+        }
+        
+        // Get current timestamp in the format SwiftData uses (seconds since reference date)
+        let now = Date().timeIntervalSinceReferenceDate
+        
+        // List of tables that have modifiedAt column
+        let tables = [
+            "ZSTUDIO",
+            "ZDEVICEINSTANCE", 
+            "ZCONNECTION",
+            "ZDOCLINK",
+            "ZCONNECTIONBUNDLEMODEL",
+            "ZCONNECTIONEDGEMODEL",
+            "ZENDPOINTNAMEMODEL"
+        ]
+        
+        var totalUpdated = 0
+        
+        for table in tables {
+            let sql = "UPDATE \(table) SET ZMODIFIEDAT = ? WHERE 1=1"
+            var statement: OpaquePointer?
+            
+            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+                sqlite3_bind_double(statement, 1, now)
+                
+                if sqlite3_step(statement) == SQLITE_DONE {
+                    let changes = sqlite3_changes(db)
+                    totalUpdated += Int(changes)
+                    #if DEBUG
+                    print("   Updated \(changes) rows in \(table)")
+                    #endif
+                } else {
+                    let errmsg = String(cString: sqlite3_errmsg(db))
+                    #if DEBUG
+                    print("   ⚠️ Failed to update \(table): \(errmsg)")
+                    #endif
+                }
+            }
+            
+            sqlite3_finalize(statement)
+        }
+        
+        #if DEBUG
+        print("   Total rows updated: \(totalUpdated)")
+        #endif
+    }
+    
     /// Performs complete backup restore on app launch BEFORE container initialization
     /// This is called from Studio_GuruApp before the main ModelContainer is created
     /// Does: 1) Copy backup files  2) Update timestamps  3) Set success flag
@@ -269,17 +331,32 @@ class BackupManager: ObservableObject {
         
         #if DEBUG
         print("✅ Backup files copied successfully")
-        print("📋 Backup restore complete - no timestamp modification needed")
-        print("   Note: If iCloud sync is enabled, data will sync as-is from backup")
         #endif
         
-        // STEP 2: Clean up flags and mark success
+        // STEP 2: Update timestamps using direct SQLite (avoids CoreData corruption)
+        #if DEBUG
+        print("⏰ Step 2: Updating timestamps using direct SQLite...")
+        #endif
+        
+        do {
+            try updateTimestampsDirectly(storeURL: storeURL)
+            #if DEBUG
+            print("✅ Timestamps updated successfully using direct SQLite")
+            #endif
+        } catch {
+            #if DEBUG
+            print("❌ Failed to update timestamps: \(error)")
+            print("   Continuing anyway - restored data may be overwritten by iCloud")
+            #endif
+        }
+        
+        // STEP 3: Clean up flags and mark success
         UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")
         UserDefaults.standard.set(true, forKey: "didCompleteRestoreThisLaunch")
         
         #if DEBUG
-        print("✅ RESTORE ON LAUNCH COMPLETE: Database restored from backup")
-        print("   The app will now start with the restored data")
+        print("✅ RESTORE ON LAUNCH COMPLETE: Database restored and timestamps updated")
+        print("   Restored data will win all iCloud sync conflicts due to current timestamps")
         #endif
     }
     

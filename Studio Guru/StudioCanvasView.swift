@@ -379,6 +379,27 @@ struct StudioCanvasView: View {
             print("🔵 StudioCanvasView.onAppear - START")
             #endif
             
+            // CRITICAL: Update timestamps after restore FIRST (blocking, before iCloud sync)
+            // This must complete before anything else to ensure restored data wins in sync
+            if UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") {
+                // Run synchronously by blocking the main thread
+                let semaphore = DispatchSemaphore(value: 0)
+                Task {
+                    do {
+                        try await BackupManager.updateRestoredTimestampsIfNeeded(container: modelContext.container)
+                        #if DEBUG
+                        print("✅ Timestamp update completed - restored data is now authoritative")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("❌ Failed to update restored timestamps: \(error)")
+                        #endif
+                    }
+                    semaphore.signal()
+                }
+                semaphore.wait()
+            }
+            
             // Set up model context for ConnectionsStore (enables iCloud sync)
             connectionsStore.setModelContext(modelContext)
             
@@ -403,16 +424,6 @@ struct StudioCanvasView: View {
             
             // Create automatic backup if needed
             Task {
-                // CRITICAL: Update timestamps after restore (if needed)
-                // This must happen before any iCloud sync to ensure restored data wins
-                do {
-                    try await BackupManager.updateRestoredTimestampsIfNeeded(container: modelContext.container)
-                } catch {
-                    #if DEBUG
-                    print("❌ Failed to update restored timestamps: \(error)")
-                    #endif
-                }
-                
                 let backupManager = BackupManager()
                 
                 // Check if this is first launch of new version - create backup for safety

@@ -783,6 +783,57 @@ struct StudioCanvasView: View {
                 // Reload connections when studio is modified (including CloudKit sync)
                 connectionsStore.load(studioId: studio.id)
             }
+            .overlay {
+                if isPlacingDeviceFromLocker {
+                    ZStack {
+                        Color.black.opacity(0.4)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                // Tapping backdrop cancels placement
+                                isPlacingDeviceFromLocker = false
+                                deviceToPlaceId = nil
+                                deviceToPlaceName = ""
+                            }
+                        
+                        VStack(spacing: 20) {
+                            VStack(spacing: 12) {
+                                Image(systemName: "hand.tap.fill")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(.accentColor)
+                                
+                                Text("Place Device")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                
+                                Text(deviceToPlaceName)
+                                    .font(.title3)
+                                    .foregroundColor(.secondary)
+                                
+                                Divider()
+                                    .padding(.horizontal, 20)
+                                
+                                Text("Tap anywhere on the canvas to place this device")
+                                    .font(.body)
+                                    .multilineTextAlignment(.center)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("Press ESC or tap outside to cancel")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(32)
+                            #if os(iOS)
+                            .background(Color(uiColor: .systemBackground))
+                            #else
+                            .background(Color(nsColor: .windowBackgroundColor))
+                            #endif
+                            .cornerRadius(16)
+                            .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+                            .frame(maxWidth: 400)
+                        }
+                    }
+                }
+            }
             .sheet(isPresented: $isShowingDeviceEditor) {
                 deviceEditorSheetContent
             }
@@ -1019,12 +1070,6 @@ struct StudioCanvasView: View {
                     onPlaceDevice: { location in
                         placeDeviceFromLocker(at: location)
                     },
-                    onCancelPlacement: {
-                        isPlacingDeviceFromLocker = false
-                        deviceToPlaceId = nil
-                        deviceToPlaceName = ""
-                    },
-                    deviceToPlaceName: deviceToPlaceName,
                     canvasSize: $canvasSize
                 )
                 .environmentObject(selectionState)
@@ -4524,8 +4569,6 @@ private struct DetailCanvas: View {
     @Binding var isDrawingMode: Bool
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
-    let onCancelPlacement: (() -> Void)?
-    let deviceToPlaceName: String
     @EnvironmentObject var selectionState: SelectionState
     @Binding var canvasSize: CGSize
 
@@ -4548,9 +4591,7 @@ private struct DetailCanvas: View {
             onClearAutoArrangeUndo: onClearAutoArrangeUndo,
             isDrawingMode: $isDrawingMode,
             isPlacingDeviceFromLocker: $isPlacingDeviceFromLocker,
-            onPlaceDevice: onPlaceDevice,
-            onCancelPlacement: onCancelPlacement,
-            deviceToPlaceName: deviceToPlaceName
+            onPlaceDevice: onPlaceDevice
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(CanvasSizePreferenceKey.self) { newSize in
@@ -4712,8 +4753,6 @@ private struct CanvasSurfaceView: View {
     @Binding var isDrawingMode: Bool
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
-    let onCancelPlacement: (() -> Void)?
-    let deviceToPlaceName: String
     @EnvironmentObject var selection: SelectionState
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
@@ -4791,37 +4830,6 @@ private struct CanvasSurfaceView: View {
                         .zIndex(5)
                 }
                 .contentShape(Rectangle())
-                .overlay(
-                    Group {
-                        if isPlacingDeviceFromLocker {
-                            VStack(spacing: 12) {
-                                VStack(spacing: 8) {
-                                    Text("Place '\(deviceToPlaceName)'")
-                                        .font(.title2)
-                                        .fontWeight(.semibold)
-                                    
-                                    Text("Click anywhere on the canvas")
-                                        .font(.body)
-                                    
-                                    Text("Press ESC to cancel")
-                                        .font(.caption)
-                                        .foregroundColor(.white.opacity(0.8))
-                                }
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.accentColor)
-                                        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
-                                )
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .padding(.top, 60)
-                            .allowsHitTesting(false)
-                        }
-                    }
-                )
                 .onTapGesture { location in
                     #if DEBUG
                     print("🖱️ Canvas tapped at: \(location)")
@@ -4874,14 +4882,6 @@ private struct CanvasSurfaceView: View {
                     }
                     lastKnownWidth = newSize.width
                 }
-            }
-            .onKeyPress(.escape) {
-                if isPlacingDeviceFromLocker {
-                    // Cancel device placement from Gear Locker
-                    onCancelPlacement?()
-                    return .handled
-                }
-                return .ignored
             }
         }
     }

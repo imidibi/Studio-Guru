@@ -718,31 +718,24 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Restore", role: .destructive) {
                     if let backup = backupToRestore {
-                        Task {
-                            do {
-                                let container = modelContext.container
-                                try await backupManager.restoreFromBackup(backup, container: container)
-                                
-                                // CRITICAL: Quit immediately to prevent iCloud sync from overwriting restored data
-                                // The timestamp update will happen on next launch (before iCloud sync starts)
-                                #if DEBUG
-                                print("✅ Restore complete - quitting app immediately to prevent sync conflicts")
-                                #endif
-                                
-                                // Force quit immediately - no delay, no alert
-                                exit(0)
-                            } catch {
-                                backupManager.lastError = error.localizedDescription
-                            }
-                        }
+                        // Save which backup to restore - the actual restore will happen on next app launch
+                        UserDefaults.standard.set(backup.filename, forKey: "backupToRestoreOnLaunch")
+                        
+                        #if DEBUG
+                        print("📝 Marked backup '\(backup.filename)' for restore on next launch")
+                        print("🔄 Quitting app - restore will happen before anything else on relaunch")
+                        #endif
+                        
+                        // Quit immediately - restore will happen on next launch BEFORE container init
+                        exit(0)
                     }
                 }
             } message: {
                 if let backup = backupToRestore {
                     if iCloudSyncEnabled {
-                        Text("This will replace all current data with the backup from \(backup.displayName).\n\n⚠️ IMPORTANT: iCloud Sync is enabled. The restored data will become the current version and will sync to ALL your devices, replacing any newer data on those devices.\n\nThe app will quit immediately after restore and you must relaunch it. This cannot be undone! Consider creating a backup of your current data first.")
+                        Text("This will replace all current data with the backup from \(backup.displayName).\n\n⚠️ IMPORTANT: iCloud Sync is enabled. The restored data will become the current version and will sync to ALL your devices, replacing any newer data on those devices.\n\nThe app will quit immediately. When you relaunch, the restore will complete before any sync occurs. This cannot be undone! Consider creating a backup of your current data first.")
                     } else {
-                        Text("This will replace all current data with the backup from \(backup.displayName).\n\nThe app will quit immediately after restore and you must relaunch it. This cannot be undone! Consider creating a backup of your current data first.")
+                        Text("This will replace all current data with the backup from \(backup.displayName).\n\nThe app will quit immediately. When you relaunch, the restore will complete automatically. This cannot be undone! Consider creating a backup of your current data first.")
                     }
                 }
             }

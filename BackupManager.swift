@@ -48,6 +48,22 @@ class BackupManager: ObservableObject {
         return appSupport.appendingPathComponent(backupDirectoryName, isDirectory: true)
     }
     
+    /// Static version for use during app launch before BackupManager instance exists
+    static var staticBackupDirectory: URL? {
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return appSupport.appendingPathComponent("StudioGuruBackups", isDirectory: true)
+    }
+    
+    /// Get the default SwiftData store URL without needing a container
+    static var defaultStoreURL: URL? {
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return appSupport.appendingPathComponent("default.store")
+    }
+    
     /// Get the current SwiftData store URL
     private func getStoreURL(from container: ModelContainer) -> URL? {
         return container.configurations.first?.url
@@ -195,10 +211,147 @@ class BackupManager: ObservableObject {
         // We'll show this in the UI
     }
     
+    /// Performs complete backup restore on app launch BEFORE container initialization
+    /// This is called from Studio_GuruApp before the main ModelContainer is created
+    /// Does: 1) Copy backup files  2) Update timestamps  3) Set success flag
+    /// This is atomic and happens before any iCloud sync can interfere
+    static func performRestoreOnLaunchIfNeeded(schema: Schema) throws {
+        // Check if there's a backup marked for restore
+        guard let backupFilename = UserDefaults.standard.string(forKey: "backupToRestoreOnLaunch") else {
+            return
+        }
+        
+        #if DEBUG
+        print("🔄 RESTORE ON LAUNCH: Starting atomic restore of '\(backupFilename)'")
+        #endif
+        
+        guard let backupDir = staticBackupDirectory else {
+            throw BackupError.directoryCreationFailed
+        }
+        
+        guard let storeURL = defaultStoreURL else {
+            throw BackupError.storeNotFound
+        }
+        
+        let backupURL = backupDir.appendingPathComponent(backupFilename)
+        
+        guard FileManager.default.fileExists(atPath: backupURL.path) else {
+            #if DEBUG
+            print("❌ Backup file not found: \(backupURL.path)")
+            #endif
+            throw BackupError.backupNotFound
+        }
+        
+        // STEP 1: Copy backup files to replace current database
+        #if DEBUG
+        print("📁 Step 1: Copying backup files...")
+        #endif
+        
+        // Remove current store files
+        try? FileManager.default.removeItem(at: storeURL)
+        try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
+        try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
+        
+        // Copy backup to store location
+        try FileManager.default.copyItem(at: backupURL, to: storeURL)
+        
+        // Copy WAL and SHM files if they exist
+        let backupWalURL = backupURL.appendingPathExtension("wal")
+        let backupShmURL = backupURL.appendingPathExtension("shm")
+        
+        if FileManager.default.fileExists(atPath: backupWalURL.path) {
+            try? FileManager.default.copyItem(at: backupWalURL, to: storeURL.appendingPathExtension("wal"))
+        }
+        
+        if FileManager.default.fileExists(atPath: backupShmURL.path) {
+            try? FileManager.default.copyItem(at: backupShmURL, to: storeURL.appendingPathExtension("shm"))
+        }
+        
+        #if DEBUG
+        print("✅ Backup files copied successfully")
+        #endif
+        
+        // STEP 2: Update timestamps using temporary local-only container
+        #if DEBUG
+        print("⏰ Step 2: Updating timestamps...")
+        #endif
+        
+        let tempConfig = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .none  // Critical: no iCloud sync during timestamp update
+        )
+        let tempContainer = try ModelContainer(for: schema, configurations: [tempConfig])
+        
+        // Update all timestamps
+        let context = ModelContext(tempContainer)
+        let now = Date()
+        var updatedCount = 0
+        
+        // Update all model types
+        let studios = try context.fetch(FetchDescriptor<Studio>())
+        for studio in studios {
+            studio.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        let devices = try context.fetch(FetchDescriptor<DeviceInstance>())
+        for device in devices {
+            device.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        let connections = try context.fetch(FetchDescriptor<Connection>())
+        for connection in connections {
+            connection.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        let docLinks = try context.fetch(FetchDescriptor<DocLink>())
+        for docLink in docLinks {
+            docLink.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        let bundles = try context.fetch(FetchDescriptor<ConnectionBundleModel>())
+        for bundle in bundles {
+            bundle.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        let edges = try context.fetch(FetchDescriptor<ConnectionEdgeModel>())
+        for edge in edges {
+            edge.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        let endpointNames = try context.fetch(FetchDescriptor<EndpointNameModel>())
+        for endpointName in endpointNames {
+            endpointName.modifiedAt = now
+            updatedCount += 1
+        }
+        
+        try context.save()
+        
+        #if DEBUG
+        print("✅ Updated \(updatedCount) object timestamps to \(now)")
+        #endif
+        
+        // STEP 3: Clean up flags and mark success
+        UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")
+        UserDefaults.standard.set(true, forKey: "didCompleteRestoreThisLaunch")
+        
+        #if DEBUG
+        print("✅ RESTORE ON LAUNCH COMPLETE: Database restored and ready for iCloud sync")
+        print("   Restored data will win all sync conflicts due to updated timestamps")
+        #endif
+    }
+    
     /// Updates all modifiedAt timestamps in the restored database to the current date
     /// This ensures the restored data is treated as "newer" than iCloud data during sync
     /// This is called on app startup after a restore, not during the restore itself
     /// This function runs on a background thread to avoid blocking the main thread
+    /// NOTE: This function is deprecated in favor of performRestoreOnLaunchIfNeeded()
     static func updateRestoredTimestampsIfNeeded(container: ModelContainer) throws {
         // Check if we need to update timestamps
         guard UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") else {

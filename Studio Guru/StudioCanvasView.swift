@@ -4776,6 +4776,24 @@ private struct CanvasSurfaceView: View {
                         .zIndex(5)
                 }
                 .contentShape(Rectangle())
+                .overlay(
+                    Group {
+                        if isPlacingDeviceFromLocker {
+                            VStack {
+                                Text("Click anywhere to place device")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                    .padding()
+                                    .background(Color.accentColor)
+                                    .cornerRadius(12)
+                                    .shadow(radius: 8)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(false)
+                        }
+                    }
+                )
                 .onTapGesture { location in
                     #if DEBUG
                     print("🖱️ Canvas tapped at: \(location)")

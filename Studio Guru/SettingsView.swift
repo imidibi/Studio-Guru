@@ -797,21 +797,84 @@ struct SettingsView: View {
     
     private func resetSyncAndForceUpload() {
         #if DEBUG
-        print("🔄 Sync reset: Marking \(studios.count) studios as modified")
+        print("🔄 Sync reset: Marking all data as modified...")
         #endif
+        
+        var totalUpdated = 0
         
         // Mark all studios and devices as modified with current timestamp
         // This makes CloudKit prioritize this device's data in conflicts
         for studio in studios {
             studio.markAsModified()
+            totalUpdated += 1
             
             // Mark all devices in this studio as modified too
             for device in studio.devices ?? [] {
                 device.markAsModified()
+                totalUpdated += 1
             }
             
             #if DEBUG
             print("  ✏️ Updated studio '\(studio.name)' modifiedAt: \(studio.modifiedAt)")
+            #endif
+        }
+        
+        // CRITICAL: Also update all Connections, DocLinks, and related models
+        // These were missing in the original implementation
+        do {
+            // Update Connections
+            let connections = try modelContext.fetch(FetchDescriptor<Connection>())
+            for connection in connections {
+                connection.markAsModified()
+                totalUpdated += 1
+            }
+            #if DEBUG
+            print("  ✏️ Updated \(connections.count) connections")
+            #endif
+            
+            // Update DocLinks (manuals)
+            let docLinks = try modelContext.fetch(FetchDescriptor<DocLink>())
+            for docLink in docLinks {
+                docLink.markAsModified()
+                totalUpdated += 1
+            }
+            #if DEBUG
+            print("  ✏️ Updated \(docLinks.count) doc links")
+            #endif
+            
+            // Update ConnectionBundleModel
+            let bundles = try modelContext.fetch(FetchDescriptor<ConnectionBundleModel>())
+            for bundle in bundles {
+                bundle.markAsModified()
+                totalUpdated += 1
+            }
+            #if DEBUG
+            print("  ✏️ Updated \(bundles.count) connection bundles")
+            #endif
+            
+            // Update ConnectionEdgeModel
+            let edges = try modelContext.fetch(FetchDescriptor<ConnectionEdgeModel>())
+            for edge in edges {
+                edge.markAsModified()
+                totalUpdated += 1
+            }
+            #if DEBUG
+            print("  ✏️ Updated \(edges.count) connection edges")
+            #endif
+            
+            // Update EndpointNameModel
+            let endpoints = try modelContext.fetch(FetchDescriptor<EndpointNameModel>())
+            for endpoint in endpoints {
+                endpoint.markAsModified()
+                totalUpdated += 1
+            }
+            #if DEBUG
+            print("  ✏️ Updated \(endpoints.count) endpoint names")
+            #endif
+            
+        } catch {
+            #if DEBUG
+            print("⚠️ Error fetching some models during sync reset: \(error)")
             #endif
         }
         
@@ -820,7 +883,7 @@ struct SettingsView: View {
             try modelContext.save()
             
             #if DEBUG
-            print("✅ Sync reset complete - all data marked as modified and saved")
+            print("✅ Sync reset complete - \(totalUpdated) objects marked as modified and saved")
             print("   CloudKit will now upload this device's data as the newest version")
             #endif
         } catch {

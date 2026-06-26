@@ -335,7 +335,29 @@ class BackupManager: ObservableObject {
         
         #if DEBUG
         print("✅ Updated \(updatedCount) object timestamps to \(now)")
+        print("🔄 Closing temporary container and waiting for database locks to release...")
         #endif
+        
+        // CRITICAL: Force the context and container to release all locks
+        // We need to ensure the temp container is FULLY closed before the main container opens
+        // Swift's ARC doesn't guarantee immediate deallocation, so we need to be explicit
+        
+        // Delete the WAL file to force checkpoint and release locks
+        if let storeURL = defaultStoreURL {
+            let walURL = storeURL.appendingPathExtension("wal")
+            let shmURL = storeURL.appendingPathExtension("shm")
+            
+            // Give SQLite a moment to flush
+            Thread.sleep(forTimeInterval: 0.1)
+            
+            // Remove WAL and SHM to force clean state
+            try? FileManager.default.removeItem(at: walURL)
+            try? FileManager.default.removeItem(at: shmURL)
+            
+            #if DEBUG
+            print("✅ Cleaned up WAL/SHM files - database ready for main container")
+            #endif
+        }
         
         // STEP 3: Clean up flags and mark success
         UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")

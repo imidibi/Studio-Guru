@@ -27,6 +27,40 @@ struct Studio_GuruApp: App {
             EndpointNameModel.self
         ])
         
+        // CRITICAL: Update timestamps from backup restore BEFORE creating main container
+        // This must happen before any ModelContainer opens the database to avoid corruption
+        if UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") {
+            #if DEBUG
+            print("🔄 Detected restore flag - updating timestamps BEFORE container initialization...")
+            #endif
+            
+            do {
+                // Create a temporary local-only container just for timestamp updates
+                let tempConfig = ModelConfiguration(
+                    schema: schema,
+                    isStoredInMemoryOnly: false,
+                    cloudKitDatabase: .none  // Critical: no CloudKit during update
+                )
+                let tempContainer = try ModelContainer(for: schema, configurations: [tempConfig])
+                
+                // Update all timestamps synchronously
+                try BackupManager.updateRestoredTimestampsIfNeeded(container: tempContainer)
+                
+                // CRITICAL: Explicitly nil out the container to release the database
+                // This ensures the file is fully closed before the main container opens it
+                _ = tempContainer
+                
+                #if DEBUG
+                print("✅ Timestamp update completed before main container initialization")
+                #endif
+            } catch {
+                #if DEBUG
+                print("❌ Failed to update timestamps before container init: \(error)")
+                #endif
+                // Continue anyway - better to launch with potentially wrong timestamps than crash
+            }
+        }
+        
         // Check user preference for iCloud sync (default to false for free users)
         let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
         

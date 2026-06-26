@@ -269,6 +269,9 @@ class BackupManager: ObservableObject {
         // Clear the flag now that we're done
         UserDefaults.standard.removeObject(forKey: "needsTimestampUpdateAfterRestore")
         
+        // Set a flag so the UI knows to show the success alert
+        UserDefaults.standard.set(true, forKey: "didCompleteRestoreThisLaunch")
+        
         #if DEBUG
         print("✅ Updated \(updatedCount) object timestamps to \(now)")
         print("   This ensures restored data wins in iCloud sync conflict resolution")

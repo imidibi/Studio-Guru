@@ -387,48 +387,15 @@ struct StudioCanvasView: View {
             print("🔵 StudioCanvasView.onAppear - START")
             #endif
             
-            // CRITICAL: Update timestamps after restore FIRST (blocking, before iCloud sync)
-            // This must complete before anything else to ensure restored data wins in sync
-            if UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") {
+            // Check if we just completed a restore (flag was set but is now cleared by app startup)
+            // The timestamp update happens in Studio_GuruApp before container initialization
+            let justRestored = UserDefaults.standard.bool(forKey: "didCompleteRestoreThisLaunch")
+            if justRestored {
                 #if DEBUG
-                print("🔄 Detected restore flag - updating timestamps before iCloud sync...")
+                print("✅ Restore was completed during app launch - showing confirmation")
                 #endif
-                
-                // Run synchronously on a background thread to avoid blocking main thread
-                let semaphore = DispatchSemaphore(value: 0)
-                let container = modelContext.container
-                var updateError: Error? = nil
-                
-                DispatchQueue.global(qos: .userInitiated).async {
-                    do {
-                        try BackupManager.updateRestoredTimestampsIfNeeded(container: container)
-                        #if DEBUG
-                        print("✅ Timestamp update completed - restored data is now authoritative")
-                        #endif
-                    } catch {
-                        updateError = error
-                        #if DEBUG
-                        print("❌ Failed to update restored timestamps: \(error)")
-                        #endif
-                    }
-                    semaphore.signal()
-                }
-                
-                // Wait for timestamp update to complete before continuing
-                semaphore.wait()
-                
-                #if DEBUG
-                if updateError == nil {
-                    print("✅ Timestamp update completed successfully, proceeding with app launch")
-                } else {
-                    print("⚠️ Timestamp update failed, but proceeding with app launch")
-                }
-                #endif
-                
-                // Show success alert to user if restore completed successfully
-                if updateError == nil {
-                    isShowingRestoreSuccess = true
-                }
+                isShowingRestoreSuccess = true
+                UserDefaults.standard.removeObject(forKey: "didCompleteRestoreThisLaunch")
             }
             
             // Set up model context for ConnectionsStore (enables iCloud sync)

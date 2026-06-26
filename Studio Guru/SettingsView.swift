@@ -722,7 +722,15 @@ struct SettingsView: View {
                             do {
                                 let container = modelContext.container
                                 try await backupManager.restoreFromBackup(backup, container: container)
-                                showingRestartForRestore = true
+                                
+                                // CRITICAL: Quit immediately to prevent iCloud sync from overwriting restored data
+                                // The timestamp update will happen on next launch (before iCloud sync starts)
+                                #if DEBUG
+                                print("✅ Restore complete - quitting app immediately to prevent sync conflicts")
+                                #endif
+                                
+                                // Force quit immediately - no delay, no alert
+                                exit(0)
                             } catch {
                                 backupManager.lastError = error.localizedDescription
                             }
@@ -732,21 +740,10 @@ struct SettingsView: View {
             } message: {
                 if let backup = backupToRestore {
                     if iCloudSyncEnabled {
-                        Text("This will replace all current data with the backup from \(backup.displayName).\n\n⚠️ IMPORTANT: iCloud Sync is enabled. The restored data will become the current version and will sync to ALL your devices, replacing any newer data on those devices.\n\nThe app must restart after restoring. This cannot be undone! Consider creating a backup of your current data first.")
+                        Text("This will replace all current data with the backup from \(backup.displayName).\n\n⚠️ IMPORTANT: iCloud Sync is enabled. The restored data will become the current version and will sync to ALL your devices, replacing any newer data on those devices.\n\nThe app will quit immediately after restore and you must relaunch it. This cannot be undone! Consider creating a backup of your current data first.")
                     } else {
-                        Text("This will replace all current data with the backup from \(backup.displayName). The app must restart after restoring.\n\nThis cannot be undone! Consider creating a backup of your current data first.")
+                        Text("This will replace all current data with the backup from \(backup.displayName).\n\nThe app will quit immediately after restore and you must relaunch it. This cannot be undone! Consider creating a backup of your current data first.")
                     }
-                }
-            }
-            .alert("Restore Complete", isPresented: $showingRestartForRestore) {
-                Button("Quit App") {
-                    exit(0)
-                }
-            } message: {
-                if iCloudSyncEnabled {
-                    Text("The backup has been restored and prepared for iCloud sync. When you relaunch Studio Guru, the restored data will sync to all your devices.\n\nPlease relaunch Studio Guru now.")
-                } else {
-                    Text("The backup has been restored. Please relaunch Studio Guru for the changes to take effect.")
                 }
             }
         }

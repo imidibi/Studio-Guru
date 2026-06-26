@@ -788,12 +788,7 @@ struct StudioCanvasView: View {
                     ZStack {
                         Color.black.opacity(0.4)
                             .ignoresSafeArea()
-                            .onTapGesture {
-                                // Tapping backdrop cancels placement
-                                isPlacingDeviceFromLocker = false
-                                deviceToPlaceId = nil
-                                deviceToPlaceName = ""
-                            }
+                            .allowsHitTesting(false)  // Don't block canvas taps
                         
                         VStack(spacing: 20) {
                             VStack(spacing: 12) {
@@ -817,7 +812,7 @@ struct StudioCanvasView: View {
                                     .multilineTextAlignment(.center)
                                     .foregroundColor(.secondary)
                                 
-                                Text("Press ESC or tap outside to cancel")
+                                Text("Press ESC to cancel")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -831,6 +826,7 @@ struct StudioCanvasView: View {
                             .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
                             .frame(maxWidth: 400)
                         }
+                        .allowsHitTesting(false)  // Make modal non-interactive
                     }
                 }
             }

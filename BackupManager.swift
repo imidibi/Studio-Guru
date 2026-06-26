@@ -269,103 +269,17 @@ class BackupManager: ObservableObject {
         
         #if DEBUG
         print("✅ Backup files copied successfully")
+        print("📋 Backup restore complete - no timestamp modification needed")
+        print("   Note: If iCloud sync is enabled, data will sync as-is from backup")
         #endif
         
-        // STEP 2: Update timestamps using temporary local-only container
-        #if DEBUG
-        print("⏰ Step 2: Updating timestamps...")
-        #endif
-        
-        let tempConfig = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none  // Critical: no iCloud sync during timestamp update
-        )
-        let tempContainer = try ModelContainer(for: schema, configurations: [tempConfig])
-        
-        // Update all timestamps
-        let context = ModelContext(tempContainer)
-        let now = Date()
-        var updatedCount = 0
-        
-        // Update all model types
-        let studios = try context.fetch(FetchDescriptor<Studio>())
-        for studio in studios {
-            studio.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        let devices = try context.fetch(FetchDescriptor<DeviceInstance>())
-        for device in devices {
-            device.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        let connections = try context.fetch(FetchDescriptor<Connection>())
-        for connection in connections {
-            connection.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        let docLinks = try context.fetch(FetchDescriptor<DocLink>())
-        for docLink in docLinks {
-            docLink.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        let bundles = try context.fetch(FetchDescriptor<ConnectionBundleModel>())
-        for bundle in bundles {
-            bundle.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        let edges = try context.fetch(FetchDescriptor<ConnectionEdgeModel>())
-        for edge in edges {
-            edge.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        let endpointNames = try context.fetch(FetchDescriptor<EndpointNameModel>())
-        for endpointName in endpointNames {
-            endpointName.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        try context.save()
-        
-        #if DEBUG
-        print("✅ Updated \(updatedCount) object timestamps to \(now)")
-        print("🔄 Closing temporary container and waiting for database locks to release...")
-        #endif
-        
-        // CRITICAL: Force the context and container to release all locks
-        // We need to ensure the temp container is FULLY closed before the main container opens
-        // Swift's ARC doesn't guarantee immediate deallocation, so we need to be explicit
-        
-        // Delete the WAL file to force checkpoint and release locks
-        if let storeURL = defaultStoreURL {
-            let walURL = storeURL.appendingPathExtension("wal")
-            let shmURL = storeURL.appendingPathExtension("shm")
-            
-            // Give SQLite a moment to flush
-            Thread.sleep(forTimeInterval: 0.1)
-            
-            // Remove WAL and SHM to force clean state
-            try? FileManager.default.removeItem(at: walURL)
-            try? FileManager.default.removeItem(at: shmURL)
-            
-            #if DEBUG
-            print("✅ Cleaned up WAL/SHM files - database ready for main container")
-            #endif
-        }
-        
-        // STEP 3: Clean up flags and mark success
+        // STEP 2: Clean up flags and mark success
         UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")
         UserDefaults.standard.set(true, forKey: "didCompleteRestoreThisLaunch")
         
         #if DEBUG
-        print("✅ RESTORE ON LAUNCH COMPLETE: Database restored and ready for iCloud sync")
-        print("   Restored data will win all sync conflicts due to updated timestamps")
+        print("✅ RESTORE ON LAUNCH COMPLETE: Database restored from backup")
+        print("   The app will now start with the restored data")
         #endif
     }
     

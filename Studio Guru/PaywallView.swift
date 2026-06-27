@@ -223,22 +223,17 @@ struct PaywallView: View {
         errorMessage = nil
         
         do {
-            NSLog("🔄 STUDIOGURU: PaywallView: Calling storeManager.restorePurchases()...")
             try await storeManager.restorePurchases()
-            NSLog("✅ STUDIOGURU: PaywallView: restorePurchases() completed")
             
             if storeManager.isPro {
-                NSLog("✅ STUDIOGURU: PaywallView: User is now Pro - dismissing paywall")
                 errorMessage = "Purchases restored successfully!"
                 // Give user a moment to see the success message
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 dismiss()
             } else {
-                NSLog("⚠️ STUDIOGURU: PaywallView: User is NOT Pro after restore")
                 errorMessage = "No previous purchases found. Please check that you're signed in with the correct Apple ID and try again."
             }
         } catch {
-            NSLog("❌ STUDIOGURU: PaywallView: restorePurchases() failed with error: %@", error.localizedDescription)
             errorMessage = "Failed to restore purchases: \(error.localizedDescription). Please check your internet connection and try again."
         }
         

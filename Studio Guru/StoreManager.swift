@@ -48,21 +48,18 @@ class StoreManager: ObservableObject {
         // PRIORITY 1: Trust StoreKit transactions (most reliable)
         // Check for Pro upgrade IAP
         if purchasedProductIDs.contains(proProductID) {
-            print("✅ User has Pro IAP purchase")
             return true
         }
         
         // Check if user bought the original paid app
         // When the app was paid, the transaction product ID was the bundle ID
         if purchasedProductIDs.contains("com.ianmiller.studioguru") {
-            print("✅ User has paid app purchase - granting Pro")
             return true
         }
         
         // PRIORITY 2: Check version upgrade (fallback for offline/edge cases)
         // This helps users who upgraded from paid version but StoreKit hasn't synced yet
         if didPurchaseOriginalApp {
-            print("✅ User upgraded from paid version - granting Pro")
             return true
         }
         
@@ -82,10 +79,8 @@ class StoreManager: ObservableObject {
         if let previous = lastVersion, !previous.isEmpty {
             // Check if they upgraded from v1.21 or earlier (paid versions)
             if isVersionEligibleForFreePro(previous) {
-                print("ℹ️ User upgraded from paid version v\(previous)")
                 return true
             } else {
-                print("ℹ️ User upgraded from v\(previous) (freemium era)")
                 return false
             }
         }
@@ -151,9 +146,13 @@ class StoreManager: ObservableObject {
         do {
             let loadedProducts = try await Product.products(for: [proProductID])
             products = loadedProducts
+            #if DEBUG
             print("✅ Loaded \(loadedProducts.count) products")
+            #endif
         } catch {
+            #if DEBUG
             print("❌ Failed to load products: \(error)")
+            #endif
         }
     }
 
@@ -187,78 +186,49 @@ class StoreManager: ObservableObject {
 
     // Restore previous purchases
     func restorePurchases() async throws {
-        NSLog("🔄 STUDIOGURU: restorePurchases() called - Starting restore process...")
         isLoading = true
-        defer { 
-            isLoading = false 
-            NSLog("🔄 STUDIOGURU: restorePurchases() completed - isLoading set to false")
-        }
+        defer { isLoading = false }
 
-        NSLog("🔄 STUDIOGURU: Calling AppStore.sync()...")
         try await AppStore.sync()
-        NSLog("✅ STUDIOGURU: AppStore.sync() completed successfully")
-        
-        NSLog("🔄 STUDIOGURU: Calling updatePurchasedProducts()...")
         await updatePurchasedProducts()
-        NSLog("✅ STUDIOGURU: updatePurchasedProducts() completed")
     }
 
     // Update the set of purchased product IDs
     private func updatePurchasedProducts() async {
-        NSLog("🔍 STUDIOGURU: updatePurchasedProducts() started")
         var purchased = Set<String>()
-        var transactionCount = 0
-        var unverifiedCount = 0
 
         // Iterate through all transactions to check for ANY purchase
         // This includes the original paid app AND the Pro upgrade IAP
-        NSLog("🔍 STUDIOGURU: Checking Transaction.currentEntitlements...")
         for await result in Transaction.currentEntitlements {
-            transactionCount += 1
-            NSLog("🔍 STUDIOGURU: Found transaction #%d: %@", transactionCount, String(describing: result))
-            
-            switch result {
-            case .verified(let transaction):
-                NSLog("✅ STUDIOGURU: Transaction #%d is VERIFIED", transactionCount)
-                NSLog("   STUDIOGURU: Product ID: %@", transaction.productID)
-                NSLog("   STUDIOGURU: Purchase date: %@", transaction.purchaseDate.description)
-                NSLog("   STUDIOGURU: Transaction ID: %llu", transaction.id)
-                NSLog("   STUDIOGURU: Revocation date: %@", transaction.revocationDate?.description ?? "nil")
-                
-                // Add to purchased set if not revoked
-                if transaction.revocationDate == nil {
-                    purchased.insert(transaction.productID)
-                    NSLog("   ✅ STUDIOGURU: Added to purchased set")
-                } else {
-                    NSLog("   ⚠️ STUDIOGURU: Transaction was revoked - not adding")
+            guard case .verified(let transaction) = result else {
+                #if DEBUG
+                if case .unverified(let transaction, let error) = result {
+                    print("⚠️ Unverified transaction for \(transaction.productID): \(error)")
                 }
+                #endif
+                continue
+            }
+
+            // Add to purchased set if not revoked
+            if transaction.revocationDate == nil {
+                purchased.insert(transaction.productID)
                 
-            case .unverified(let transaction, let verificationError):
-                unverifiedCount += 1
-                NSLog("⚠️ STUDIOGURU: Transaction #%d is UNVERIFIED", transactionCount)
-                NSLog("   STUDIOGURU: Product ID: %@", transaction.productID)
-                NSLog("   STUDIOGURU: Purchase date: %@", transaction.purchaseDate.description)
-                NSLog("   STUDIOGURU: Verification error: %@", verificationError.localizedDescription)
-                NSLog("   ⚠️ STUDIOGURU: SKIPPING unverified transaction")
+                #if DEBUG
+                print("📱 Found transaction: \(transaction.productID)")
+                print("   Purchase date: \(transaction.purchaseDate)")
+                print("   Transaction ID: \(transaction.id)")
+                #endif
             }
         }
 
-        NSLog("📊 STUDIOGURU: Transaction scan complete:")
-        NSLog("   STUDIOGURU: Total transactions found: %d", transactionCount)
-        NSLog("   STUDIOGURU: Verified: %d", transactionCount - unverifiedCount)
-        NSLog("   STUDIOGURU: Unverified: %d", unverifiedCount)
-        NSLog("   STUDIOGURU: Purchased product IDs: %@", purchased.description)
-
         purchasedProductIDs = purchased
-        NSLog("✅ STUDIOGURU: Updated purchased products: %@", purchased.description)
+        
+        #if DEBUG
+        print("✅ Updated purchased products: \(purchased)")
+        #endif
         
         // IMPORTANT: If user has ANY purchase (paid app OR Pro IAP), they should have Pro
         // The paid app transaction will have the bundle ID as product ID
-        if !purchased.isEmpty {
-            NSLog("ℹ️ STUDIOGURU: User has at least one purchase - checking for Pro eligibility")
-        } else {
-            NSLog("⚠️ STUDIOGURU: No purchases found - user will be on free tier")
-        }
     }
 
     // Observe transaction updates

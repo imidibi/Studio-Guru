@@ -186,40 +186,68 @@ class StoreManager: ObservableObject {
     }
 
     // Restore previous purchases
-    func restorePurchases() async {
+    func restorePurchases() async throws {
+        print("🔄 restorePurchases() called - Starting restore process...")
         isLoading = true
-        defer { isLoading = false }
-
-        do {
-            try await AppStore.sync()
-            await updatePurchasedProducts()
-        } catch {
-            print("❌ Failed to restore purchases: \(error)")
+        defer { 
+            isLoading = false 
+            print("🔄 restorePurchases() completed - isLoading set to false")
         }
+
+        print("🔄 Calling AppStore.sync()...")
+        try await AppStore.sync()
+        print("✅ AppStore.sync() completed successfully")
+        
+        print("🔄 Calling updatePurchasedProducts()...")
+        await updatePurchasedProducts()
+        print("✅ updatePurchasedProducts() completed")
     }
 
     // Update the set of purchased product IDs
     private func updatePurchasedProducts() async {
+        print("🔍 updatePurchasedProducts() started")
         var purchased = Set<String>()
+        var transactionCount = 0
+        var unverifiedCount = 0
 
         // Iterate through all transactions to check for ANY purchase
         // This includes the original paid app AND the Pro upgrade IAP
+        print("🔍 Checking Transaction.currentEntitlements...")
         for await result in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = result else {
-                continue
-            }
-
-            // Add to purchased set if not revoked
-            if transaction.revocationDate == nil {
-                purchased.insert(transaction.productID)
-                
-                #if DEBUG
-                print("📱 Found transaction: \(transaction.productID)")
+            transactionCount += 1
+            print("🔍 Found transaction #\(transactionCount): \(result)")
+            
+            switch result {
+            case .verified(let transaction):
+                print("✅ Transaction #\(transactionCount) is VERIFIED")
+                print("   Product ID: \(transaction.productID)")
                 print("   Purchase date: \(transaction.purchaseDate)")
                 print("   Transaction ID: \(transaction.id)")
-                #endif
+                print("   Revocation date: \(transaction.revocationDate?.description ?? "nil")")
+                
+                // Add to purchased set if not revoked
+                if transaction.revocationDate == nil {
+                    purchased.insert(transaction.productID)
+                    print("   ✅ Added to purchased set")
+                } else {
+                    print("   ⚠️ Transaction was revoked - not adding")
+                }
+                
+            case .unverified(let transaction, let verificationError):
+                unverifiedCount += 1
+                print("⚠️ Transaction #\(transactionCount) is UNVERIFIED")
+                print("   Product ID: \(transaction.productID)")
+                print("   Purchase date: \(transaction.purchaseDate)")
+                print("   Verification error: \(verificationError)")
+                print("   ⚠️ SKIPPING unverified transaction")
             }
         }
+
+        print("📊 Transaction scan complete:")
+        print("   Total transactions found: \(transactionCount)")
+        print("   Verified: \(transactionCount - unverifiedCount)")
+        print("   Unverified: \(unverifiedCount)")
+        print("   Purchased product IDs: \(purchased)")
 
         purchasedProductIDs = purchased
         print("✅ Updated purchased products: \(purchased)")
@@ -228,6 +256,8 @@ class StoreManager: ObservableObject {
         // The paid app transaction will have the bundle ID as product ID
         if !purchased.isEmpty {
             print("ℹ️ User has at least one purchase - checking for Pro eligibility")
+        } else {
+            print("⚠️ No purchases found - user will be on free tier")
         }
     }
 

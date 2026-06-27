@@ -115,10 +115,7 @@ struct PaywallView: View {
 
                             Button {
                                 Task {
-                                    await storeManager.restorePurchases()
-                                    if storeManager.isPro {
-                                        dismiss()
-                                    }
+                                    await restorePurchases()
                                 }
                             } label: {
                                 Text("Restore Purchases")
@@ -218,6 +215,33 @@ struct PaywallView: View {
             errorMessage = "Purchase failed: \(error.localizedDescription)"
         }
 
+        isPurchasing = false
+    }
+    
+    private func restorePurchases() async {
+        isPurchasing = true
+        errorMessage = nil
+        
+        do {
+            print("🔄 PaywallView: Calling storeManager.restorePurchases()...")
+            try await storeManager.restorePurchases()
+            print("✅ PaywallView: restorePurchases() completed")
+            
+            if storeManager.isPro {
+                print("✅ PaywallView: User is now Pro - dismissing paywall")
+                errorMessage = "Purchases restored successfully!"
+                // Give user a moment to see the success message
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                dismiss()
+            } else {
+                print("⚠️ PaywallView: User is NOT Pro after restore")
+                errorMessage = "No previous purchases found. Please check that you're signed in with the correct Apple ID and try again."
+            }
+        } catch {
+            print("❌ PaywallView: restorePurchases() failed with error: \(error)")
+            errorMessage = "Failed to restore purchases: \(error.localizedDescription). Please check your internet connection and try again."
+        }
+        
         isPurchasing = false
     }
 }

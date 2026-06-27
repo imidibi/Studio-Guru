@@ -45,13 +45,10 @@ class StoreManager: ObservableObject {
         }
         #endif
         
-        // Honor original app purchase - anyone who bought v1.21 or earlier gets Pro for free
-        if didPurchaseOriginalApp {
-            return true
-        }
-        
+        // PRIORITY 1: Trust StoreKit transactions (most reliable)
         // Check for Pro upgrade IAP
         if purchasedProductIDs.contains(proProductID) {
+            print("✅ User has Pro IAP purchase")
             return true
         }
         
@@ -62,58 +59,42 @@ class StoreManager: ObservableObject {
             return true
         }
         
+        // PRIORITY 2: Check version upgrade (fallback for offline/edge cases)
+        // This helps users who upgraded from paid version but StoreKit hasn't synced yet
+        if didPurchaseOriginalApp {
+            print("✅ User upgraded from paid version - granting Pro")
+            return true
+        }
+        
         // Default to free tier
         return false
     }
     
     // Check if user purchased the app before it went freemium
+    // This is a FALLBACK check for users who upgraded but StoreKit hasn't synced
+    // We trust StoreKit as primary source (checked FIRST in isPro), but this helps during offline/migration
     private var didPurchaseOriginalApp: Bool {
-        // SECURITY FIX: Track both granted AND denied states to prevent exploits
-        // We need to remember if we already made a decision for this user
-        let hasCheckedKey = "hasCheckedOriginalPurchaser"
-        let wasGrantedKey = "wasGrantedOriginalPurchaserPro"
-        
-        // If we've already made a decision for this user, honor it
-        if UserDefaults.standard.object(forKey: hasCheckedKey) != nil {
-            let wasGranted = UserDefaults.standard.bool(forKey: wasGrantedKey)
-            if wasGranted {
-                print("ℹ️ User was previously granted Pro as original purchaser")
-            }
-            return wasGranted
-        }
-
-        // For backwards compatibility during transition:
         // Check if user has the app installed from before freemium launch (v1.22)
-        // We'll use a version check - if they're upgrading from v1.21 or earlier, grant Pro
         let lastVersionKey = "lastKnownVersion"
         let lastVersion = UserDefaults.standard.string(forKey: lastVersionKey)
 
-        // If this is their first launch of v1.22+ and they had a previous version, validate it
+        // If they had a previous version installed, check if it was a paid version
         if let previous = lastVersion, !previous.isEmpty {
-            // SECURITY: Only grant Pro if they upgraded from v1.21 or earlier
-            // This prevents users from getting Pro by reinstalling
+            // Check if they upgraded from v1.21 or earlier (paid versions)
             if isVersionEligibleForFreePro(previous) {
-                // They upgraded from a paid version - mark as original purchaser
-                UserDefaults.standard.set(true, forKey: hasCheckedKey)
-                UserDefaults.standard.set(true, forKey: wasGrantedKey)
-                print("✅ Granting Pro status to original app purchaser (upgraded from v\(previous))")
+                print("ℹ️ User upgraded from paid version v\(previous)")
                 return true
             } else {
-                // They had a newer version installed (v1.22+), not eligible for free Pro
-                UserDefaults.standard.set(true, forKey: hasCheckedKey)
-                UserDefaults.standard.set(false, forKey: wasGrantedKey)
-                print("ℹ️ User upgraded from v\(previous), not eligible for free Pro (freemium started at v1.22)")
+                print("ℹ️ User upgraded from v\(previous) (freemium era)")
                 return false
             }
         }
 
-        // First-time install - store current version and mark as checked/denied
+        // Store current version for future reference
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
         UserDefaults.standard.set(currentVersion, forKey: lastVersionKey)
-        UserDefaults.standard.set(true, forKey: hasCheckedKey)
-        UserDefaults.standard.set(false, forKey: wasGrantedKey)
-        print("ℹ️ First install at v\(currentVersion), not eligible for free Pro")
 
+        // No previous version = fresh install = not eligible for legacy upgrade
         return false
     }
 

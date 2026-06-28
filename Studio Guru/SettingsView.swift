@@ -76,6 +76,15 @@ struct SettingsView: View {
         return appStoreReceiptURL.lastPathComponent == "sandboxReceipt"
     }
     
+    /// Show debug section in DEBUG builds or TestFlight
+    private var showDebugSection: Bool {
+        #if DEBUG
+        return true
+        #else
+        return isTestFlight
+        #endif
+    }
+    
     /// Get color for a category
     private func colorFor(_ category: DeviceCategory) -> Color {
         let hex: String
@@ -549,12 +558,6 @@ struct SettingsView: View {
                     Text("About")
                 }
 
-                #if DEBUG
-                let showDebugSection = true
-                #else
-                let showDebugSection = isTestFlight
-                #endif
-                
                 if showDebugSection {
                     // Debug/TestFlight section for testing freemium features
                     Section {

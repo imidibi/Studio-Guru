@@ -152,6 +152,160 @@ struct SettingsView: View {
         }
     }
     
+    // Extract debug section to reduce body complexity
+    @ViewBuilder
+    private var debugTestingSection: some View {
+        Section {
+            #if DEBUG
+            Toggle(isOn: $storeManager.debugForceFreeTier) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Force Free Tier")
+                        .font(.headline)
+                    Text("Override all checks and enforce free tier limits")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            #endif
+            
+            Toggle(isOn: $storeManager.debugSimulatePro) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Enable Pro for Testing")
+                        .font(.headline)
+                    Text("Test Pro features without purchasing")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            #if DEBUG
+            .disabled(storeManager.debugForceFreeTier)
+            #endif
+
+            #if DEBUG
+            if storeManager.debugForceFreeTier {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("⚠️ Force Free Tier Active")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.orange)
+                    Text("All Pro checks bypassed - free limits enforced:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• Max \(StoreManager.freeDeviceLimit) devices")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• \(StoreManager.freeStudioLimit) studio only")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• No iCloud sync")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• No export/import")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            #endif
+            
+            if storeManager.debugSimulatePro {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("✅ Pro Mode Enabled")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.green)
+                    Text("Testing Pro features:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• Unlimited studios")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• Unlimited devices")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• iCloud sync enabled")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• Export/import enabled")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• Gear Locker enabled")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            #if DEBUG
+            Divider()
+            
+            VStack(spacing: 12) {
+                Text("Test Scenarios")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Button {
+                    // Simulate upgrading from v1.21 (original purchaser)
+                    UserDefaults.standard.removeObject(forKey: "hasGrantedOriginalPurchaserPro")
+                    UserDefaults.standard.set("1.21", forKey: "lastKnownVersion")
+                    storeManager.debugSimulatePro = false
+                    storeManager.debugForceFreeTier = false
+                    storeManager.refreshProStatus()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Simulate Original Purchaser")
+                                .font(.headline)
+                        }
+                        Text("Sets lastKnownVersion to 1.21, grants Pro on next check")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                
+                Button(role: .destructive) {
+                    // Simulate new user (no previous version)
+                    UserDefaults.standard.removeObject(forKey: "hasGrantedOriginalPurchaserPro")
+                    UserDefaults.standard.removeObject(forKey: "lastKnownVersion")
+                    storeManager.debugSimulatePro = false
+                    storeManager.debugForceFreeTier = true
+                    storeManager.refreshProStatus()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .foregroundStyle(.orange)
+                            Text("Simulate New User")
+                                .font(.headline)
+                        }
+                        Text("Clears all flags, enforces free tier limits")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.vertical, 8)
+            #endif
+        } header: {
+            #if DEBUG
+            Text("Debug Testing")
+            #else
+            Text("TestFlight Testing")
+            #endif
+        } footer: {
+            #if DEBUG
+            Text("This section only appears in debug builds. Toggle switches and test scenarios help verify freemium functionality.")
+            #else
+            Text("This section only appears in TestFlight builds. Enable 'Pro for Testing' to test Pro features during beta testing. This will be hidden in the App Store version.")
+            #endif
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -559,156 +713,7 @@ struct SettingsView: View {
                 }
 
                 if showDebugSection {
-                    // Debug/TestFlight section for testing freemium features
-                    Section {
-                        #if DEBUG
-                        Toggle(isOn: $storeManager.debugForceFreeTier) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Force Free Tier")
-                                    .font(.headline)
-                                Text("Override all checks and enforce free tier limits")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        #endif
-                        
-                        Toggle(isOn: $storeManager.debugSimulatePro) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Enable Pro for Testing")
-                                    .font(.headline)
-                                Text("Test Pro features without purchasing")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        #if DEBUG
-                        .disabled(storeManager.debugForceFreeTier)
-                        #endif
-
-                        #if DEBUG
-                        if storeManager.debugForceFreeTier {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("⚠️ Force Free Tier Active")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.orange)
-                                Text("All Pro checks bypassed - free limits enforced:")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• Max \(StoreManager.freeDeviceLimit) devices")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• \(StoreManager.freeStudioLimit) studio only")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• No iCloud sync")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• No export/import")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        #endif
-                        
-                        if storeManager.debugSimulatePro {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("✅ Pro Mode Enabled")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.green)
-                                Text("Testing Pro features:")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• Unlimited studios")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• Unlimited devices")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• iCloud sync enabled")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• Export/import enabled")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("• Gear Locker enabled")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        
-                        #if DEBUG
-                        Divider()
-                        
-                        VStack(spacing: 12) {
-                            Text("Test Scenarios")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            
-                            Button {
-                                // Simulate upgrading from v1.21 (original purchaser)
-                                UserDefaults.standard.removeObject(forKey: "hasGrantedOriginalPurchaserPro")
-                                UserDefaults.standard.set("1.21", forKey: "lastKnownVersion")
-                                storeManager.debugSimulatePro = false
-                                storeManager.debugForceFreeTier = false
-                                storeManager.refreshProStatus()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Image(systemName: "arrow.up.circle.fill")
-                                            .foregroundStyle(.green)
-                                        Text("Simulate Original Purchaser")
-                                            .font(.headline)
-                                    }
-                                    Text("Sets lastKnownVersion to 1.21, grants Pro on next check")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.bordered)
-                            
-                            Button(role: .destructive) {
-                                // Simulate new user (no previous version)
-                                UserDefaults.standard.removeObject(forKey: "hasGrantedOriginalPurchaserPro")
-                                UserDefaults.standard.removeObject(forKey: "lastKnownVersion")
-                                storeManager.debugSimulatePro = false
-                                storeManager.debugForceFreeTier = true
-                                storeManager.refreshProStatus()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Image(systemName: "person.crop.circle.badge.plus")
-                                            .foregroundStyle(.orange)
-                                        Text("Simulate New User")
-                                            .font(.headline)
-                                    }
-                                    Text("Clears all flags, enforces free tier limits")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(.vertical, 8)
-                        #endif
-                    } header: {
-                        #if DEBUG
-                        Text("Debug Testing")
-                        #else
-                        Text("TestFlight Testing")
-                        #endif
-                    } footer: {
-                        #if DEBUG
-                        Text("This section only appears in debug builds. Toggle switches and test scenarios help verify freemium functionality.")
-                        #else
-                        Text("This section only appears in TestFlight builds. Enable 'Pro for Testing' to test Pro features during beta testing. This will be hidden in the App Store version.")
-                        #endif
-                    }
+                    debugTestingSection
                 }
             }
             #if os(macOS)

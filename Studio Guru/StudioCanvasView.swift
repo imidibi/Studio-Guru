@@ -2817,18 +2817,17 @@ struct StudioCanvasView: View {
         // First, clean up any orphaned connections in ConnectionsStore
         connectionsStore.cleanupOrphanedConnections(studio: studio)
 
-        // Then sync connections from ConnectionsStore to SwiftData
-        syncConnectionsToSwiftData(studio: studio)
-
         #if DEBUG
         // Log export statistics
+        let bundleCount = connectionsStore.links(for: studio.id).count
         print("📤 Exporting studio '\(studio.name)':")
         print("   Devices: \(studio.devices?.count ?? 0)")
-        print("   Connections in SwiftData: \(studio.connections?.count ?? 0)")
+        print("   Connection bundles in ConnectionsStore: \(bundleCount)")
         #endif
 
-        // Create exportable representation
-        let exportable = ExportableStudio(from: studio)
+        // Create exportable representation directly from ConnectionsStore
+        // This avoids modifying studio.connections which would trigger CloudKit sync
+        let exportable = ExportableStudio(from: studio, connectionsStore: connectionsStore)
         
         #if DEBUG
         print("   Connections in exportable: \(exportable.connections.count)")

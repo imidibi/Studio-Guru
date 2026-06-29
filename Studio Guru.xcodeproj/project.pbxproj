@@ -70,6 +70,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5FFE5CA32F37D70900EB00B9 /* Build configuration list for PBXNativeTarget "Studio Guru" */;
 			buildPhases = (
+				5FA97D132FF1C78A00562B49 /* ShellScript */,
 				5FFE5C922F37D70900EB00B9 /* Sources */,
 				5FFE5C932F37D70900EB00B9 /* Frameworks */,
 				5FFE5C942F37D70900EB00B9 /* Resources */,
@@ -131,6 +132,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		5FA97D132FF1C78A00562B49 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Type a script or drag a script file from your workspace to insert its path# CloudKit Schema Reminder\nif [ \"${CONFIGURATION}\" == \"Release\" ]; then\n    echo \"warning: ⚠️ REMINDER: If you made SwiftData model changes, push CloudKit schema to production in CloudKit Console!\"\n    echo \"warning: → https://icloud.developer.apple.com/dashboard\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		5FFE5C922F37D70900EB00B9 /* Sources */ = {
@@ -272,7 +293,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -322,7 +343,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Studio Guru/Studio Guru.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = BSUPN2VUX7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

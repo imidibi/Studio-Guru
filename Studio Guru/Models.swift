@@ -559,6 +559,41 @@ struct ExportableStudio: Sendable {
         self.exportDate = Date()
         self.appVersion = "1.0"
     }
+    
+    /// Initialize from Studio, building connections from ConnectionsStore instead of studio.connections
+    /// This avoids modifying SwiftData during export (which would trigger CloudKit sync)
+    init(from studio: Studio, connectionsStore: ConnectionsStore) {
+        self.name = studio.name
+        self.devices = (studio.devices ?? []).map { ExportableDevice(from: $0) }
+        
+        // Build connections from ConnectionsStore without modifying SwiftData
+        var exportableConnections: [ExportableConnection] = []
+        let bundles = connectionsStore.links(for: studio.id)
+            .compactMap { connectionsStore.bundle(for: studio.id, linkId: $0.id) }
+        
+        for bundle in bundles {
+            for edge in bundle.edges {
+                let connection = ExportableConnection(
+                    id: edge.id,
+                    fromDeviceId: edge.from.deviceId,
+                    fromPortId: edge.from.portId,
+                    fromChannelId: edge.from.channelId,
+                    toDeviceId: edge.to.deviceId,
+                    toPortId: edge.to.portId,
+                    toChannelId: edge.to.channelId,
+                    cableRaw: CableType.other.rawValue,
+                    label: edge.fromName,
+                    notes: nil
+                )
+                exportableConnections.append(connection)
+            }
+        }
+        
+        self.connections = exportableConnections
+        self.canvasDrawingData = studio.canvasDrawingData
+        self.exportDate = Date()
+        self.appVersion = "1.0"
+    }
 }
 
 // Manual Codable conformance to avoid Swift 6 concurrency warnings
@@ -711,6 +746,21 @@ struct ExportableConnection: Codable, Sendable {
         self.cableRaw = connection.cableRaw
         self.label = connection.label
         self.notes = connection.notes
+    }
+    
+    init(id: UUID, fromDeviceId: UUID, fromPortId: UUID, fromChannelId: UUID,
+         toDeviceId: UUID, toPortId: UUID, toChannelId: UUID,
+         cableRaw: String, label: String, notes: String?) {
+        self.id = id
+        self.fromDeviceId = fromDeviceId
+        self.fromPortId = fromPortId
+        self.fromChannelId = fromChannelId
+        self.toDeviceId = toDeviceId
+        self.toPortId = toPortId
+        self.toChannelId = toChannelId
+        self.cableRaw = cableRaw
+        self.label = label
+        self.notes = notes
     }
 }
 

@@ -68,10 +68,15 @@ struct SettingsView: View {
     
     /// Detect if app is running via TestFlight
     private var isTestFlight: Bool {
-        guard let appStoreReceiptURL = Bundle.main.appStoreReceiptURL else {
-            return false
+        #if DEBUG
+        return false
+        #else
+        // Check if running in TestFlight environment
+        if let receiptURL = Bundle.main.appStoreReceiptURL {
+            return receiptURL.lastPathComponent == "sandboxReceipt"
         }
-        return appStoreReceiptURL.lastPathComponent == "sandboxReceipt"
+        return false
+        #endif
     }
     
     /// Show debug section in DEBUG builds or TestFlight
@@ -493,7 +498,7 @@ struct SettingsView: View {
                                     }
                                     
                                     // Clear success message after 3 seconds
-                                    if let message = backupSuccessMessage, !showingRestartAlert {
+                                    if backupSuccessMessage != nil, !showingRestartAlert {
                                         try? await Task.sleep(nanoseconds: 3_000_000_000)
                                         backupSuccessMessage = nil
                                     }

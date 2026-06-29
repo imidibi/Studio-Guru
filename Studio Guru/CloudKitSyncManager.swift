@@ -332,7 +332,7 @@ class CloudKitSyncManager: ObservableObject {
         guard let bundleIdString = record["id"] as? String,
               let bundleId = UUID(uuidString: bundleIdString),
               let studioIdString = record["studioId"] as? String,
-              let studioId = UUID(uuidString: studioIdString) else {
+              let _ = UUID(uuidString: studioIdString) else {
             return
         }
 

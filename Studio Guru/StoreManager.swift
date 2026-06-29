@@ -16,9 +16,10 @@ class StoreManager: ObservableObject {
     @Published private(set) var purchasedProductIDs = Set<String>()
     @Published private(set) var isLoading = false
 
-    // Debug mode for testing (only available in DEBUG builds)
-    #if DEBUG
+    // Debug mode for testing (available in DEBUG and TestFlight builds)
     @Published var debugSimulatePro: Bool = false
+    
+    #if DEBUG
     @Published var debugForceFreeTier: Bool = false
     @Published private var refreshTrigger: Bool = false
     #endif
@@ -38,12 +39,12 @@ class StoreManager: ObservableObject {
         if debugForceFreeTier {
             return false
         }
+        #endif
         
-        // In debug mode, allow simulation of Pro tier
+        // Allow simulation of Pro tier (available in DEBUG and TestFlight)
         if debugSimulatePro {
             return true
         }
-        #endif
         
         // PRIORITY 1: Trust StoreKit transactions (most reliable)
         // Check for Pro upgrade IAP

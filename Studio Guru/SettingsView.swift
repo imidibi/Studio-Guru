@@ -464,7 +464,7 @@ struct SettingsView: View {
                 } header: {
                     Text("How It Works")
                 } footer: {
-                    Text("iCloud sync uses backup/restore to keep your devices in sync. This is simpler and more reliable than real-time sync for a single-user app.")
+                    Text("iCloud sync automatically keeps your devices in sync by saving your data to iCloud Drive. This is simpler and more reliable than real-time sync for a single-user app.")
                 }
                 
                 if iCloudSyncEnabled {
@@ -529,14 +529,14 @@ struct SettingsView: View {
                         }
                         
                         if let latestBackup = backupManager.availableBackups.first {
-                            Text("Last backup: \(latestBackup.displayName)")
+                            Text("Last sync: \(latestBackup.displayName)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     } header: {
                         Text("iCloud Sync")
                     } footer: {
-                        Text("Your data is automatically backed up to iCloud Drive when you background the app and restored when you launch it. Use 'Sync Now' to manually sync immediately.")
+                        Text("Your data is automatically synced to iCloud Drive when you background the app and synced from iCloud when you launch it. Use 'Sync Now' to manually sync immediately.")
                     }
                 }
                 
@@ -571,7 +571,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Troubleshooting")
                 } footer: {
-                    Text("iCloud sync uses backup/restore - the app automatically backs up when backgrounded and restores the latest backup on launch. The most recently modified data always wins.")
+                    Text("iCloud sync automatically syncs your data when the app backgrounds and when you launch it. The most recently modified data always wins.")
                 }
                 
                 Section {

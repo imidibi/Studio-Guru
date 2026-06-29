@@ -29,9 +29,9 @@ struct Studio_GuruApp: App {
         formatter.timeStyle = .short
         
         if let date = restoreBackupDate {
-            return "A newer backup from iCloud Drive is available (\(formatter.string(from: date))). The app will restore this backup and restart.\n\nYour current data will be replaced with the iCloud backup."
+            return "Newer data from iCloud Drive is available (\(formatter.string(from: date))). The app will sync this data and restart.\n\nYour current data will be replaced with the iCloud data."
         } else {
-            return "A newer backup from iCloud Drive is available. The app will restore this backup and restart."
+            return "Newer data from iCloud Drive is available. The app will sync this data and restart."
         }
     }
 
@@ -248,13 +248,13 @@ struct Studio_GuruApp: App {
                             do {
                                 let result = try await backupManager.performAutoSyncWithiCloud(container: sharedModelContainer)
                                 
-                                // Handle restore scheduled for next launch
+                                // Handle sync from iCloud scheduled for next launch
                                 if case .restoredFromiCloud(let backupDate) = result {
                                     await MainActor.run {
                                         restoreBackupDate = backupDate
                                         showingRestoreAlert = true
                                     }
-                                    print("📥 Restore scheduled - user needs to restart app")
+                                    print("📥 Sync from iCloud scheduled - user needs to restart app")
                                 } else if let message = result.message {
                                     await MainActor.run {
                                         autoSyncMessage = message
@@ -267,7 +267,7 @@ struct Studio_GuruApp: App {
                         }
                     }
                 }
-                .alert("iCloud Backup Available", isPresented: $showingRestoreAlert) {
+                .alert("iCloud Sync Available", isPresented: $showingRestoreAlert) {
                     Button("Restart Now", role: .destructive) {
                         exit(0)
                     }
@@ -279,35 +279,35 @@ struct Studio_GuruApp: App {
                     Text(restoreAlertMessage)
                 }
                 .onChange(of: scenePhase) { oldPhase, newPhase in
-                    // Auto-backup when app goes to background or becomes inactive
+                    // Auto-sync to iCloud when app goes to background or becomes inactive
                     let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
                     
-                    // Backup when transitioning FROM active to inactive/background
+                    // Sync when transitioning FROM active to inactive/background
                     // This catches: minimizing, switching apps, closing windows, etc.
                     if iCloudSyncEnabled && oldPhase == .active && (newPhase == .background || newPhase == .inactive) {
                         Task {
                             do {
                                 try await backupManager.createBackup(container: sharedModelContainer)
-                                print("✅ Auto-backup completed (phase: \(oldPhase) → \(newPhase))")
+                                print("✅ Auto-sync to iCloud completed (phase: \(oldPhase) → \(newPhase))")
                                 lastBackupCheck = Date()
                             } catch {
-                                print("❌ Auto-backup failed: \(error)")
+                                print("❌ Auto-sync to iCloud failed: \(error)")
                             }
                         }
                     }
                     
-                    // Also backup periodically when app becomes active (every 5 minutes)
-                    // This ensures backups happen even if scene phase changes don't fire reliably
+                    // Also sync periodically when app becomes active (every 5 minutes)
+                    // This ensures syncs happen even if scene phase changes don't fire reliably
                     if iCloudSyncEnabled && newPhase == .active {
                         let timeSinceLastBackup = Date().timeIntervalSince(lastBackupCheck)
                         if timeSinceLastBackup > 300 { // 5 minutes
                             Task {
                                 do {
                                     try await backupManager.createBackup(container: sharedModelContainer)
-                                    print("✅ Periodic backup completed (5+ min since last backup)")
+                                    print("✅ Periodic sync to iCloud completed (5+ min since last sync)")
                                     lastBackupCheck = Date()
                                 } catch {
-                                    print("❌ Periodic backup failed: \(error)")
+                                    print("❌ Periodic sync to iCloud failed: \(error)")
                                 }
                             }
                         }

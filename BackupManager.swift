@@ -532,7 +532,7 @@ class BackupManager: ObservableObject {
         }
         
         #if DEBUG
-        print("🔄 Checking for iCloud backups to sync...")
+        print("🔄 Checking for iCloud sync...")
         #endif
         
         // Reload backups to get latest from iCloud
@@ -543,7 +543,7 @@ class BackupManager: ObservableObject {
         // Get the most recent backup
         guard let latestBackup = availableBackups.first else {
             #if DEBUG
-            print("📦 No backups found in iCloud, creating initial backup")
+            print("📦 No data found in iCloud, creating initial sync")
             #endif
             try await createBackup(container: container)
             return .createdInitialBackup
@@ -564,24 +564,24 @@ class BackupManager: ObservableObject {
         }
         
         #if DEBUG
-        print("📅 Latest iCloud backup: \(latestBackup.timestamp)")
-        print("📅 Local database modified: \(localModifiedDate)")
+        print("📅 Latest iCloud data: \(latestBackup.timestamp)")
+        print("📅 Local data modified: \(localModifiedDate)")
         #endif
         
         // Compare timestamps - if iCloud backup is significantly newer (>60 seconds), schedule restore
         let timeDifference = latestBackup.timestamp.timeIntervalSince(localModifiedDate)
         
         if timeDifference > 60 {
-            // iCloud backup is newer - schedule it for restore on next launch
+            // iCloud data is newer - schedule it for restore on next launch
             #if DEBUG
-            print("📥 iCloud backup is newer, scheduling restore on next launch...")
+            print("📥 iCloud data is newer, scheduling sync from iCloud on next launch...")
             #endif
             UserDefaults.standard.set(latestBackup.filename, forKey: "backupToRestoreOnLaunch")
             return .restoredFromiCloud(backupDate: latestBackup.timestamp)
         } else if timeDifference < -60 {
-            // Local data is newer - back it up to iCloud
+            // Local data is newer - sync it to iCloud
             #if DEBUG
-            print("📤 Local data is newer, backing up to iCloud...")
+            print("📤 Local data is newer, syncing to iCloud...")
             #endif
             try await createBackup(container: container)
             return .backedUpToiCloud
@@ -606,14 +606,14 @@ class BackupManager: ObservableObject {
         var message: String? {
             switch self {
             case .createdInitialBackup:
-                return "Created initial iCloud backup"
+                return "Created initial iCloud sync"
             case .restoredFromiCloud(let date):
                 let formatter = DateFormatter()
                 formatter.dateStyle = .short
                 formatter.timeStyle = .short
-                return "Restored from iCloud backup (\(formatter.string(from: date)))"
+                return "Synced from iCloud (\(formatter.string(from: date)))"
             case .backedUpToiCloud:
-                return "Backed up to iCloud"
+                return "Synced to iCloud"
             case .alreadyInSync:
                 return nil // Don't show message when already in sync
             default:

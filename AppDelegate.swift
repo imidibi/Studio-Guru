@@ -24,31 +24,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
         
-        print("🛑 App is quitting - creating final backup...")
+        print("🛑 App is quitting - syncing final changes to iCloud...")
         
-        // Create a semaphore to block termination until backup completes
+        // Create a semaphore to block termination until sync completes
         let semaphore = DispatchSemaphore(value: 0)
-        var backupSucceeded = false
+        var syncSucceeded = false
         
         Task {
             do {
                 try await backupManager.createBackup(container: container)
-                print("✅ Final backup completed before quit")
-                backupSucceeded = true
+                print("✅ Final sync to iCloud completed before quit")
+                syncSucceeded = true
             } catch {
-                print("❌ Final backup failed: \(error)")
+                print("❌ Final sync to iCloud failed: \(error)")
             }
             semaphore.signal()
         }
         
-        // Wait up to 5 seconds for backup to complete
+        // Wait up to 5 seconds for sync to complete
         let timeout = DispatchTime.now() + .seconds(5)
         let result = semaphore.wait(timeout: timeout)
         
         if result == .timedOut {
-            print("⚠️ Backup timed out, terminating anyway")
-        } else if backupSucceeded {
-            print("✅ Backup completed, safe to terminate")
+            print("⚠️ Sync timed out, terminating anyway")
+        } else if syncSucceeded {
+            print("✅ Sync completed, safe to terminate")
         }
         
         return .terminateNow

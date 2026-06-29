@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var storeManager: StoreManager
+    @EnvironmentObject var cloudKitSync: CloudKitSyncManager
     @Query private var studios: [Studio]
 
     @State private var isShowingPaywall = false
@@ -21,8 +22,6 @@ struct SettingsView: View {
     @State private var showingSyncReset = false
     @State private var syncResetConfirmed = false
     @State private var showingRestartAlert = false
-    @State private var isSyncing = false
-    @State private var lastSyncMessage: String?
     @StateObject private var diagnostics = iCloudDiagnostics()
     @State private var showingDiagnostics = false
     @StateObject private var backupManager = BackupManager()
@@ -149,6 +148,55 @@ struct SettingsView: View {
         case .usbExpander: usbExpanderColor = hex
         case .videoMonitor: videoMonitorColor = hex
         case .other: otherColor = hex
+        }
+    }
+    
+    private var syncStatusMessage: String {
+        switch cloudKitSync.syncStatus {
+        case .idle:
+            if let lastSync = cloudKitSync.lastSyncDate {
+                let formatter = DateFormatter()
+                formatter.timeStyle = .short
+                formatter.dateStyle = .none
+                return "Last synced at \(formatter.string(from: lastSync))"
+            } else {
+                return "Never synced"
+            }
+        case .syncing(let progress):
+            return progress
+        case .success:
+            return "Sync completed successfully"
+        case .error(let message):
+            return "Error: \(message)"
+        }
+    }
+    
+    private var syncStatusColor: Color {
+        switch cloudKitSync.syncStatus {
+        case .idle:
+            return .secondary
+        case .syncing:
+            return .blue
+        case .success:
+            return .green
+        case .error:
+            return .red
+        }
+    }
+    
+    // Extract sync status display to reduce body complexity
+    @ViewBuilder
+    private var syncStatusView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(syncStatusMessage)
+                .font(.caption)
+                .foregroundStyle(syncStatusColor)
+            
+            if let error = cloudKitSync.syncError {
+                Text("Last error: \(error)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
     }
     
@@ -466,29 +514,29 @@ struct SettingsView: View {
                     Section {
                         Button {
                             Task {
-                                await forceSyncNow()
+                                do {
+                                    try await cloudKitSync.performFullSync()
+                                } catch {
+                                    print("❌ Sync failed: \(error)")
+                                }
                             }
                         } label: {
                             HStack {
                                 Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                                 Spacer()
-                                if isSyncing {
+                                if cloudKitSync.isSyncing {
                                     ProgressView()
                                         .scaleEffect(0.8)
                                 }
                             }
                         }
-                        .disabled(isSyncing)
+                        .disabled(cloudKitSync.isSyncing)
                         
-                        if let message = lastSyncMessage {
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        syncStatusView
                     } header: {
                         Text("Manual Sync")
                     } footer: {
-                        Text("Uploads any local changes to iCloud immediately. Changes from other devices sync automatically in the background (usually within 1-2 minutes). Device manuals are stored in iCloud Drive and sync separately.")
+                        Text("Syncs all studios, devices, and connections with iCloud. Changes are pushed immediately and remote changes are pulled down.")
                     }
                 }
                 
@@ -785,154 +833,15 @@ struct SettingsView: View {
         }
     }
     
-    private func forceSyncNow() async {
-        await MainActor.run {
-            isSyncing = true
-            lastSyncMessage = "Syncing..."
-        }
-        
-        #if DEBUG
-        print("🔄 Manual sync started for \(studios.count) studios")
-        for studio in studios {
-            print("  📱 Studio: '\(studio.name)' - Modified: \(studio.modifiedAt)")
-            if let devices = studio.devices {
-                for device in devices {
-                    print("    🎛️ Device: '\(device.nickname)' - Docs: \(device.docs?.count ?? 0)")
-                }
-            }
-        }
-        #endif
-        
-        // Force a save to push local changes to CloudKit
-        // Note: SwiftData automatically syncs in the background, but this ensures
-        // any pending local changes are pushed up immediately
-        do {
-            try modelContext.save()
-            
-            #if DEBUG
-            print("✅ Local changes saved to CloudKit")
-            #endif
-            
-            // Give CloudKit time to process
-            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-            
-            await MainActor.run {
-                isSyncing = false
-                let formatter = DateFormatter()
-                formatter.timeStyle = .short
-                lastSyncMessage = "Local changes uploaded at \(formatter.string(from: Date())). New changes from other devices will sync automatically in the background. This can take 1-2 minutes."
-            }
-            
-            #if DEBUG
-            print("✅ Manual sync completed successfully")
-            #endif
-        } catch {
-            await MainActor.run {
-                isSyncing = false
-                lastSyncMessage = "Sync failed: \(error.localizedDescription)"
-            }
-            
-            #if DEBUG
-            print("❌ Manual sync failed: \(error)")
-            #endif
-        }
-    }
-    
     private func resetSyncAndForceUpload() {
-        #if DEBUG
-        print("🔄 Sync reset: Marking all data as modified...")
-        #endif
-        
-        var totalUpdated = 0
-        
-        // Mark all studios and devices as modified with current timestamp
-        // This makes CloudKit prioritize this device's data in conflicts
-        for studio in studios {
-            studio.markAsModified()
-            totalUpdated += 1
-            
-            // Mark all devices in this studio as modified too
-            for device in studio.devices ?? [] {
-                device.markAsModified()
-                totalUpdated += 1
+        Task {
+            do {
+                try await cloudKitSync.performFullSync()
+            } catch {
+                #if DEBUG
+                print("❌ Sync reset failed: \(error)")
+                #endif
             }
-            
-            #if DEBUG
-            print("  ✏️ Updated studio '\(studio.name)' modifiedAt: \(studio.modifiedAt)")
-            #endif
-        }
-        
-        // CRITICAL: Also update all Connections, DocLinks, and related models
-        // These were missing in the original implementation
-        do {
-            // Update Connections
-            let connections = try modelContext.fetch(FetchDescriptor<Connection>())
-            for connection in connections {
-                connection.markAsModified()
-                totalUpdated += 1
-            }
-            #if DEBUG
-            print("  ✏️ Updated \(connections.count) connections")
-            #endif
-            
-            // Update DocLinks (manuals)
-            let docLinks = try modelContext.fetch(FetchDescriptor<DocLink>())
-            for docLink in docLinks {
-                docLink.markAsModified()
-                totalUpdated += 1
-            }
-            #if DEBUG
-            print("  ✏️ Updated \(docLinks.count) doc links")
-            #endif
-            
-            // Update ConnectionBundleModel
-            let bundles = try modelContext.fetch(FetchDescriptor<ConnectionBundleModel>())
-            for bundle in bundles {
-                bundle.markAsModified()
-                totalUpdated += 1
-            }
-            #if DEBUG
-            print("  ✏️ Updated \(bundles.count) connection bundles")
-            #endif
-            
-            // Update ConnectionEdgeModel
-            let edges = try modelContext.fetch(FetchDescriptor<ConnectionEdgeModel>())
-            for edge in edges {
-                edge.markAsModified()
-                totalUpdated += 1
-            }
-            #if DEBUG
-            print("  ✏️ Updated \(edges.count) connection edges")
-            #endif
-            
-            // Update EndpointNameModel
-            let endpoints = try modelContext.fetch(FetchDescriptor<EndpointNameModel>())
-            for endpoint in endpoints {
-                endpoint.markAsModified()
-                totalUpdated += 1
-            }
-            #if DEBUG
-            print("  ✏️ Updated \(endpoints.count) endpoint names")
-            #endif
-            
-        } catch {
-            #if DEBUG
-            print("⚠️ Error fetching some models during sync reset: \(error)")
-            #endif
-        }
-        
-        // Save to trigger CloudKit sync
-        do {
-            try modelContext.save()
-            
-            #if DEBUG
-            print("✅ Sync reset complete - \(totalUpdated) objects marked as modified and saved")
-            print("   CloudKit will now upload this device's data as the newest version")
-            #endif
-        } catch {
-            #if DEBUG
-            print("❌ Sync reset failed: \(error)")
-            #endif
         }
     }
 }

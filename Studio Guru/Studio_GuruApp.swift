@@ -12,6 +12,7 @@ import CloudKit
 @main
 struct Studio_GuruApp: App {
     @StateObject private var storeManager = StoreManager()
+    @StateObject private var cloudKitSync = CloudKitSyncManager()
 
     var sharedModelContainer: ModelContainer = {
         // SwiftData schema - migration happens automatically when models change
@@ -40,13 +41,13 @@ struct Studio_GuruApp: App {
             // User will see the error and can try restore again
         }
         
-        // Check user preference for iCloud sync (default to false for free users)
-        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
-        
+        // IMPORTANT: We use manual CloudKit sync instead of SwiftData's automatic sync
+        // This gives us complete control and deterministic behavior
+        // SwiftData's automatic CloudKit sync (.automatic) is disabled
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: iCloudSyncEnabled ? .automatic : .none
+            cloudKitDatabase: .none  // Manual CloudKit sync via CloudKitSyncManager
         )
 
         do {
@@ -55,7 +56,7 @@ struct Studio_GuruApp: App {
             // Log sync activity for debugging and support
             let logMessage = """
             📱 SwiftData Container Initialized
-            📱 iCloud Sync: \(iCloudSyncEnabled ? "Enabled" : "Disabled")
+            📱 iCloud Sync: Manual CloudKit sync via CloudKitSyncManager
             📱 Container URL: \(container.configurations.first?.url.path ?? "unknown")
             📱 CloudKit Database: \(modelConfiguration.cloudKitDatabase)
             📱 Team ID: BSUPN2VUX7
@@ -72,8 +73,9 @@ struct Studio_GuruApp: App {
             // Always log to support file for troubleshooting
             Self.logToSupportFile(logMessage)
             
-            // Check CloudKit container status
-            if iCloudSyncEnabled {
+            // Check CloudKit container status (manual sync always available for Pro users)
+            let checkCloudKit = true
+            if checkCloudKit {
                 Task {
                     let ckContainer = CKContainer(identifier: "iCloud.com.ianmiller.studioguru")
                     let containerLog = "📱 CloudKit container: iCloud.com.ianmiller.studioguru"
@@ -185,6 +187,46 @@ struct Studio_GuruApp: App {
         WindowGroup {
             StudioCanvasView()
                 .environmentObject(storeManager)
+                .environmentObject(cloudKitSync)
+                .onAppear {
+                    // Initialize CloudKit sync manager with model context
+                    cloudKitSync.setModelContext(sharedModelContainer.mainContext)
+                }
+                .onChange(of: storeManager.isPro) { oldValue, newValue in
+                    // When Pro status becomes true, ensure Gear Locker exists
+                    if newValue && !oldValue {
+                        print("🔍 Pro status changed to true, creating Gear Locker")
+                        let context = sharedModelContainer.mainContext
+                        let descriptor = FetchDescriptor<Studio>()
+                        if let studios = try? context.fetch(descriptor) {
+                            StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
+                        }
+                    }
+                }
+                .onAppear {
+                    // Also check immediately in case user is already Pro
+                    if storeManager.isPro {
+                        print("🔍 User is already Pro on appear, creating Gear Locker")
+                        let context = sharedModelContainer.mainContext
+                        let descriptor = FetchDescriptor<Studio>()
+                        if let studios = try? context.fetch(descriptor) {
+                            StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
+                        }
+                    }
+                    
+                    // Perform automatic sync on launch if iCloud sync is enabled
+                    let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+                    if iCloudSyncEnabled {
+                        Task {
+                            do {
+                                try await cloudKitSync.performFullSync()
+                                print("✅ Automatic sync on launch completed")
+                            } catch {
+                                print("❌ Automatic sync on launch failed: \(error)")
+                            }
+                        }
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
         .commands {

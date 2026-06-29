@@ -34,10 +34,14 @@ enum StudioSeed {
     }
     
     static func ensureGearLockerExists(modelContext: ModelContext, studios: [Studio]) {
+        print("🔍 ensureGearLockerExists called with \(studios.count) studios")
+        
         // Find all Gear Lockers (there might be duplicates from iCloud sync)
         let existingLockers = studios.filter {
             $0.isSystemStudio && $0.systemStudioType == "gear_locker"
         }
+        
+        print("🔍 Found \(existingLockers.count) existing Gear Lockers")
         
         if existingLockers.isEmpty {
             // No Gear Locker exists, create one

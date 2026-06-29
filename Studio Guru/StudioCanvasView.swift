@@ -47,6 +47,7 @@ struct StudioCanvasView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Studio.name, order: .forward) private var studios: [Studio]
     @EnvironmentObject var storeManager: StoreManager
+    @EnvironmentObject var cloudKitSync: CloudKitSyncManager
 
     @State private var selectedStudioId: UUID?
 
@@ -247,6 +248,18 @@ struct StudioCanvasView: View {
 
                 do {
                     try modelContext.save()
+                    
+                    // Sync to CloudKit if enabled
+                    let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+                    if iCloudSyncEnabled {
+                        Task {
+                            do {
+                                try await cloudKitSync.pushStudio(s)
+                            } catch {
+                                print("❌ Failed to sync new studio: \(error)")
+                            }
+                        }
+                    }
                 } catch {
                     print("Studio save failed: \(error)")
                 }
@@ -1656,6 +1669,19 @@ struct StudioCanvasView: View {
             #if DEBUG
             print("✅ Device saved successfully")
             #endif
+            
+            // Sync to CloudKit if enabled
+            let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+            if iCloudSyncEnabled {
+                Task {
+                    do {
+                        try await cloudKitSync.pushDevice(newDevice, studioId: targetStudio.id)
+                        try await cloudKitSync.pushStudio(targetStudio)
+                    } catch {
+                        print("❌ Failed to sync placed device: \(error)")
+                    }
+                }
+            }
         } catch {
             #if DEBUG
             print("❌ Failed to save device from locker: \(error)")
@@ -1888,6 +1914,19 @@ struct StudioCanvasView: View {
         device.markAsModified()
         targetStudio.markAsModified()
         
+        // Sync to CloudKit if enabled
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+        if iCloudSyncEnabled {
+            Task {
+                do {
+                    try await cloudKitSync.pushDevice(device, studioId: targetStudio.id)
+                    try await cloudKitSync.pushStudio(targetStudio)
+                } catch {
+                    print("❌ Failed to sync device changes: \(error)")
+                }
+            }
+        }
+        
         // Only set selection if device was saved to current studio AND it's not a system studio
         // System studios (like Gear Locker) use list views and don't need canvas selection
         if targetStudio.id == studio.id && !targetStudio.isSystemStudio {
@@ -1958,6 +1997,20 @@ struct StudioCanvasView: View {
         newDevice.markAsModified()
         studio.markAsModified()
         try? modelContext.save()
+        
+        // Sync cloned device to CloudKit if enabled
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+        if iCloudSyncEnabled {
+            Task {
+                do {
+                    try await cloudKitSync.pushDevice(newDevice, studioId: studio.id)
+                    try await cloudKitSync.pushStudio(studio)
+                } catch {
+                    print("❌ Failed to sync cloned device: \(error)")
+                }
+            }
+        }
+        
         selectionState.selection = .device(newDevice.id)
     }
 
@@ -2799,6 +2852,18 @@ struct StudioCanvasView: View {
         modelContext.insert(copy)
         copy.markAsModified()
         try? modelContext.save()
+        
+        // Sync duplicated studio to CloudKit if enabled
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+        if iCloudSyncEnabled {
+            Task {
+                do {
+                    try await cloudKitSync.pushStudio(copy)
+                } catch {
+                    print("❌ Failed to sync duplicated studio: \(error)")
+                }
+            }
+        }
         
         // Rebuild ConnectionsStore from the copied connections
         connectionsStore.rebuildFromConnections(studio: copy, markAsModified: true)
@@ -4466,6 +4531,19 @@ struct StudioCanvasView: View {
 
             // Select the imported studio
             selectedStudioId = studio.id
+            
+            // Sync imported studio to CloudKit if enabled
+            let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+            if iCloudSyncEnabled {
+                Task {
+                    do {
+                        try await cloudKitSync.performFullSync()
+                        print("✅ Imported studio synced to CloudKit")
+                    } catch {
+                        print("❌ Failed to sync imported studio: \(error)")
+                    }
+                }
+            }
 
             exportResultMessage =
                 "Studio '\(studio.name)' imported successfully!"
@@ -4786,6 +4864,7 @@ private struct CanvasSurfaceView: View {
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
     @EnvironmentObject var selection: SelectionState
+    @EnvironmentObject var cloudKitSync: CloudKitSyncManager
 
     @State private var dragOrigin: (id: UUID, x: Double, y: Double)?
     @State private var activeConnectionDrag:
@@ -5026,6 +5105,23 @@ private struct CanvasSurfaceView: View {
                     for device in devices {
                         device.posX += shiftX
                         device.posY += shiftY
+                    }
+                }
+                
+                // Sync device positions to CloudKit if enabled
+                let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+                let syncManager = cloudKitSync
+                let currentStudioId = studio.id
+                if iCloudSyncEnabled {
+                    Task {
+                        do {
+                            // Push all moved devices to CloudKit
+                            for device in devices {
+                                try await syncManager.pushDevice(device, studioId: currentStudioId)
+                            }
+                        } catch {
+                            print("❌ Failed to sync device positions: \(error)")
+                        }
                     }
                 }
             }

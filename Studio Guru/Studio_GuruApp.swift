@@ -13,6 +13,9 @@ import CloudKit
 struct Studio_GuruApp: App {
     @StateObject private var storeManager = StoreManager()
     @StateObject private var cloudKitSync = CloudKitSyncManager()
+    @StateObject private var backupManager = BackupManager()
+    @State private var autoSyncMessage: String?
+    @Environment(\.scenePhase) var scenePhase
 
     var sharedModelContainer: ModelContainer = {
         // SwiftData schema - migration happens automatically when models change
@@ -214,15 +217,35 @@ struct Studio_GuruApp: App {
                         }
                     }
                     
-                    // Perform automatic sync on launch if iCloud sync is enabled
+                    // Perform automatic iCloud Drive sync on launch
                     let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
                     if iCloudSyncEnabled {
                         Task {
                             do {
-                                try await cloudKitSync.performFullSync()
-                                print("✅ Automatic sync on launch completed")
+                                let result = try await backupManager.performAutoSyncWithiCloud(container: sharedModelContainer)
+                                if let message = result.message {
+                                    await MainActor.run {
+                                        autoSyncMessage = message
+                                    }
+                                    print("✅ Auto-sync: \(message)")
+                                }
                             } catch {
-                                print("❌ Automatic sync on launch failed: \(error)")
+                                print("❌ Auto-sync failed: \(error)")
+                            }
+                        }
+                    }
+                }
+                .onChange(of: scenePhase) { oldPhase, newPhase in
+                    // Auto-backup when app goes to background or becomes inactive
+                    let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+                    
+                    if iCloudSyncEnabled && (newPhase == .background || newPhase == .inactive) {
+                        Task {
+                            do {
+                                try await backupManager.createBackup(container: sharedModelContainer)
+                                print("✅ Auto-backup completed (phase: \(newPhase))")
+                            } catch {
+                                print("❌ Auto-backup failed: \(error)")
                             }
                         }
                     }

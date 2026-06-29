@@ -41,8 +41,28 @@ class BackupManager: ObservableObject {
         loadAvailableBackups()
     }
     
-    /// Directory where backups are stored (local, not iCloud)
+    /// Directory where backups are stored (iCloud Drive)
     private var backupDirectory: URL? {
+        // Check if iCloud sync is enabled
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+        
+        if iCloudSyncEnabled {
+            // Use iCloud Drive
+            guard let iCloudURL = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+                #if DEBUG
+                print("⚠️ iCloud Drive not available, falling back to local storage")
+                #endif
+                return localBackupDirectory
+            }
+            return iCloudURL.appendingPathComponent("Documents/\(backupDirectoryName)", isDirectory: true)
+        } else {
+            // Use local storage when iCloud sync is disabled
+            return localBackupDirectory
+        }
+    }
+    
+    /// Local backup directory (fallback when iCloud is unavailable)
+    private var localBackupDirectory: URL? {
         guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
@@ -51,6 +71,15 @@ class BackupManager: ObservableObject {
     
     /// Static version for use during app launch before BackupManager instance exists
     static var staticBackupDirectory: URL? {
+        let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
+        
+        if iCloudSyncEnabled {
+            if let iCloudURL = FileManager.default.url(forUbiquityContainerIdentifier: nil) {
+                return iCloudURL.appendingPathComponent("Documents/StudioGuruBackups", isDirectory: true)
+            }
+        }
+        
+        // Fallback to local
         guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
@@ -491,6 +520,106 @@ class BackupManager: ObservableObject {
         }
         
         return false
+    }
+    
+    /// Automatically sync with iCloud Drive backups
+    /// Checks if there's a newer backup in iCloud and offers to restore it
+    /// Or backs up local data if it's newer than what's in iCloud
+    func performAutoSyncWithiCloud(container: ModelContainer) async throws -> AutoSyncResult {
+        // Only sync if iCloud is enabled
+        guard UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false else {
+            return .disabled
+        }
+        
+        #if DEBUG
+        print("🔄 Checking for iCloud backups to sync...")
+        #endif
+        
+        // Reload backups to get latest from iCloud
+        await MainActor.run {
+            loadAvailableBackups()
+        }
+        
+        // Get the most recent backup
+        guard let latestBackup = availableBackups.first else {
+            #if DEBUG
+            print("📦 No backups found in iCloud, creating initial backup")
+            #endif
+            try await createBackup(container: container)
+            return .createdInitialBackup
+        }
+        
+        // Get the local database's last modified time
+        guard let storeURL = getStoreURL(from: container),
+              FileManager.default.fileExists(atPath: storeURL.path) else {
+            #if DEBUG
+            print("⚠️ Local database not found")
+            #endif
+            return .noLocalData
+        }
+        
+        let attributes = try FileManager.default.attributesOfItem(atPath: storeURL.path)
+        guard let localModifiedDate = attributes[.modificationDate] as? Date else {
+            return .error
+        }
+        
+        #if DEBUG
+        print("📅 Latest iCloud backup: \(latestBackup.timestamp)")
+        print("📅 Local database modified: \(localModifiedDate)")
+        #endif
+        
+        // Compare timestamps - if iCloud backup is significantly newer (>60 seconds), restore it
+        let timeDifference = latestBackup.timestamp.timeIntervalSince(localModifiedDate)
+        
+        if timeDifference > 60 {
+            // iCloud backup is newer - restore it
+            #if DEBUG
+            print("📥 iCloud backup is newer, restoring...")
+            #endif
+            try await restoreFromBackup(latestBackup, container: container)
+            return .restoredFromiCloud(backupDate: latestBackup.timestamp)
+        } else if timeDifference < -60 {
+            // Local data is newer - back it up to iCloud
+            #if DEBUG
+            print("📤 Local data is newer, backing up to iCloud...")
+            #endif
+            try await createBackup(container: container)
+            return .backedUpToiCloud
+        } else {
+            // Data is in sync
+            #if DEBUG
+            print("✅ Data is already in sync")
+            #endif
+            return .alreadyInSync
+        }
+    }
+    
+    enum AutoSyncResult {
+        case disabled
+        case createdInitialBackup
+        case restoredFromiCloud(backupDate: Date)
+        case backedUpToiCloud
+        case alreadyInSync
+        case noLocalData
+        case error
+        
+        var message: String? {
+            switch self {
+            case .createdInitialBackup:
+                return "Created initial iCloud backup"
+            case .restoredFromiCloud(let date):
+                let formatter = DateFormatter()
+                formatter.dateStyle = .short
+                formatter.timeStyle = .short
+                return "Restored from iCloud backup (\(formatter.string(from: date)))"
+            case .backedUpToiCloud:
+                return "Backed up to iCloud"
+            case .alreadyInSync:
+                return nil // Don't show message when already in sync
+            default:
+                return nil
+            }
+        }
     }
     
     // MARK: - Private Methods

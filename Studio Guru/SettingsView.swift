@@ -19,8 +19,7 @@ struct SettingsView: View {
     @State private var paywallReason: PaywallReason = .general
     // Default to false for free users - Pro users can enable it
     @AppStorage("iCloudSyncEnabled") private var iCloudSyncEnabled = false
-    @State private var showingSyncReset = false
-    @State private var syncResetConfirmed = false
+
     @State private var showingRestartAlert = false
     @StateObject private var diagnostics = iCloudDiagnostics()
     @State private var showingDiagnostics = false
@@ -151,54 +150,7 @@ struct SettingsView: View {
         }
     }
     
-    private var syncStatusMessage: String {
-        switch cloudKitSync.syncStatus {
-        case .idle:
-            if let lastSync = cloudKitSync.lastSyncDate {
-                let formatter = DateFormatter()
-                formatter.timeStyle = .short
-                formatter.dateStyle = .none
-                return "Last synced at \(formatter.string(from: lastSync))"
-            } else {
-                return "Never synced"
-            }
-        case .syncing(let progress):
-            return progress
-        case .success:
-            return "Sync completed successfully"
-        case .error(let message):
-            return "Error: \(message)"
-        }
-    }
-    
-    private var syncStatusColor: Color {
-        switch cloudKitSync.syncStatus {
-        case .idle:
-            return .secondary
-        case .syncing:
-            return .blue
-        case .success:
-            return .green
-        case .error:
-            return .red
-        }
-    }
-    
-    // Extract sync status display to reduce body complexity
-    @ViewBuilder
-    private var syncStatusView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(syncStatusMessage)
-                .font(.caption)
-                .foregroundStyle(syncStatusColor)
-            
-            if let error = cloudKitSync.syncError {
-                Text("Last error: \(error)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-    }
+
     
     // Extract debug section to reduce body complexity
     @ViewBuilder
@@ -484,19 +436,19 @@ struct SettingsView: View {
                 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Your studio data is stored securely in your personal iCloud account and syncs automatically between your iPad and Mac.")
+                        Text("Your studio data is stored securely in your personal iCloud Drive and syncs automatically between your iPad and Mac.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("• Changes sync automatically when online")
+                        Text("• App backs up to iCloud when backgrounded or quit")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("• Most recently modified item wins in conflicts")
+                        Text("• Latest backup restores automatically on launch")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("• Turning sync off then on may lose local changes")
+                        Text("• Most recently modified data always wins")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
@@ -507,36 +459,79 @@ struct SettingsView: View {
                 } header: {
                     Text("How It Works")
                 } footer: {
-                    Text("IMPORTANT: If you disable iCloud sync and make changes, then re-enable it, your local changes may be overwritten by iCloud's version. Use Export before disabling sync to backup your data.")
+                    Text("iCloud sync uses backup/restore to keep your devices in sync. This is simpler and more reliable than real-time sync for a single-user app.")
                 }
                 
                 if iCloudSyncEnabled {
                     Section {
                         Button {
                             Task {
+                                backupSuccessMessage = nil
                                 do {
-                                    try await cloudKitSync.performFullSync()
+                                    let container = modelContext.container
+                                    let result = try await backupManager.performAutoSyncWithiCloud(container: container)
+                                    
+                                    switch result {
+                                    case .disabled:
+                                        backupSuccessMessage = "iCloud sync is disabled"
+                                    case .createdInitialBackup:
+                                        backupSuccessMessage = "Created initial iCloud backup"
+                                    case .restoredFromiCloud(let date):
+                                        let formatter = DateFormatter()
+                                        formatter.dateStyle = .short
+                                        formatter.timeStyle = .short
+                                        backupSuccessMessage = "Restored from iCloud backup (\(formatter.string(from: date)))"
+                                        showingRestartAlert = true
+                                    case .backedUpToiCloud:
+                                        backupSuccessMessage = "Backed up to iCloud"
+                                    case .alreadyInSync:
+                                        backupSuccessMessage = "Already in sync with iCloud"
+                                    case .noLocalData:
+                                        backupSuccessMessage = "No local data found"
+                                    case .error:
+                                        backupSuccessMessage = "Sync error occurred"
+                                    }
+                                    
+                                    // Clear success message after 3 seconds
+                                    if let message = backupSuccessMessage, !showingRestartAlert {
+                                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                                        backupSuccessMessage = nil
+                                    }
                                 } catch {
                                     print("❌ Sync failed: \(error)")
+                                    backupSuccessMessage = "Sync failed: \(error.localizedDescription)"
+                                    
+                                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                                    backupSuccessMessage = nil
                                 }
                             }
                         } label: {
                             HStack {
                                 Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                                 Spacer()
-                                if cloudKitSync.isSyncing {
+                                if backupManager.isCreatingBackup || backupManager.isRestoringBackup {
                                     ProgressView()
                                         .scaleEffect(0.8)
                                 }
                             }
                         }
-                        .disabled(cloudKitSync.isSyncing)
+                        .disabled(backupManager.isCreatingBackup || backupManager.isRestoringBackup)
                         
-                        syncStatusView
+                        if let successMessage = backupSuccessMessage {
+                            Text(successMessage)
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                        
+                        if let latestBackup = backupManager.availableBackups.first {
+                            Text("Last backup: \(latestBackup.displayName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     } header: {
-                        Text("Manual Sync")
+                        Text("iCloud Sync")
                     } footer: {
-                        Text("Syncs all studios, devices, and connections with iCloud. Changes are pushed immediately and remote changes are pulled down.")
+                        Text("Your data is automatically backed up to iCloud Drive when you background the app and restored when you launch it. Use 'Sync Now' to manually sync immediately.")
                     }
                 }
                 
@@ -550,31 +545,17 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("2. Use 'Sync Now' button above on both devices")
+                        Text("2. Use 'Sync Now' button above to force a sync")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("3. Wait a few minutes for sync to complete")
+                        Text("3. Force quit and relaunch the app on both devices")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("4. If still not syncing, force quit and relaunch on both devices")
+                        Text("4. The most recently modified data will be used")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    
-                    Button(role: .destructive) {
-                        showingSyncReset = true
-                    } label: {
-                        Label("Reset Sync & Use This Device's Data", systemImage: "arrow.triangle.2.circlepath.icloud")
-                    }
-                    
-                    Divider()
-                    
-                    Button {
-                        showingDiagnostics = true
-                    } label: {
-                        Label("Run iCloud Diagnostics", systemImage: "stethoscope")
                     }
                     
                     if let logURL = Studio_GuruApp.getDiagnosticsLogURL() {
@@ -585,7 +566,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Troubleshooting")
                 } footer: {
-                    Text("Use 'Reset Sync' only if data isn't syncing properly after trying 'Sync Now'. This marks all data on this device as new and uploads it to iCloud. Other devices will download this version.")
+                    Text("iCloud sync uses backup/restore - the app automatically backs up when backgrounded and restores the latest backup on launch. The most recently modified data always wins.")
                 }
                 
                 Section {
@@ -691,7 +672,8 @@ struct SettingsView: View {
                 } header: {
                     Text("Automatic Backups")
                 } footer: {
-                    Text("Studio Guru automatically backs up your entire database. The last 5 backups are kept locally (not in iCloud). Backups are created on app launch if 24 hours have passed since the last backup.")
+                    let location = (UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false) ? "in iCloud Drive" : "locally"
+                    return Text("Studio Guru automatically backs up your entire database. The last 5 backups are kept \(location). Backups are created when the app backgrounds or quits if iCloud sync is enabled, or on launch if 24 hours have passed.")
                 }
                 
                 if iCloudSyncEnabled && !studios.isEmpty {
@@ -776,14 +758,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .alert("Reset iCloud Sync?", isPresented: $showingSyncReset) {
-                Button("Cancel", role: .cancel) {}
-                Button("Reset & Upload This Data", role: .destructive) {
-                    resetSyncAndForceUpload()
-                }
-            } message: {
-                Text("This will mark all data on this device as 'new' and upload it to iCloud. Other devices will download this data. Use this if sync seems stuck.\n\nIMPORTANT: Make sure this device has the data you want to keep!")
-            }
+
             .alert("Restart Required", isPresented: $showingRestartAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -833,17 +808,7 @@ struct SettingsView: View {
         }
     }
     
-    private func resetSyncAndForceUpload() {
-        Task {
-            do {
-                try await cloudKitSync.performFullSync()
-            } catch {
-                #if DEBUG
-                print("❌ Sync reset failed: \(error)")
-                #endif
-            }
-        }
-    }
+
 }
 
 // MARK: - Backups List View

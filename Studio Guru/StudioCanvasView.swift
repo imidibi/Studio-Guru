@@ -2857,11 +2857,48 @@ struct StudioCanvasView: View {
     // MARK: - Port Migration
 
     /// Fixes port types for computer interface and MIDI ports without changing port IDs (preserves connections)
+    /// Also ensures ports exist for synced devices (CloudKit sync may bring devices with counts but no ports array)
     private func fixComputerInterfacePortTypes(in studio: Studio) {
         // print(
         //     "🔧 Running port type migration for \(studio.devices?.count ?? 0) devices..."
         // )
         for device in studio.devices ?? [] {
+            // CRITICAL FIX: Ensure ports exist for synced devices
+            // When devices sync from CloudKit, they have port counts but ports array may be empty
+            // This causes connection dialog to show no available ports
+            let hasPortCounts = device.audioInputsCount > 0 || device.audioOutputsCount > 0 ||
+                                device.adatInputPortsCount > 0 || device.adatOutputPortsCount > 0 ||
+                                device.madiInputPortsCount > 0 || device.madiOutputPortsCount > 0 ||
+                                device.midiInputPortsCount > 0 || device.midiOutputPortsCount > 0 ||
+                                device.cvInputPortsCount > 0 || device.cvOutputPortsCount > 0 ||
+                                !device.digitalInputsRaw.isEmpty || !device.digitalOutputsRaw.isEmpty ||
+                                !device.computerInterfacesRaw.isEmpty
+            
+            let hasNoPorts = (device.ports ?? []).isEmpty
+            
+            if hasPortCounts && hasNoPorts {
+                #if DEBUG
+                print("🔧 Generating missing ports for synced device: \(device.nickname)")
+                #endif
+                
+                // Generate ports from device metadata
+                device.ports = buildPorts(
+                    audioInputs: device.audioInputsCount,
+                    audioOutputs: device.audioOutputsCount,
+                    digitalInputs: device.digitalInputs,
+                    digitalOutputs: device.digitalOutputs,
+                    adatInputPorts: device.adatInputPortsCount,
+                    adatOutputPorts: device.adatOutputPortsCount,
+                    madiInputPorts: device.madiInputPortsCount,
+                    madiOutputPorts: device.madiOutputPortsCount,
+                    midiInputPorts: device.midiInputPortsCount,
+                    midiOutputPorts: device.midiOutputPortsCount,
+                    cvInputPorts: device.cvInputPortsCount,
+                    cvOutputPorts: device.cvOutputPortsCount,
+                    computerInterfaceCounts: device.computerInterfaceCounts,
+                    sampleRate: device.sampleRate
+                )
+            }
             // Fix computer interface ports
             let counts = device.computerInterfaceCounts
             if !counts.isEmpty {

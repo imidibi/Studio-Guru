@@ -11,6 +11,9 @@ import CloudKit
 
 @main
 struct Studio_GuruApp: App {
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
     @StateObject private var storeManager = StoreManager()
     @StateObject private var cloudKitSync = CloudKitSyncManager()
     @StateObject private var backupManager = BackupManager()
@@ -209,6 +212,12 @@ struct Studio_GuruApp: App {
                 .onAppear {
                     // Initialize CloudKit sync manager with model context
                     cloudKitSync.setModelContext(sharedModelContainer.mainContext)
+                    
+                    #if os(macOS)
+                    // Pass backup manager and container to AppDelegate for quit handling
+                    appDelegate.backupManager = backupManager
+                    appDelegate.modelContainer = sharedModelContainer
+                    #endif
                 }
                 .onChange(of: storeManager.isPro) { oldValue, newValue in
                     // When Pro status becomes true, ensure Gear Locker exists

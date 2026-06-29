@@ -523,7 +523,7 @@ class BackupManager: ObservableObject {
     }
     
     /// Automatically sync with iCloud Drive backups
-    /// Checks if there's a newer backup in iCloud and offers to restore it
+    /// Checks if there's a newer backup in iCloud and schedules restore if needed
     /// Or backs up local data if it's newer than what's in iCloud
     func performAutoSyncWithiCloud(container: ModelContainer) async throws -> AutoSyncResult {
         // Only sync if iCloud is enabled
@@ -568,15 +568,15 @@ class BackupManager: ObservableObject {
         print("📅 Local database modified: \(localModifiedDate)")
         #endif
         
-        // Compare timestamps - if iCloud backup is significantly newer (>60 seconds), restore it
+        // Compare timestamps - if iCloud backup is significantly newer (>60 seconds), schedule restore
         let timeDifference = latestBackup.timestamp.timeIntervalSince(localModifiedDate)
         
         if timeDifference > 60 {
-            // iCloud backup is newer - restore it
+            // iCloud backup is newer - schedule it for restore on next launch
             #if DEBUG
-            print("📥 iCloud backup is newer, restoring...")
+            print("📥 iCloud backup is newer, scheduling restore on next launch...")
             #endif
-            try await restoreFromBackup(latestBackup, container: container)
+            UserDefaults.standard.set(latestBackup.filename, forKey: "backupToRestoreOnLaunch")
             return .restoredFromiCloud(backupDate: latestBackup.timestamp)
         } else if timeDifference < -60 {
             // Local data is newer - back it up to iCloud

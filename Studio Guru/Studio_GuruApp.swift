@@ -15,7 +15,21 @@ struct Studio_GuruApp: App {
     @StateObject private var cloudKitSync = CloudKitSyncManager()
     @StateObject private var backupManager = BackupManager()
     @State private var autoSyncMessage: String?
+    @State private var showingRestoreAlert = false
+    @State private var restoreBackupDate: Date?
     @Environment(\.scenePhase) var scenePhase
+    
+    private var restoreAlertMessage: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        
+        if let date = restoreBackupDate {
+            return "A newer backup from iCloud Drive is available (\(formatter.string(from: date))). The app will restore this backup and restart.\n\nYour current data will be replaced with the iCloud backup."
+        } else {
+            return "A newer backup from iCloud Drive is available. The app will restore this backup and restart."
+        }
+    }
 
     var sharedModelContainer: ModelContainer = {
         // SwiftData schema - migration happens automatically when models change
@@ -223,7 +237,14 @@ struct Studio_GuruApp: App {
                         Task {
                             do {
                                 let result = try await backupManager.performAutoSyncWithiCloud(container: sharedModelContainer)
-                                if let message = result.message {
+                                
+                                // Handle restore scheduled for next launch
+                                if case .restoredFromiCloud(let backupDate) = result {
+                                    await MainActor.run {
+                                        restoreBackupDate = backupDate
+                                        showingRestoreAlert = true
+                                    }
+                                } else if let message = result.message {
                                     await MainActor.run {
                                         autoSyncMessage = message
                                     }
@@ -234,6 +255,17 @@ struct Studio_GuruApp: App {
                             }
                         }
                     }
+                }
+                .alert("iCloud Backup Available", isPresented: $showingRestoreAlert) {
+                    Button("Restart Now", role: .destructive) {
+                        exit(0)
+                    }
+                    Button("Cancel", role: .cancel) {
+                        // Clear the restore flag
+                        UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")
+                    }
+                } message: {
+                    Text(restoreAlertMessage)
                 }
                 .onChange(of: scenePhase) { oldPhase, newPhase in
                     // Auto-backup when app goes to background or becomes inactive

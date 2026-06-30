@@ -125,6 +125,10 @@ class BackupManager: ObservableObject {
             throw BackupError.storeNotFound
         }
         
+        // CRITICAL: Checkpoint the WAL file first to consolidate all changes into the main database
+        // This ensures we get a complete, consistent backup without needing WAL/SHM files
+        try checkpointWAL(storeURL: storeURL)
+        
         // Create backup filename with timestamp
         let timestamp = Date()
         let formatter = ISO8601DateFormatter()
@@ -133,22 +137,9 @@ class BackupManager: ObservableObject {
         let backupFilename = "backup_\(timestampString).store"
         let backupURL = backupDir.appendingPathComponent(backupFilename)
         
-        // Copy the store file
+        // Copy ONLY the main store file (after WAL has been checkpointed)
+        // Do NOT copy WAL or SHM files - they should not be part of backups
         try FileManager.default.copyItem(at: storeURL, to: backupURL)
-        
-        // Also copy the -wal and -shm files if they exist (SQLite Write-Ahead Log)
-        let walURL = storeURL.appendingPathExtension("wal")
-        let shmURL = storeURL.appendingPathExtension("shm")
-        
-        if FileManager.default.fileExists(atPath: walURL.path) {
-            let backupWalURL = backupURL.appendingPathExtension("wal")
-            try? FileManager.default.copyItem(at: walURL, to: backupWalURL)
-        }
-        
-        if FileManager.default.fileExists(atPath: shmURL.path) {
-            let backupShmURL = backupURL.appendingPathExtension("shm")
-            try? FileManager.default.copyItem(at: shmURL, to: backupShmURL)
-        }
         
         // Get file size
         let attributes = try FileManager.default.attributesOfItem(atPath: backupURL.path)
@@ -178,7 +169,45 @@ class BackupManager: ObservableObject {
         }
     }
     
+    /// Checkpoint the WAL file to consolidate all changes into the main database file
+    /// This ensures the database is in a consistent state before backup
+    private func checkpointWAL(storeURL: URL) throws {
+        var db: OpaquePointer?
+        
+        // Open database
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK else {
+            let errmsg = String(cString: sqlite3_errmsg(db))
+            sqlite3_close(db)
+            throw NSError(domain: "SQLite", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: "Failed to open database: \(errmsg)"])
+        }
+        
+        defer {
+            sqlite3_close(db)
+        }
+        
+        // Execute WAL checkpoint
+        var statement: OpaquePointer?
+        let sql = "PRAGMA wal_checkpoint(TRUNCATE);"
+        
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) == SQLITE_ROW {
+                #if DEBUG
+                let busy = sqlite3_column_int(statement, 0)
+                let log = sqlite3_column_int(statement, 1)
+                let checkpointed = sqlite3_column_int(statement, 2)
+                print("📝 WAL checkpoint: busy=\(busy), log=\(log), checkpointed=\(checkpointed)")
+                #endif
+            }
+            sqlite3_finalize(statement)
+        } else {
+            let errmsg = String(cString: sqlite3_errmsg(db))
+            sqlite3_finalize(statement)
+            throw NSError(domain: "SQLite", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: "Failed to checkpoint WAL: \(errmsg)"])
+        }
+    }
+    
     /// Restore from a backup
+    /// This schedules the backup to be restored on the next app launch (before the ModelContainer is created)
     func restoreFromBackup(_ backup: BackupInfo, container: ModelContainer) async throws {
         isRestoringBackup = true
         lastError = nil
@@ -197,115 +226,24 @@ class BackupManager: ObservableObject {
             throw BackupError.backupNotFound
         }
         
-        guard let storeURL = getStoreURL(from: container) else {
-            throw BackupError.storeNotFound
-        }
-        
-        // Create a safety backup of current state before restoring
-        let safetyBackupURL = storeURL.deletingLastPathComponent().appendingPathComponent("pre-restore-backup.store")
-        try? FileManager.default.removeItem(at: safetyBackupURL)
-        try FileManager.default.copyItem(at: storeURL, to: safetyBackupURL)
-        
-        // Remove current store files
-        try? FileManager.default.removeItem(at: storeURL)
-        try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
-        try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
-        
-        // Copy backup to store location
-        try FileManager.default.copyItem(at: backupURL, to: storeURL)
-        
-        // Copy WAL and SHM files if they exist
-        let backupWalURL = backupURL.appendingPathExtension("wal")
-        let backupShmURL = backupURL.appendingPathExtension("shm")
-        
-        if FileManager.default.fileExists(atPath: backupWalURL.path) {
-            let walURL = storeURL.appendingPathExtension("wal")
-            try? FileManager.default.copyItem(at: backupWalURL, to: walURL)
-        }
-        
-        if FileManager.default.fileExists(atPath: backupShmURL.path) {
-            let shmURL = storeURL.appendingPathExtension("shm")
-            try? FileManager.default.copyItem(at: backupShmURL, to: shmURL)
-        }
-        
-        // CRITICAL: Mark that we need to update timestamps on next app launch
-        // We can't do it now because the database was just copied and the main container might still have locks
-        // The timestamp update will happen in updateRestoredTimestampsIfNeeded() on app startup
-        UserDefaults.standard.set(true, forKey: "needsTimestampUpdateAfterRestore")
+        // Schedule this backup to be restored on next app launch (before ModelContainer creation)
+        // This avoids database corruption from trying to restore while the database is open
+        UserDefaults.standard.set(backup.filename, forKey: "backupToRestoreOnLaunch")
         
         #if DEBUG
-        print("✅ Backup restored - timestamps will be updated on next app launch")
+        print("✅ Backup scheduled for restore on next app launch")
+        print("   User will need to restart the app to complete the restore")
         #endif
         
         // Note: The app will need to restart for changes to take effect
         // We'll show this in the UI
     }
     
-    /// Updates all modifiedAt timestamps in the database using direct SQLite commands
-    /// This avoids CoreData/SwiftData layer which was causing database corruption
-    private static func updateTimestampsDirectly(storeURL: URL) throws {
-        var db: OpaquePointer?
-        
-        // Open database
-        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK else {
-            let errmsg = String(cString: sqlite3_errmsg(db))
-            sqlite3_close(db)
-            throw NSError(domain: "SQLite", code: Int(sqlite3_errcode(db)), userInfo: [NSLocalizedDescriptionKey: errmsg])
-        }
-        
-        defer {
-            sqlite3_close(db)
-        }
-        
-        // Get current timestamp in the format SwiftData uses (seconds since reference date)
-        let now = Date().timeIntervalSinceReferenceDate
-        
-        // List of tables that have modifiedAt column
-        let tables = [
-            "ZSTUDIO",
-            "ZDEVICEINSTANCE", 
-            "ZCONNECTION",
-            "ZDOCLINK",
-            "ZCONNECTIONBUNDLEMODEL",
-            "ZCONNECTIONEDGEMODEL",
-            "ZENDPOINTNAMEMODEL"
-        ]
-        
-        var totalUpdated = 0
-        
-        for table in tables {
-            let sql = "UPDATE \(table) SET ZMODIFIEDAT = ? WHERE 1=1"
-            var statement: OpaquePointer?
-            
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_double(statement, 1, now)
-                
-                if sqlite3_step(statement) == SQLITE_DONE {
-                    let changes = sqlite3_changes(db)
-                    totalUpdated += Int(changes)
-                    #if DEBUG
-                    print("   Updated \(changes) rows in \(table)")
-                    #endif
-                } else {
-                    let errmsg = String(cString: sqlite3_errmsg(db))
-                    #if DEBUG
-                    print("   ⚠️ Failed to update \(table): \(errmsg)")
-                    #endif
-                }
-            }
-            
-            sqlite3_finalize(statement)
-        }
-        
-        #if DEBUG
-        print("   Total rows updated: \(totalUpdated)")
-        #endif
-    }
+
     
     /// Performs complete backup restore on app launch BEFORE container initialization
     /// This is called from Studio_GuruApp before the main ModelContainer is created
-    /// Does: 1) Copy backup files  2) Update timestamps  3) Set success flag
-    /// This is atomic and happens before any iCloud sync can interfere
+    /// Simply copies the backup file - no timestamp manipulation to avoid database corruption
     static func performRestoreOnLaunchIfNeeded(schema: Schema) throws {
         // Check if there's a backup marked for restore
         guard let backupFilename = UserDefaults.standard.string(forKey: "backupToRestoreOnLaunch") else {
@@ -313,7 +251,7 @@ class BackupManager: ObservableObject {
         }
         
         #if DEBUG
-        print("🔄 RESTORE ON LAUNCH: Starting atomic restore of '\(backupFilename)'")
+        print("🔄 RESTORE ON LAUNCH: Starting restore of '\(backupFilename)'")
         #endif
         
         guard let backupDir = staticBackupDirectory else {
@@ -333,145 +271,40 @@ class BackupManager: ObservableObject {
             throw BackupError.backupNotFound
         }
         
-        // STEP 1: Copy backup files to replace current database
-        #if DEBUG
-        print("📁 Step 1: Copying backup files...")
-        #endif
+        // Create a safety backup of current state before restoring
+        let safetyBackupURL = storeURL.deletingLastPathComponent().appendingPathComponent("pre-restore-backup.store")
+        try? FileManager.default.removeItem(at: safetyBackupURL)
+        if FileManager.default.fileExists(atPath: storeURL.path) {
+            try? FileManager.default.copyItem(at: storeURL, to: safetyBackupURL)
+            #if DEBUG
+            print("📦 Created safety backup at: \(safetyBackupURL.path)")
+            #endif
+        }
         
-        // Remove current store files
+        // Remove current store files (including WAL/SHM)
         try? FileManager.default.removeItem(at: storeURL)
         try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
         try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
         
-        // Copy backup to store location
+        // Copy ONLY the main backup file (backups don't include WAL/SHM)
         try FileManager.default.copyItem(at: backupURL, to: storeURL)
         
-        // Copy WAL and SHM files if they exist
-        let backupWalURL = backupURL.appendingPathExtension("wal")
-        let backupShmURL = backupURL.appendingPathExtension("shm")
-        
-        if FileManager.default.fileExists(atPath: backupWalURL.path) {
-            try? FileManager.default.copyItem(at: backupWalURL, to: storeURL.appendingPathExtension("wal"))
-        }
-        
-        if FileManager.default.fileExists(atPath: backupShmURL.path) {
-            try? FileManager.default.copyItem(at: backupShmURL, to: storeURL.appendingPathExtension("shm"))
-        }
-        
         #if DEBUG
-        print("✅ Backup files copied successfully")
+        print("✅ Backup restored successfully")
         #endif
         
-        // STEP 2: Update timestamps using direct SQLite (avoids CoreData corruption)
-        #if DEBUG
-        print("⏰ Step 2: Updating timestamps using direct SQLite...")
-        #endif
-        
-        do {
-            try updateTimestampsDirectly(storeURL: storeURL)
-            #if DEBUG
-            print("✅ Timestamps updated successfully using direct SQLite")
-            #endif
-        } catch {
-            #if DEBUG
-            print("❌ Failed to update timestamps: \(error)")
-            print("   Continuing anyway - restored data may be overwritten by iCloud")
-            #endif
-        }
-        
-        // STEP 3: Clean up flags and mark success
+        // Clean up flags and mark success
         UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")
         UserDefaults.standard.set(true, forKey: "didCompleteRestoreThisLaunch")
         
         #if DEBUG
-        print("✅ RESTORE ON LAUNCH COMPLETE: Database restored and timestamps updated")
-        print("   Restored data will win all iCloud sync conflicts due to current timestamps")
+        print("✅ RESTORE ON LAUNCH COMPLETE")
+        print("   Note: Restored data will use its original timestamps")
+        print("   If iCloud has newer data, it may overwrite the restored data during next sync")
         #endif
     }
     
-    /// Updates all modifiedAt timestamps in the restored database to the current date
-    /// This ensures the restored data is treated as "newer" than iCloud data during sync
-    /// This is called on app startup after a restore, not during the restore itself
-    /// This function runs on a background thread to avoid blocking the main thread
-    /// NOTE: This function is deprecated in favor of performRestoreOnLaunchIfNeeded()
-    static func updateRestoredTimestampsIfNeeded(container: ModelContainer) throws {
-        // Check if we need to update timestamps
-        guard UserDefaults.standard.bool(forKey: "needsTimestampUpdateAfterRestore") else {
-            return
-        }
-        
-        #if DEBUG
-        print("⏰ Updating timestamps in restored database for iCloud sync compatibility...")
-        #endif
-        
-        // Create a background context (doesn't require @MainActor)
-        let context = ModelContext(container)
-        let now = Date()
-        var updatedCount = 0
-        
-        // Update Studio objects
-        let studios = try context.fetch(FetchDescriptor<Studio>())
-        for studio in studios {
-            studio.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Update DeviceInstance objects
-        let devices = try context.fetch(FetchDescriptor<DeviceInstance>())
-        for device in devices {
-            device.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Update Connection objects
-        let connections = try context.fetch(FetchDescriptor<Connection>())
-        for connection in connections {
-            connection.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Update DocLink objects
-        let docLinks = try context.fetch(FetchDescriptor<DocLink>())
-        for docLink in docLinks {
-            docLink.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Update ConnectionBundleModel objects
-        let bundles = try context.fetch(FetchDescriptor<ConnectionBundleModel>())
-        for bundle in bundles {
-            bundle.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Update ConnectionEdgeModel objects
-        let edges = try context.fetch(FetchDescriptor<ConnectionEdgeModel>())
-        for edge in edges {
-            edge.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Update EndpointNameModel objects
-        let endpointNames = try context.fetch(FetchDescriptor<EndpointNameModel>())
-        for endpointName in endpointNames {
-            endpointName.modifiedAt = now
-            updatedCount += 1
-        }
-        
-        // Save all changes
-        try context.save()
-        
-        // Clear the flag now that we're done
-        UserDefaults.standard.removeObject(forKey: "needsTimestampUpdateAfterRestore")
-        
-        // Set a flag so the UI knows to show the success alert
-        UserDefaults.standard.set(true, forKey: "didCompleteRestoreThisLaunch")
-        
-        #if DEBUG
-        print("✅ Updated \(updatedCount) object timestamps to \(now)")
-        print("   This ensures restored data wins in iCloud sync conflict resolution")
-        #endif
-    }
+
     
     /// Delete a specific backup
     func deleteBackup(_ backup: BackupInfo) throws {
@@ -738,13 +571,31 @@ class BackupManager: ObservableObject {
     }
     
     private func cleanupOldBackups() throws {
-        guard availableBackups.count > maxBackups else { return }
+        guard let backupDir = backupDirectory else { return }
         
-        // Get backups to delete (oldest ones beyond maxBackups)
-        let backupsToDelete = availableBackups.sorted { $0.timestamp < $1.timestamp }.prefix(availableBackups.count - maxBackups)
+        // Delete old backups beyond maxBackups
+        if availableBackups.count > maxBackups {
+            let backupsToDelete = availableBackups.sorted { $0.timestamp < $1.timestamp }.prefix(availableBackups.count - maxBackups)
+            
+            for backup in backupsToDelete {
+                try? deleteBackup(backup)
+            }
+        }
         
-        for backup in backupsToDelete {
-            try? deleteBackup(backup)
+        // Clean up orphaned WAL and SHM files from all backups (these should never exist)
+        // We're removing these because old backups may have created them before the fix
+        guard let files = try? FileManager.default.contentsOfDirectory(at: backupDir, includingPropertiesForKeys: nil) else {
+            return
+        }
+        
+        for file in files {
+            let ext = file.pathExtension.lowercased()
+            if ext == "wal" || ext == "shm" {
+                #if DEBUG
+                print("🧹 Removing orphaned \(ext.uppercased()) file: \(file.lastPathComponent)")
+                #endif
+                try? FileManager.default.removeItem(at: file)
+            }
         }
     }
     

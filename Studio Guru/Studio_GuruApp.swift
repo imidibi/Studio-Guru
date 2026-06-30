@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import CloudKit
+import CoreData
 
 @main
 struct Studio_GuruApp: App {
@@ -15,25 +16,11 @@ struct Studio_GuruApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
     @StateObject private var storeManager = StoreManager()
-    @StateObject private var cloudKitSync = CloudKitSyncManager()
-    @StateObject private var backupManager = BackupManager()
-    @State private var autoSyncMessage: String?
-    @State private var showingRestoreAlert = false
-    @State private var restoreBackupDate: Date?
-    @State private var lastBackupCheck = Date()
+    @State private var cloudKitSyncStatus: String?
+    @State private var isCloudKitSyncing = false
     @Environment(\.scenePhase) var scenePhase
     
-    private var restoreAlertMessage: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        
-        if let date = restoreBackupDate {
-            return "Newer data from iCloud Drive is available (\(formatter.string(from: date))). The app will sync this data and restart.\n\nYour current data will be replaced with the iCloud data."
-        } else {
-            return "Newer data from iCloud Drive is available. The app will sync this data and restart."
-        }
-    }
+
 
     var sharedModelContainer: ModelContainer = {
         // SwiftData schema - migration happens automatically when models change
@@ -49,26 +36,19 @@ struct Studio_GuruApp: App {
             EndpointNameModel.self
         ])
         
-        // CRITICAL: Perform complete backup restore BEFORE creating main container
-        // This does: 1) Copy backup files  2) Update timestamps  3) Set success flag
-        // Must happen before ModelContainer opens the database to avoid corruption and sync conflicts
-        do {
-            try BackupManager.performRestoreOnLaunchIfNeeded(schema: schema)
-        } catch {
-            #if DEBUG
-            print("❌ Failed to restore backup on launch: \(error)")
-            #endif
-            // Continue anyway - better to launch than crash
-            // User will see the error and can try restore again
-        }
-        
-        // IMPORTANT: We use manual CloudKit sync instead of SwiftData's automatic sync
-        // This gives us complete control and deterministic behavior
-        // SwiftData's automatic CloudKit sync (.automatic) is disabled
+        // IMPORTANT: Use SwiftData's automatic CloudKit sync
+        // This is Apple's recommended approach and handles:
+        // - Automatic conflict resolution (last-writer-wins based on modifiedAt timestamps)
+        // - Background sync across all devices
+        // - Schema migration when models change
+        // - Fresh install data merging
+        // - Error recovery and retry logic
+        //
+        // The .automatic option reads the first CloudKit container from entitlements
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none  // Manual CloudKit sync via CloudKitSyncManager
+            cloudKitDatabase: .automatic  // Use CloudKit container from entitlements
         )
 
         do {
@@ -77,7 +57,7 @@ struct Studio_GuruApp: App {
             // Log sync activity for debugging and support
             let logMessage = """
             📱 SwiftData Container Initialized
-            📱 iCloud Sync: Manual CloudKit sync via CloudKitSyncManager
+            📱 iCloud Sync: AUTOMATIC via SwiftData CloudKit integration
             📱 Container URL: \(container.configurations.first?.url.path ?? "unknown")
             📱 CloudKit Database: \(modelConfiguration.cloudKitDatabase)
             📱 Team ID: BSUPN2VUX7
@@ -208,16 +188,9 @@ struct Studio_GuruApp: App {
         WindowGroup {
             StudioCanvasView()
                 .environmentObject(storeManager)
-                .environmentObject(cloudKitSync)
                 .onAppear {
-                    // Initialize CloudKit sync manager with model context
-                    cloudKitSync.setModelContext(sharedModelContainer.mainContext)
-                    
-                    #if os(macOS)
-                    // Pass backup manager and container to AppDelegate for quit handling
-                    appDelegate.backupManager = backupManager
-                    appDelegate.modelContainer = sharedModelContainer
-                    #endif
+                    // Start monitoring CloudKit sync events
+                    setupCloudKitMonitoring()
                 }
                 .onChange(of: storeManager.isPro) { oldValue, newValue in
                     // When Pro status becomes true, ensure Gear Locker exists
@@ -238,78 +211,6 @@ struct Studio_GuruApp: App {
                         let descriptor = FetchDescriptor<Studio>()
                         if let studios = try? context.fetch(descriptor) {
                             StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
-                        }
-                    }
-                    
-                    // Perform automatic iCloud Drive sync on launch
-                    let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
-                    if iCloudSyncEnabled {
-                        Task {
-                            do {
-                                let result = try await backupManager.performAutoSyncWithiCloud(container: sharedModelContainer)
-                                
-                                // Handle sync from iCloud scheduled for next launch
-                                if case .restoredFromiCloud(let backupDate) = result {
-                                    await MainActor.run {
-                                        restoreBackupDate = backupDate
-                                        showingRestoreAlert = true
-                                    }
-                                    print("📥 Sync from iCloud scheduled - user needs to restart app")
-                                } else if let message = result.message {
-                                    await MainActor.run {
-                                        autoSyncMessage = message
-                                    }
-                                    print("✅ Auto-sync: \(message)")
-                                }
-                            } catch {
-                                print("❌ Auto-sync failed: \(error)")
-                            }
-                        }
-                    }
-                }
-                .alert("iCloud Sync Available", isPresented: $showingRestoreAlert) {
-                    Button("Restart Now", role: .destructive) {
-                        exit(0)
-                    }
-                    Button("Cancel", role: .cancel) {
-                        // Clear the restore flag
-                        UserDefaults.standard.removeObject(forKey: "backupToRestoreOnLaunch")
-                    }
-                } message: {
-                    Text(restoreAlertMessage)
-                }
-                .onChange(of: scenePhase) { oldPhase, newPhase in
-                    // Auto-sync to iCloud when app goes to background or becomes inactive
-                    let iCloudSyncEnabled = UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
-                    
-                    // Sync when transitioning FROM active to inactive/background
-                    // This catches: minimizing, switching apps, closing windows, etc.
-                    if iCloudSyncEnabled && oldPhase == .active && (newPhase == .background || newPhase == .inactive) {
-                        Task {
-                            do {
-                                try await backupManager.createBackup(container: sharedModelContainer)
-                                print("✅ Auto-sync to iCloud completed (phase: \(oldPhase) → \(newPhase))")
-                                lastBackupCheck = Date()
-                            } catch {
-                                print("❌ Auto-sync to iCloud failed: \(error)")
-                            }
-                        }
-                    }
-                    
-                    // Also sync periodically when app becomes active (every 5 minutes)
-                    // This ensures syncs happen even if scene phase changes don't fire reliably
-                    if iCloudSyncEnabled && newPhase == .active {
-                        let timeSinceLastBackup = Date().timeIntervalSince(lastBackupCheck)
-                        if timeSinceLastBackup > 300 { // 5 minutes
-                            Task {
-                                do {
-                                    try await backupManager.createBackup(container: sharedModelContainer)
-                                    print("✅ Periodic sync to iCloud completed (5+ min since last sync)")
-                                    lastBackupCheck = Date()
-                                } catch {
-                                    print("❌ Periodic sync to iCloud failed: \(error)")
-                                }
-                            }
                         }
                     }
                 }
@@ -370,5 +271,115 @@ struct Studio_GuruApp: App {
         }
         let logFileURL = documentsPath.appendingPathComponent("StudioGuru_iCloud_Diagnostics.log")
         return FileManager.default.fileExists(atPath: logFileURL.path) ? logFileURL : nil
+    }
+    
+    /// Monitor CloudKit sync events to provide user feedback and log issues
+    /// This is the recommended approach per Apple's best practices for NSPersistentCloudKitContainer
+    private func setupCloudKitMonitoring() {
+        // Monitor CloudKit sync events (available iOS 14+)
+        NotificationCenter.default.addObserver(
+            forName: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey] as? NSPersistentCloudKitContainer.Event else {
+                return
+            }
+            
+            let logMessage: String
+            
+            switch event.type {
+            case .setup:
+                logMessage = "☁️ CloudKit: Setting up sync"
+                self.isCloudKitSyncing = true
+                
+            case .import:
+                if event.endDate != nil {
+                    // Import completed
+                    logMessage = "☁️ CloudKit: Import completed"
+                    self.isCloudKitSyncing = false
+                    self.cloudKitSyncStatus = "Synced from iCloud"
+                } else {
+                    // Import started
+                    logMessage = "☁️ CloudKit: Importing from iCloud"
+                    self.isCloudKitSyncing = true
+                }
+                
+            case .export:
+                if event.endDate != nil {
+                    // Export completed
+                    logMessage = "☁️ CloudKit: Export completed"
+                    self.isCloudKitSyncing = false
+                    self.cloudKitSyncStatus = "Synced to iCloud"
+                } else {
+                    // Export started
+                    logMessage = "☁️ CloudKit: Exporting to iCloud"
+                    self.isCloudKitSyncing = true
+                }
+                
+            @unknown default:
+                logMessage = "☁️ CloudKit: Unknown event type"
+            }
+            
+            #if DEBUG
+            print(logMessage)
+            #endif
+            Self.logToSupportFile(logMessage)
+            
+            // Handle errors
+            if let error = event.error {
+                let errorMessage = "❌ CloudKit sync error: \(error.localizedDescription)"
+                
+                #if DEBUG
+                print(errorMessage)
+                print("   Error type: \(type(of: error))")
+                if let nsError = error as NSError? {
+                    print("   Domain: \(nsError.domain), Code: \(nsError.code)")
+                    print("   User info: \(nsError.userInfo)")
+                }
+                #endif
+                
+                Self.logToSupportFile(errorMessage)
+                
+                // Handle specific error types per best practices
+                if let nsError = error as NSError? {
+                    switch nsError.code {
+                    case 134404: // CKErrorNotAuthenticated / Not logged in to iCloud
+                        self.cloudKitSyncStatus = "Not signed in to iCloud"
+                        
+                    case 134405: // CKErrorAccountChanged / iCloud account changed
+                        self.cloudKitSyncStatus = "iCloud account changed - please restart app"
+                        
+                    case 25: // CKErrorQuotaExceeded
+                        self.cloudKitSyncStatus = "iCloud storage full"
+                        
+                    case 134020: // NSPersistentStoreError / Merge error
+                        self.cloudKitSyncStatus = "Sync conflict - retrying"
+                        
+                    default:
+                        // Log other errors but don't show to user unless persistent
+                        if event.succeeded == false {
+                            self.cloudKitSyncStatus = "Sync issue - check iCloud settings"
+                        }
+                    }
+                }
+                
+                self.isCloudKitSyncing = false
+            }
+            
+            // Clear status message after a delay if sync succeeded
+            if event.succeeded && event.endDate != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if self.cloudKitSyncStatus != nil {
+                        self.cloudKitSyncStatus = nil
+                    }
+                }
+            }
+        }
+        
+        #if DEBUG
+        print("☁️ CloudKit event monitoring enabled")
+        #endif
+        Self.logToSupportFile("☁️ CloudKit event monitoring enabled")
     }
 }

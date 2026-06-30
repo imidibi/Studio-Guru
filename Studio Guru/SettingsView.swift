@@ -12,23 +12,12 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var storeManager: StoreManager
-    @EnvironmentObject var cloudKitSync: CloudKitSyncManager
     @Query private var studios: [Studio]
 
     @State private var isShowingPaywall = false
     @State private var paywallReason: PaywallReason = .general
-    // Default to false for free users - Pro users can enable it
-    @AppStorage("iCloudSyncEnabled") private var iCloudSyncEnabled = false
-
-    @State private var showingRestartAlert = false
     @StateObject private var diagnostics = iCloudDiagnostics()
     @State private var showingDiagnostics = false
-    @StateObject private var backupManager = BackupManager()
-    @State private var showingBackupsList = false
-    @State private var showingRestoreConfirmation = false
-    @State private var backupToRestore: BackupManager.BackupInfo?
-    @State private var showingRestartForRestore = false
-    @State private var backupSuccessMessage: String?
     
     // Category color settings (stored as hex strings)
     @AppStorage("categoryColor_ADATExpander") private var adatExpanderColor = "#9B59B6"
@@ -388,33 +377,31 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle(isOn: Binding(
-                        get: { iCloudSyncEnabled },
-                        set: { newValue in
-                            // Check if user has Pro when trying to enable iCloud sync
-                            if newValue && !storeManager.canUseICloudSync {
-                                paywallReason = .iCloudSync
-                                isShowingPaywall = true
-                            } else {
-                                iCloudSyncEnabled = newValue
-                                showingRestartAlert = true
-                            }
-                        }
-                    )) {
-                        HStack {
-                            Image(systemName: iCloudSyncEnabled ? "checkmark.icloud.fill" : "icloud.slash.fill")
-                                .foregroundStyle(iCloudSyncEnabled ? .green : .secondary)
+                    HStack {
+                        Image(systemName: storeManager.isPro ? "checkmark.icloud.fill" : "icloud.slash.fill")
+                            .foregroundStyle(storeManager.isPro ? .green : .secondary)
+                        VStack(alignment: .leading, spacing: 4) {
                             Text("iCloud Sync")
                                 .font(.headline)
-                            if !storeManager.isPro {
-                                Image(systemName: "star.fill")
-                                    .foregroundStyle(.yellow)
+                            if storeManager.isPro {
+                                Text("Active - syncing automatically")
                                     .font(.caption)
+                                    .foregroundStyle(.green)
+                            } else {
+                                Text("Requires Studio Guru Pro")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
+                        }
+                        Spacer()
+                        if !storeManager.isPro {
+                            Image(systemName: "star.fill")
+                                .foregroundStyle(.yellow)
+                                .font(.caption)
                         }
                     }
                     
-                    if iCloudSyncEnabled {
+                    if storeManager.isPro {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Your studios sync automatically across all your devices using iCloud.")
                                 .font(.caption)
@@ -436,113 +423,50 @@ struct SettingsView: View {
                 } header: {
                     Text("Data Sync")
                 } footer: {
-                    Text("Changing this setting requires restarting the app to take effect.")
-                }
-                
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Your studio data is stored securely in your personal iCloud Drive and syncs automatically between your iPad and Mac.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        Text("• App backs up to iCloud when backgrounded or quit")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        Text("• Latest backup restores automatically on launch")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        Text("• Most recently modified data always wins")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        Text("• Data never leaves your iCloud account")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if storeManager.isPro {
+                        Text("SwiftData automatically syncs your data to iCloud in the background. No configuration needed!")
+                    } else {
+                        Text("Upgrade to Pro to enable automatic iCloud sync across all your devices.")
                     }
-                } header: {
-                    Text("How It Works")
-                } footer: {
-                    Text("iCloud sync automatically keeps your devices in sync by saving your data to iCloud Drive. This is simpler and more reliable than real-time sync for a single-user app.")
                 }
                 
-                if iCloudSyncEnabled {
+                if storeManager.isPro {
                     Section {
-                        Button {
-                            Task {
-                                backupSuccessMessage = nil
-                                do {
-                                    let container = modelContext.container
-                                    let result = try await backupManager.performAutoSyncWithiCloud(container: container)
-                                    
-                                    switch result {
-                                    case .disabled:
-                                        backupSuccessMessage = "iCloud sync is disabled"
-                                    case .createdInitialBackup:
-                                        backupSuccessMessage = "Created initial iCloud backup"
-                                    case .restoredFromiCloud(let date):
-                                        let formatter = DateFormatter()
-                                        formatter.dateStyle = .short
-                                        formatter.timeStyle = .short
-                                        backupSuccessMessage = "Restored from iCloud backup (\(formatter.string(from: date)))"
-                                        showingRestartAlert = true
-                                    case .backedUpToiCloud:
-                                        backupSuccessMessage = "Backed up to iCloud"
-                                    case .alreadyInSync:
-                                        backupSuccessMessage = "Already in sync with iCloud"
-                                    case .noLocalData:
-                                        backupSuccessMessage = "No local data found"
-                                    case .error:
-                                        backupSuccessMessage = "Sync error occurred"
-                                    }
-                                    
-                                    // Clear success message after 3 seconds
-                                    if backupSuccessMessage != nil, !showingRestartAlert {
-                                        try? await Task.sleep(nanoseconds: 3_000_000_000)
-                                        backupSuccessMessage = nil
-                                    }
-                                } catch {
-                                    print("❌ Sync failed: \(error)")
-                                    backupSuccessMessage = "Sync failed: \(error.localizedDescription)"
-                                    
-                                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                                    backupSuccessMessage = nil
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
-                                Spacer()
-                                if backupManager.isCreatingBackup || backupManager.isRestoringBackup {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                }
-                            }
-                        }
-                        .disabled(backupManager.isCreatingBackup || backupManager.isRestoringBackup)
-                        
-                        if let successMessage = backupSuccessMessage {
-                            Text(successMessage)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Your studio data is stored securely in your personal iCloud and syncs automatically between your iPad and Mac.")
                                 .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                        
-                        if let latestBackup = backupManager.availableBackups.first {
-                            Text("Last sync: \(latestBackup.displayName)")
+                                .foregroundStyle(.secondary)
+                            
+                            Text("• Changes sync automatically in the background")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            Text("• Works seamlessly across all your devices")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            Text("• Uses Apple's CloudKit for reliable sync")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            Text("• Data never leaves your iCloud account")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     } header: {
-                        Text("iCloud Sync")
+                        Text("How It Works")
                     } footer: {
-                        Text("Your data is automatically synced to iCloud Drive when you background the app and synced from iCloud when you launch it. Use 'Sync Now' to manually sync immediately.")
+                        Text("iCloud sync uses Apple's CloudKit technology to keep your data automatically synchronized across all your devices. No configuration required!")
                     }
                 }
                 
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("If you see different data on different devices:")
+                // Automatic CloudKit sync sections removed
+                // CloudKit now syncs automatically in the background for Pro users
+                
+                if storeManager.isPro {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("If you see different data on different devices:")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
@@ -573,6 +497,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("iCloud sync automatically syncs your data when the app backgrounds and when you launch it. The most recently modified data always wins.")
                 }
+                }  // Close if storeManager.isPro
                 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
@@ -600,113 +525,7 @@ struct SettingsView: View {
                     Text("Exported files can be shared via email, AirDrop, or cloud storage services.")
                 }
                 
-                Section {
-                    Button {
-                        Task {
-                            backupSuccessMessage = nil
-                            do {
-                                let container = modelContext.container
-                                try await backupManager.createBackup(container: container)
-                                backupSuccessMessage = "Backup created successfully"
-                                
-                                // Clear success message after 3 seconds
-                                Task {
-                                    try await Task.sleep(nanoseconds: 3_000_000_000)
-                                    backupSuccessMessage = nil
-                                }
-                            } catch {
-                                backupManager.lastError = error.localizedDescription
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Label("Create Backup Now", systemImage: "arrow.down.doc")
-                            Spacer()
-                            if backupManager.isCreatingBackup {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            }
-                        }
-                    }
-                    .disabled(backupManager.isCreatingBackup)
-                    
-                    if !backupManager.availableBackups.isEmpty {
-                        Button {
-                            showingBackupsList = true
-                        } label: {
-                            HStack {
-                                Label("View & Restore Backups", systemImage: "clock.arrow.circlepath")
-                                Spacer()
-                                Text("\(backupManager.availableBackups.count)")
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    
-                    if let successMessage = backupSuccessMessage {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(successMessage)
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                    }
-                    
-                    if let error = backupManager.lastError {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    
-                    if let lastBackup = backupManager.availableBackups.first {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Last backup:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(lastBackup.displayName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    Text("Automatic Backups")
-                } footer: {
-                    let location = (UserDefaults.standard.object(forKey: "iCloudSyncEnabled") as? Bool ?? false) ? "in iCloud Drive" : "locally"
-                    return Text("Studio Guru automatically backs up your entire database. The last 5 backups are kept \(location). Backups are created when the app backgrounds or quits if iCloud sync is enabled, or on launch if 24 hours have passed.")
-                }
-                
-                if iCloudSyncEnabled && !studios.isEmpty {
-                    Section {
-                        ForEach(studios) { studio in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(studio.name)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                HStack {
-                                    Text("Last modified:")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Text(studio.modifiedAt, style: .relative)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Text("ago")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    } header: {
-                        Text("Studios & Sessions")
-                    } footer: {
-                        Text("Shows when each studio or session was last modified. Recent changes should sync to other devices within a few minutes.")
-                    }
-                }
+                // Manual backup sections removed - CloudKit sync is automatic
                 
                 Section {
                     ForEach(DeviceCategory.allCases, id: \.self) { category in
@@ -764,51 +583,12 @@ struct SettingsView: View {
                 }
             }
 
-            .alert("Restart Required", isPresented: $showingRestartAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Please quit and restart Studio Guru for the sync setting change to take effect.")
-            }
             .sheet(isPresented: $isShowingPaywall) {
                 PaywallView(reason: paywallReason)
                     .environmentObject(storeManager)
             }
             .sheet(isPresented: $showingDiagnostics) {
                 iCloudDiagnosticsView(diagnostics: diagnostics)
-            }
-            .sheet(isPresented: $showingBackupsList) {
-                BackupsListView(backupManager: backupManager, backupToRestore: $backupToRestore, showingRestoreConfirmation: $showingRestoreConfirmation)
-                    .frame(minWidth: 500, minHeight: 400)
-                    .onAppear {
-                        #if DEBUG
-                        print("🔵 Sheet presented - backupManager has \(backupManager.availableBackups.count) backups")
-                        #endif
-                    }
-            }
-            .alert("Restore Backup?", isPresented: $showingRestoreConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Restore", role: .destructive) {
-                    if let backup = backupToRestore {
-                        // Save which backup to restore - the actual restore will happen on next app launch
-                        UserDefaults.standard.set(backup.filename, forKey: "backupToRestoreOnLaunch")
-                        
-                        #if DEBUG
-                        print("📝 Marked backup '\(backup.filename)' for restore on next launch")
-                        print("🔄 Quitting app - restore will happen before anything else on relaunch")
-                        #endif
-                        
-                        // Quit immediately - restore will happen on next launch BEFORE container init
-                        exit(0)
-                    }
-                }
-            } message: {
-                if let backup = backupToRestore {
-                    if iCloudSyncEnabled {
-                        Text("This will replace all current data with the backup from \(backup.displayName).\n\n⚠️ IMPORTANT: iCloud Sync is enabled. The restored data will become the current version and will sync to ALL your devices, replacing any newer data on those devices.\n\nThe app will quit immediately. When you relaunch, the restore will complete before any sync occurs. This cannot be undone! Consider creating a backup of your current data first.")
-                    } else {
-                        Text("This will replace all current data with the backup from \(backup.displayName).\n\nThe app will quit immediately. When you relaunch, the restore will complete automatically. This cannot be undone! Consider creating a backup of your current data first.")
-                    }
-                }
             }
         }
     }
@@ -818,80 +598,7 @@ struct SettingsView: View {
 
 // MARK: - Backups List View
 
-struct BackupsListView: View {
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var backupManager: BackupManager
-    @Binding var backupToRestore: BackupManager.BackupInfo?
-    @Binding var showingRestoreConfirmation: Bool
-    @State private var backupToDelete: BackupManager.BackupInfo?
-    @State private var showingDeleteConfirmation = false
-    
-    var body: some View {
-        NavigationStack {
-            VStack {
-                List(backupManager.availableBackups) { backup in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(backup.displayName)
-                                .font(.headline)
-                            Text(backup.fileSizeFormatted)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                        
-                        Spacer()
-                        
-                        Button {
-                            backupToRestore = backup
-                            dismiss()
-                            showingRestoreConfirmation = true
-                        } label: {
-                            Label("Restore", systemImage: "arrow.counterclockwise")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            backupToDelete = backup
-                            showingDeleteConfirmation = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                }
-            }
-            .onAppear {
-                #if DEBUG
-                print("📋 BackupsListView appeared with \(backupManager.availableBackups.count) backups")
-                #endif
-            }
-            .navigationTitle("Backups")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .alert("Delete Backup?", isPresented: $showingDeleteConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    if let backup = backupToDelete {
-                        try? backupManager.deleteBackup(backup)
-                    }
-                }
-            } message: {
-                if let backup = backupToDelete {
-                    Text("Delete backup from \(backup.displayName)? This cannot be undone.")
-                }
-            }
-        }
-    }
-}
+// BackupsListView removed - CloudKit handles sync automatically now
 
 #Preview {
     SettingsView()

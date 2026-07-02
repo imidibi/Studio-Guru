@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Network
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -18,6 +19,9 @@ struct SettingsView: View {
     @State private var paywallReason: PaywallReason = .general
     @StateObject private var diagnostics = iCloudDiagnostics()
     @State private var showingDiagnostics = false
+    @State private var isOnline = true
+    
+    private let networkMonitor = NWPathMonitor()
     
     // Category color settings (stored as hex strings)
     @AppStorage("categoryColor_ADATExpander") private var adatExpanderColor = "#9B59B6"
@@ -380,15 +384,21 @@ struct SettingsView: View {
 
                 Section {
                     HStack {
-                        Image(systemName: storeManager.isPro ? "checkmark.icloud.fill" : "icloud.slash.fill")
-                            .foregroundStyle(storeManager.isPro ? .green : .secondary)
+                        Image(systemName: storeManager.isPro ? (isOnline ? "checkmark.icloud.fill" : "exclamationmark.icloud.fill") : "icloud.slash.fill")
+                            .foregroundStyle(storeManager.isPro ? (isOnline ? .green : .orange) : .secondary)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("iCloud Sync")
                                 .font(.headline)
                             if storeManager.isPro {
-                                Text("Active - syncing automatically")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
+                                if isOnline {
+                                    Text("Active - syncing automatically")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Text("Offline - will sync when connected")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
                             } else {
                                 Text("Requires Studio Guru Pro")
                                     .font(.caption)
@@ -592,7 +602,27 @@ struct SettingsView: View {
             .sheet(isPresented: $showingDiagnostics) {
                 iCloudDiagnosticsView(diagnostics: diagnostics)
             }
+            .onAppear {
+                startNetworkMonitoring()
+            }
+            .onDisappear {
+                stopNetworkMonitoring()
+            }
         }
+    }
+    
+    private func startNetworkMonitoring() {
+        networkMonitor.pathUpdateHandler = { path in
+            DispatchQueue.main.async {
+                isOnline = (path.status == .satisfied)
+            }
+        }
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        networkMonitor.start(queue: queue)
+    }
+    
+    private func stopNetworkMonitoring() {
+        networkMonitor.cancel()
     }
     
 

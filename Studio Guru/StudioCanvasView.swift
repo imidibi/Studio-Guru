@@ -62,6 +62,7 @@ struct StudioCanvasView: View {
     // Delete studio confirm
     @State private var isShowingDeleteStudioConfirm: Bool = false
     @State private var studioIdPendingDelete: UUID?
+    @State private var isShowingCannotDeleteLastStudio: Bool = false
 
     // Export result
     @State private var isShowingExportResult: Bool = false
@@ -220,8 +221,14 @@ struct StudioCanvasView: View {
                 onDuplicate: { duplicateStudio(from: $0) },
                 onExport: { exportStudio($0) },
                 onRequestDelete: { studio in
-                    studioIdPendingDelete = studio.id
-                    isShowingDeleteStudioConfirm = true
+                    // Check if this is the last regular studio
+                    let regularStudios = studios.filter { !$0.isSystemStudio }
+                    if regularStudios.count <= 1 {
+                        isShowingCannotDeleteLastStudio = true
+                    } else {
+                        studioIdPendingDelete = studio.id
+                        isShowingDeleteStudioConfirm = true
+                    }
                 }
             )
         } detail: {
@@ -270,6 +277,11 @@ struct StudioCanvasView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Name your studio.")
+        }
+        .alert("Cannot Delete Studio", isPresented: $isShowingCannotDeleteLastStudio) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You cannot delete your only studio. Create another studio first before deleting this one.")
         }
         .alert("Delete Studio", isPresented: $isShowingDeleteStudioConfirm) {
             Button("Delete", role: .destructive) { deletePendingStudio() }
@@ -557,6 +569,17 @@ struct StudioCanvasView: View {
                 }
             }
         }
+        .onChange(of: studios.count) { oldCount, newCount in
+            // When studios array count changes, check for duplicate Gear Lockers
+            checkAndMergeDuplicateGearLockers()
+        }
+        .onChange(of: studios.map { $0.id }) { oldIds, newIds in
+            // When studio IDs change (new studio synced), check for duplicate Gear Lockers
+            // This catches cases where count doesn't change but contents do
+            if oldIds != newIds {
+                checkAndMergeDuplicateGearLockers()
+            }
+        }
     }
 
     // MARK: - Sidebar
@@ -649,8 +672,14 @@ struct StudioCanvasView: View {
                             Divider()
                             
                             Button(role: .destructive) {
-                                studioIdPendingDelete = studio.id
-                                isShowingDeleteStudioConfirm = true
+                                // Check if this is the last regular studio
+                                let regularStudios = studios.filter { !$0.isSystemStudio }
+                                if regularStudios.count <= 1 {
+                                    isShowingCannotDeleteLastStudio = true
+                                } else {
+                                    studioIdPendingDelete = studio.id
+                                    isShowingDeleteStudioConfirm = true
+                                }
                             } label: {
                                 Label("Delete Studio...", systemImage: "trash")
                             }
@@ -2699,6 +2728,34 @@ struct StudioCanvasView: View {
         return studios.first(where: { $0.id == id })
     }
 
+    private func checkAndMergeDuplicateGearLockers() {
+        Task { @MainActor in
+            // Small delay to let SwiftData settle after sync
+            try? await Task.sleep(for: .milliseconds(500))
+            
+            // Check if we have multiple Gear Lockers
+            let gearLockers = studios.filter { 
+                $0.isSystemStudio && $0.systemStudioType == "gear_locker" 
+            }
+            
+            if gearLockers.count > 1 {
+                print("🔍 Detected \(gearLockers.count) Gear Lockers during sync, merging automatically...")
+                StudioSeed.mergeDuplicateGearLockers(
+                    modelContext: modelContext, 
+                    lockers: gearLockers
+                )
+                
+                // Save the merge
+                do {
+                    try modelContext.save()
+                    print("✅ Gear Lockers merged successfully in real-time")
+                } catch {
+                    print("❌ Failed to save after merge: \(error)")
+                }
+            }
+        }
+    }
+    
     private func deletePendingStudio() {
         guard let studio = studioPendingDelete else { return }
 

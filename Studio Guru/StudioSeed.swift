@@ -73,12 +73,26 @@ enum StudioSeed {
         
         print("⚠️ Merging \(lockers.count) Gear Lockers...")
         
-        // Sort by creation date - keep the oldest one (most likely to have been synced first)
-        let sortedLockers = lockers.sorted { $0.createdAt < $1.createdAt }
+        // Sort by most recently modified AND device count to keep the one with latest changes
+        // This ensures we don't lose devices added offline
+        let sortedLockers = lockers.sorted { locker1, locker2 in
+            let count1 = locker1.devices?.count ?? 0
+            let count2 = locker2.devices?.count ?? 0
+            
+            // Prefer the one with more devices
+            if count1 != count2 {
+                return count1 > count2
+            }
+            
+            // If same device count, prefer most recently modified
+            return locker1.modifiedAt > locker2.modifiedAt
+        }
+        
         let primaryLocker = sortedLockers[0]
         let duplicateLockers = Array(sortedLockers.dropFirst())
         
-        print("  Keeping locker \(primaryLocker.id) (created: \(primaryLocker.createdAt))")
+        print("  Keeping locker \(primaryLocker.id) (modified: \(primaryLocker.modifiedAt), devices: \(primaryLocker.devices?.count ?? 0))")
+        print("  Will merge from \(duplicateLockers.count) other locker(s)")
         
         if primaryLocker.devices == nil {
             primaryLocker.devices = []
@@ -86,9 +100,12 @@ enum StudioSeed {
         
         // Collect all devices from duplicate lockers
         for locker in duplicateLockers {
-            guard let devices = locker.devices, !devices.isEmpty else { continue }
+            guard let devices = locker.devices, !devices.isEmpty else {
+                print("  Locker \(locker.id) has no devices to merge")
+                continue
+            }
             
-            print("  Processing \(devices.count) devices from locker \(locker.id)")
+            print("  📦 Processing \(devices.count) devices from locker \(locker.id) (modified: \(locker.modifiedAt)):")
             
             for device in devices {
                 // Check if device already exists in primary locker
@@ -105,9 +122,9 @@ enum StudioSeed {
                     }
                     // Add to primary locker
                     primaryLocker.devices?.append(device)
-                    print("    Moved: \(device.manufacturer) \(device.model)")
+                    print("    ✅ Moved: \(device.manufacturer) \(device.model) (SN: \(device.serialNumber.isEmpty ? "none" : device.serialNumber))")
                 } else {
-                    print("    Skipping duplicate: \(device.manufacturer) \(device.model)")
+                    print("    ⏭️  Skipped duplicate: \(device.manufacturer) \(device.model) (SN: \(device.serialNumber.isEmpty ? "none" : device.serialNumber))")
                 }
             }
         }

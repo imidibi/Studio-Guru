@@ -162,6 +162,7 @@ struct SettingsView: View {
             }
             #endif
             
+            #if DEBUG || targetEnvironment(simulator)
             Toggle(isOn: $storeManager.debugSimulatePro) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Enable Pro for Testing")
@@ -171,7 +172,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            #if DEBUG
             .disabled(storeManager.debugForceFreeTier)
             #endif
 
@@ -201,6 +201,7 @@ struct SettingsView: View {
             }
             #endif
             
+            #if DEBUG || targetEnvironment(simulator)
             if storeManager.debugSimulatePro {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("✅ Pro Mode Enabled")
@@ -227,6 +228,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            #endif
             
             #if DEBUG
             Divider()

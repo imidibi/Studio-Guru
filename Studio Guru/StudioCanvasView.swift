@@ -233,11 +233,14 @@ struct StudioCanvasView: View {
                 let trimmed = newStudioNameDraft.trimmingCharacters(
                     in: .whitespacesAndNewlines
                 )
-                let name = trimmed.isEmpty ? "My Studio" : trimmed
+                var name = trimmed.isEmpty ? "My Studio" : trimmed
+                
+                // Ensure unique name
+                name = makeUniqueStudioName(name)
 
                 let s = Studio(name: name)
-                // If the model has createdAt, ensure it’s set so @Query sorting works.
-                // (This is safe even if Studio doesn’t use createdAt; the compiler will tell us and we can remove it.)
+                // If the model has createdAt, ensure it's set so @Query sorting works.
+                // (This is safe even if Studio doesn't use createdAt; the compiler will tell us and we can remove it.)
                 // swiftlint:disable:next unused_optional_binding
                 if Optional.some(s) as Studio? != nil {
                     // Best-effort: set createdAt if the property exists.
@@ -254,6 +257,15 @@ struct StudioCanvasView: View {
 
                 selectedStudioId = s.id
                 isShowingNewStudioPrompt = false
+                newStudioNameDraft = ""  // Clear for next time
+                
+                // Create Gear Locker for Pro users when they create their first studio
+                if storeManager.isPro {
+                    let regularStudios = studios.filter { !$0.isSystemStudio }
+                    if regularStudios.count == 1 {  // This is the first regular studio
+                        StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios + [s])
+                    }
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -417,9 +429,13 @@ struct StudioCanvasView: View {
             print("🔵 StudioCanvasView.onAppear - END")
             #endif
             
-            // Initialize Gear Locker for Pro users
+            // Initialize Gear Locker for Pro users ONLY if they have at least one regular studio
+            // This prevents new users from being stuck in an empty Gear Locker
             if storeManager.isPro {
-                StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)
+                let regularStudios = studios.filter { !$0.isSystemStudio }
+                if !regularStudios.isEmpty {
+                    StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)
+                }
             }
             
             // Create automatic backup if needed
@@ -489,7 +505,17 @@ struct StudioCanvasView: View {
             #endif
             
             if selectedStudioId == nil {
-                selectedStudioId = studios.first?.id
+                // Don't auto-select Gear Locker if it's the only studio
+                // This ensures new users see the "Create Studio" prompt
+                let regularStudios = studios.filter { !$0.isSystemStudio }
+                if !regularStudios.isEmpty {
+                    selectedStudioId = regularStudios.first?.id
+                } else if studios.count > 1 {
+                    // Only select Gear Locker if there are other studios too
+                    selectedStudioId = studios.first?.id
+                }
+                // If only Gear Locker exists (or no studios), leave selectedStudioId nil
+                // This will show the "Create Studio" dialog
             }
 
             // Defer state-modifying operations to avoid "Modifying state during view update" warning
@@ -1020,7 +1046,10 @@ struct StudioCanvasView: View {
                 DetailHeader(
                     studio: studio,
                     onCreateDevice: { beginCreateDevice() },
-                    onShowLegend: { isShowingConnectionLegend = true }
+                    onShowLegend: { isShowingConnectionLegend = true },
+                    validateName: { name, studioId in
+                        !isStudioNameDuplicate(name, excludingStudioId: studioId)
+                    }
                 )
                 .padding(.horizontal)
                 .padding(.vertical, 10)
@@ -1825,23 +1854,26 @@ struct StudioCanvasView: View {
         device.currentEstimatedValue = draftCurrentEstimatedValue
         device.assetNotes = draftAssetNotes.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Build ports from counts/formats for visualization and later connection tooling.
-        device.ports = buildPorts(
-            audioInputs: device.audioInputsCount,
-            audioOutputs: device.audioOutputsCount,
-            digitalInputs: device.digitalInputs,
-            digitalOutputs: device.digitalOutputs,
-            adatInputPorts: device.adatInputPortsCount,
-            adatOutputPorts: device.adatOutputPortsCount,
-            madiInputPorts: device.madiInputPortsCount,
-            madiOutputPorts: device.madiOutputPortsCount,
-            midiInputPorts: device.midiInputPortsCount,
-            midiOutputPorts: device.midiOutputPortsCount,
-            cvInputPorts: device.cvInputPortsCount,
-            cvOutputPorts: device.cvOutputPortsCount,
-            computerInterfaceCounts: device.computerInterfaceCounts,
-            sampleRate: draftSampleRate
-        )
+        // Only rebuild ports if the port configuration has actually changed
+        // This preserves existing port/channel UUIDs and prevents orphaning connections
+        if portConfigurationChanged(device: device) {
+            device.ports = buildPorts(
+                audioInputs: device.audioInputsCount,
+                audioOutputs: device.audioOutputsCount,
+                digitalInputs: device.digitalInputs,
+                digitalOutputs: device.digitalOutputs,
+                adatInputPorts: device.adatInputPortsCount,
+                adatOutputPorts: device.adatOutputPortsCount,
+                madiInputPorts: device.madiInputPortsCount,
+                madiOutputPorts: device.madiOutputPortsCount,
+                midiInputPorts: device.midiInputPortsCount,
+                midiOutputPorts: device.midiOutputPortsCount,
+                cvInputPorts: device.cvInputPortsCount,
+                cvOutputPorts: device.cvOutputPortsCount,
+                computerInterfaceCounts: device.computerInterfaceCounts,
+                sampleRate: draftSampleRate
+            )
+        }
         
         // Handle manual PDFs if any were selected (supports multiple)
         if !draftManualURLs.isEmpty {
@@ -2095,6 +2127,83 @@ struct StudioCanvasView: View {
             selectedStudioId = destination.id
             selectionState.selection = .device(moved.id)
         }
+    }
+    
+    /// Check if a studio name is already in use by another studio
+    /// - Parameters:
+    ///   - name: The studio name to check
+    ///   - excludingStudioId: Optional studio ID to exclude from the check (for rename validation)
+    /// - Returns: True if the name is already in use by a different studio
+    private func isStudioNameDuplicate(_ name: String, excludingStudioId: UUID? = nil) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return false }
+        
+        return studios.contains { studio in
+            let studioName = studio.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isSameName = studioName.localizedCaseInsensitiveCompare(trimmedName) == .orderedSame
+            let isDifferentStudio = studio.id != excludingStudioId
+            return isSameName && isDifferentStudio
+        }
+    }
+    
+    /// Generate a unique studio name by appending a number if needed
+    /// - Parameter baseName: The base name to make unique
+    /// - Returns: A unique studio name
+    private func makeUniqueStudioName(_ baseName: String) -> String {
+        var name = baseName
+        var counter = 2
+        
+        while isStudioNameDuplicate(name) {
+            name = "\(baseName) \(counter)"
+            counter += 1
+        }
+        
+        return name
+    }
+    
+    /// Check if any port configuration has changed that would require rebuilding ports
+    private func portConfigurationChanged(device: DeviceInstance) -> Bool {
+        // If device has no ports yet, we need to build them
+        guard let existingPorts = device.ports, !existingPorts.isEmpty else {
+            return true
+        }
+        
+        // Compare current device configuration with what the ports represent
+        // We need to check if counts or formats have changed
+        
+        // For simplicity, we'll compare the total number of ports and channels
+        // A more sophisticated approach would compare each port type individually
+        let currentPortCount = existingPorts.count
+        
+        // Calculate expected port count based on current configuration
+        var expectedPortCount = 0
+        if device.audioInputsCount > 0 { expectedPortCount += 1 }
+        if device.audioOutputsCount > 0 { expectedPortCount += 1 }
+        expectedPortCount += device.midiInputPortsCount
+        expectedPortCount += device.midiOutputPortsCount
+        expectedPortCount += device.cvInputPortsCount
+        expectedPortCount += device.cvOutputPortsCount
+        expectedPortCount += device.digitalInputs.count
+        expectedPortCount += device.digitalOutputs.count
+        
+        // Add computer interface ports
+        for (_, count) in device.computerInterfaceCounts {
+            expectedPortCount += count
+        }
+        
+        // If port counts don't match, configuration has changed
+        if currentPortCount != expectedPortCount {
+            return true
+        }
+        
+        // Check if sample rate changed (affects ADAT/MADI channel counts)
+        let currentSampleRate = SampleRate(rawValue: device.sampleRateRaw) ?? .hz48000
+        if currentSampleRate != draftSampleRate {
+            return true
+        }
+        
+        // If we get here, port configuration hasn't changed
+        return false
     }
 
     private func buildPorts(
@@ -2613,7 +2722,8 @@ struct StudioCanvasView: View {
             return
         }
 
-        let copy = Studio(name: "\(source.name) Copy")
+        let baseName = "\(source.name) Copy"
+        let copy = Studio(name: makeUniqueStudioName(baseName))
         
         // Map old device UUIDs to new devices
         var deviceMap: [UUID: DeviceInstance] = [:]
@@ -4215,8 +4325,10 @@ struct StudioCanvasView: View {
         customName: String? = nil
     ) {
         do {
-            // Create new studio
-            let studio = Studio(name: customName ?? exportable.name)
+            // Create new studio with unique name
+            let proposedName = customName ?? exportable.name
+            let uniqueName = makeUniqueStudioName(proposedName)
+            let studio = Studio(name: uniqueName)
 
             // Import devices
             var deviceMap: [UUID: DeviceInstance] = [:]
@@ -4558,22 +4670,51 @@ private struct DetailHeader: View {
     @Bindable var studio: Studio
     let onCreateDevice: () -> Void
     let onShowLegend: () -> Void
+    let validateName: (String, UUID) -> Bool  // Returns true if name is valid (not duplicate)
+    
+    @State private var showingDuplicateWarning = false
+    @State private var previousValidName: String
+
+    init(studio: Studio, onCreateDevice: @escaping () -> Void, onShowLegend: @escaping () -> Void, validateName: @escaping (String, UUID) -> Bool) {
+        self.studio = studio
+        self.onCreateDevice = onCreateDevice
+        self.onShowLegend = onShowLegend
+        self.validateName = validateName
+        self._previousValidName = State(initialValue: studio.name)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            TextField(
-                "Studio Name",
-                text: .init(
-                    get: { studio.name },
-                    set: { newValue in
-                        studio.name = newValue
-                        studio.markAsModified()
-                    }
+            VStack(alignment: .leading, spacing: 2) {
+                TextField(
+                    "Studio Name",
+                    text: .init(
+                        get: { studio.name },
+                        set: { newValue in
+                            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if trimmed.isEmpty || validateName(newValue, studio.id) {
+                                studio.name = newValue
+                                studio.markAsModified()
+                                previousValidName = newValue
+                                showingDuplicateWarning = false
+                            } else {
+                                // Revert to previous valid name
+                                studio.name = previousValidName
+                                showingDuplicateWarning = true
+                            }
+                        }
+                    )
                 )
-            )
-            .textFieldStyle(.roundedBorder)
-            .font(.title3)
-            .frame(minWidth: 240)
+                .textFieldStyle(.roundedBorder)
+                .font(.title3)
+                .frame(minWidth: 240)
+                
+                if showingDuplicateWarning {
+                    Text("A studio with this name already exists")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
 
             Spacer()
 

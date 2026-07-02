@@ -194,23 +194,31 @@ struct Studio_GuruApp: App {
                 }
                 .onChange(of: storeManager.isPro) { oldValue, newValue in
                     // When Pro status becomes true, ensure Gear Locker exists
+                    // But only if user has at least one regular studio
                     if newValue && !oldValue {
                         print("🔍 Pro status changed to true, creating Gear Locker")
                         let context = sharedModelContainer.mainContext
                         let descriptor = FetchDescriptor<Studio>()
                         if let studios = try? context.fetch(descriptor) {
-                            StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
+                            let regularStudios = studios.filter { !$0.isSystemStudio }
+                            if !regularStudios.isEmpty {
+                                StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
+                            }
                         }
                     }
                 }
                 .onAppear {
                     // Also check immediately in case user is already Pro
+                    // But only if user has at least one regular studio
                     if storeManager.isPro {
                         print("🔍 User is already Pro on appear, creating Gear Locker")
                         let context = sharedModelContainer.mainContext
                         let descriptor = FetchDescriptor<Studio>()
                         if let studios = try? context.fetch(descriptor) {
-                            StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
+                            let regularStudios = studios.filter { !$0.isSystemStudio }
+                            if !regularStudios.isEmpty {
+                                StudioSeed.ensureGearLockerExists(modelContext: context, studios: studios)
+                            }
                         }
                     }
                 }

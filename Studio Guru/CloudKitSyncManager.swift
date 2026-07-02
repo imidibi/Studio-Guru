@@ -470,6 +470,29 @@ class CloudKitSyncManager: ObservableObject {
                 print("⚠️ Failed to serialize ports: \(error)")
             }
         }
+        
+        // Serialize docs array as JSON
+        if let docs = device.docs, !docs.isEmpty {
+            do {
+                let docsData = try JSONEncoder().encode(docs.map { doc in
+                    DocData(
+                        id: doc.id,
+                        title: doc.title,
+                        kindRaw: doc.kindRaw,
+                        iCloudDocumentPath: doc.iCloudDocumentPath,
+                        localBookmarkData: doc.localBookmarkData,
+                        urlString: doc.urlString,
+                        modifiedAt: doc.modifiedAt
+                    )
+                })
+                record["docsJSON"] = String(data: docsData, encoding: .utf8)
+            } catch {
+                print("⚠️ Failed to serialize docs: \(error)")
+            }
+        } else {
+            // Explicitly set empty array to sync deletions
+            record["docsJSON"] = "[]"
+        }
 
         return record
     }
@@ -489,6 +512,16 @@ class CloudKitSyncManager: ObservableObject {
         let nameLong: String
         let nameShort: String
         let groupingRaw: String
+    }
+    
+    private struct DocData: Codable {
+        let id: UUID
+        let title: String
+        let kindRaw: String
+        let iCloudDocumentPath: String?
+        let localBookmarkData: Data?
+        let urlString: String?
+        let modifiedAt: Date
     }
 
     private func createConnectionBundleRecord(from bundle: ConnectionBundleModel) throws -> CKRecord {
@@ -676,6 +709,74 @@ class CloudKitSyncManager: ObservableObject {
                 }
             } catch {
                 print("⚠️ Failed to deserialize ports: \(error)")
+            }
+        }
+        
+        // Deserialize docs from JSON
+        if let docsJSON = record["docsJSON"] as? String,
+           let docsData = docsJSON.data(using: .utf8) {
+            do {
+                let docDataArray = try JSONDecoder().decode([DocData].self, from: docsData)
+                
+                // Merge docs using modifiedAt timestamps for conflict resolution
+                // This preserves newer changes while removing deleted docs
+                var existingDocsMap: [UUID: DocLink] = [:]
+                if let existingDocs = device.docs {
+                    for doc in existingDocs {
+                        existingDocsMap[doc.id] = doc
+                    }
+                }
+                
+                // Clear and rebuild docs array
+                device.docs?.removeAll()
+                if device.docs == nil {
+                    device.docs = []
+                }
+                
+                // Process incoming docs
+                for docData in docDataArray {
+                    // Check if we have this doc locally
+                    if let existingDoc = existingDocsMap[docData.id] {
+                        // Keep the newer version based on modifiedAt
+                        if docData.modifiedAt > existingDoc.modifiedAt {
+                            // Remote is newer, use remote data
+                            existingDoc.title = docData.title
+                            existingDoc.kindRaw = docData.kindRaw
+                            existingDoc.iCloudDocumentPath = docData.iCloudDocumentPath
+                            existingDoc.localBookmarkData = docData.localBookmarkData
+                            existingDoc.urlString = docData.urlString
+                            existingDoc.modifiedAt = docData.modifiedAt
+                        }
+                        // Keep the existing doc (with potentially updated data)
+                        device.docs?.append(existingDoc)
+                    } else {
+                        // New doc from remote, create it based on what type of storage it uses
+                        let newDoc: DocLink
+                        let kind = DocKind(rawValue: docData.kindRaw) ?? .other
+                        
+                        if let iCloudPath = docData.iCloudDocumentPath {
+                            newDoc = DocLink(title: docData.title, kind: kind, iCloudPath: iCloudPath)
+                        } else if let bookmarkData = docData.localBookmarkData {
+                            newDoc = DocLink(title: docData.title, kind: kind, bookmarkData: bookmarkData)
+                        } else if let urlString = docData.urlString, let url = URL(string: urlString) {
+                            newDoc = DocLink(title: docData.title, kind: kind, url: url)
+                        } else {
+                            // Invalid doc data, skip it
+                            print("⚠️ Skipping doc with no valid storage: \(docData.title)")
+                            continue
+                        }
+                        
+                        newDoc.id = docData.id
+                        newDoc.modifiedAt = docData.modifiedAt
+                        device.docs?.append(newDoc)
+                    }
+                }
+                
+                // Note: Docs that exist locally but not in remote have been deleted remotely
+                // They are automatically removed by not adding them back to the array
+                
+            } catch {
+                print("⚠️ Failed to deserialize docs: \(error)")
             }
         }
     }

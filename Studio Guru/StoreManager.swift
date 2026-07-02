@@ -16,8 +16,10 @@ class StoreManager: ObservableObject {
     @Published private(set) var purchasedProductIDs = Set<String>()
     @Published private(set) var isLoading = false
 
-    // Debug mode for testing (available in DEBUG and TestFlight builds)
+    #if DEBUG || targetEnvironment(simulator)
+    // Debug mode for testing (only available in DEBUG builds and Simulator)
     @Published var debugSimulatePro: Bool = false
+    #endif
     
     #if DEBUG
     @Published var debugForceFreeTier: Bool = false
@@ -41,20 +43,18 @@ class StoreManager: ObservableObject {
         }
         #endif
         
-        // Allow simulation of Pro tier (available in DEBUG and TestFlight)
+        #if DEBUG || targetEnvironment(simulator)
+        // Allow simulation of Pro tier (only in DEBUG builds and Simulator)
         if debugSimulatePro {
             return true
         }
+        #endif
         
         // PRIORITY 1: Trust StoreKit transactions (most reliable)
-        // Check for Pro upgrade IAP
+        // Check for Pro upgrade IAP ONLY
+        // NOTE: We do NOT check for bundle ID transactions because App Store
+        // may return entitlements for free downloads of previously-paid apps
         if purchasedProductIDs.contains(proProductID) {
-            return true
-        }
-        
-        // Check if user bought the original paid app
-        // When the app was paid, the transaction product ID was the bundle ID
-        if purchasedProductIDs.contains("com.ianmiller.studioguru") {
             return true
         }
         
@@ -226,10 +226,14 @@ class StoreManager: ObservableObject {
         
         #if DEBUG
         print("✅ Updated purchased products: \(purchased)")
+        if purchased.contains("com.ianmiller.studioguru") {
+            print("⚠️  Found bundle ID transaction - this is IGNORED (free downloads may have this)")
+        }
         #endif
         
-        // IMPORTANT: If user has ANY purchase (paid app OR Pro IAP), they should have Pro
-        // The paid app transaction will have the bundle ID as product ID
+        // IMPORTANT: Only the Pro IAP (proProductID) grants Pro access via StoreKit
+        // Original paid app purchasers are detected via version check fallback
+        // We do NOT trust bundle ID transactions as they may appear for free downloads
     }
 
     // Observe transaction updates

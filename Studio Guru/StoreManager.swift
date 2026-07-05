@@ -76,32 +76,66 @@ class StoreManager: ObservableObject {
         let lastVersionKey = "lastKnownVersion"
         let lastVersion = UserDefaults.standard.string(forKey: lastVersionKey)
 
+        #if DEBUG
+        print("🔍 Version check: lastKnownVersion = '\(lastVersion ?? "nil")'")
+        #endif
+
         // If they had a previous version installed, check if it was a paid version
         if let previous = lastVersion, !previous.isEmpty {
             // Check if they upgraded from v1.21 or earlier (paid versions)
-            if isVersionEligibleForFreePro(previous) {
-                return true
-            } else {
-                return false
-            }
+            let isEligible = isVersionEligibleForFreePro(previous)
+            #if DEBUG
+            print("🔍 Version check result: \(isEligible ? "ELIGIBLE" : "NOT ELIGIBLE") for Pro")
+            #endif
+            return isEligible
         }
 
         // Store current version for future reference
-        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
-        UserDefaults.standard.set(currentVersion, forKey: lastVersionKey)
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.34"
+        
+        #if DEBUG
+        print("🔍 First launch - saving version: '\(currentVersion)'")
+        #endif
+        
+        // Validate version before saving
+        if !currentVersion.isEmpty && currentVersion != "0.0" && currentVersion != "0" {
+            UserDefaults.standard.set(currentVersion, forKey: lastVersionKey)
+        } else {
+            #if DEBUG
+            print("⚠️ WARNING: Current version is invalid ('\(currentVersion)'), not saving to UserDefaults")
+            #endif
+            // Don't save invalid version - this prevents the bug
+        }
 
         // No previous version = fresh install = not eligible for legacy upgrade
+        #if DEBUG
+        print("🔍 Fresh install - DENYING Pro")
+        #endif
         return false
     }
 
     // Helper function to check if a version is eligible for free Pro upgrade
     // Versions 1.21 and earlier were paid, so those users get Pro for free
     private func isVersionEligibleForFreePro(_ versionString: String) -> Bool {
+        // Validate version string is not empty or default
+        let trimmed = versionString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "0.0", trimmed != "0" else {
+            // Empty or default version strings are NOT eligible
+            // This prevents fresh installs from getting Pro
+            #if DEBUG
+            print("⚠️ Version check: '\(versionString)' is invalid/empty - DENYING Pro")
+            #endif
+            return false
+        }
+        
         // Parse version string (e.g., "1.21" -> [1, 21])
-        let components = versionString.split(separator: ".").compactMap { Int($0) }
+        let components = trimmed.split(separator: ".").compactMap { Int($0) }
 
         guard components.count >= 2 else {
             // Invalid version format, deny Pro
+            #if DEBUG
+            print("⚠️ Version check: '\(versionString)' has invalid format - DENYING Pro")
+            #endif
             return false
         }
 
@@ -110,10 +144,21 @@ class StoreManager: ObservableObject {
 
         // Freemium started at v1.22, so v1.21 and earlier get free Pro
         if major < 1 {
-            return true  // v0.x versions get Pro
+            // CRITICAL: v0.x versions should NOT exist in production
+            // If we see v0.x, it's likely a build error - deny Pro
+            #if DEBUG
+            print("⚠️ Version check: v\(major).\(minor) is v0.x - DENYING Pro (suspicious)")
+            #endif
+            return false
         } else if major == 1 && minor <= 21 {
+            #if DEBUG
+            print("✅ Version check: v\(major).\(minor) is v1.21 or earlier - GRANTING Pro")
+            #endif
             return true  // v1.0 through v1.21 get Pro
         } else {
+            #if DEBUG
+            print("⚠️ Version check: v\(major).\(minor) is v1.22+ - DENYING Pro")
+            #endif
             return false  // v1.22+ do not get free Pro
         }
     }

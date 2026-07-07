@@ -172,10 +172,6 @@ struct StudioCanvasView: View {
     @State private var deviceToPlaceId: UUID? = nil  // Store ID instead of object to avoid stale references
     @State private var deviceToPlaceName: String = ""  // Store device name for placement UI
     
-    // Auto-arrange undo
-    @State private var savedDevicePositions: [UUID: (x: Double, y: Double)] = [:]
-    @State private var canUndoAutoArrange: Bool = false
-
     // Delete device confirm
     @State private var isShowingDeleteDeviceConfirm: Bool = false
     @State private var deviceIdPendingDelete: UUID? = nil
@@ -546,10 +542,6 @@ struct StudioCanvasView: View {
             }
         }
         .onChange(of: selectedStudioId) { _, newValue in
-            // Clear auto-arrange undo state when switching studios
-            canUndoAutoArrange = false
-            savedDevicePositions.removeAll()
-            
             // Turn off annotation mode when switching studios
             isDrawingMode = false
 
@@ -669,6 +661,12 @@ struct StudioCanvasView: View {
                                 Label("Export Canvas as PDF...", systemImage: "arrow.down.doc")
                             }
                             
+                            Button {
+                                exportCanvasAsSVG(studio: studio)
+                            } label: {
+                                Label("Export Canvas as SVG...", systemImage: "arrow.down.doc.fill")
+                            }
+                            
                             Divider()
                             
                             Button(role: .destructive) {
@@ -712,15 +710,7 @@ struct StudioCanvasView: View {
                 
                 if let studio = currentStudio {
 
-                    ToolbarItem(placement: .navigation) {
-                        Button {
-                            autoArrangeWithHubDetection(in: studio)
-                        } label: {
-                            Label("Auto-Arrange", systemImage: "square.grid.3x2")
-                        }
-                        .help("Automatically arrange devices using hub detection")
-                    }
-                    
+
                     ToolbarItem(placement: .navigation) {
                         Menu {
                             Toggle(isOn: Binding(
@@ -1116,10 +1106,6 @@ struct StudioCanvasView: View {
                         explosionDeviceSnapshot = device
                         isShowingConnectionExplosion = true
                     },
-                    onClearAutoArrangeUndo: {
-                        canUndoAutoArrange = false
-                        savedDevicePositions.removeAll()
-                    },
                     isDrawingMode: $isDrawingMode,
                     isPlacingDeviceFromLocker: $isPlacingDeviceFromLocker,
                     onPlaceDevice: { location in
@@ -1129,30 +1115,7 @@ struct StudioCanvasView: View {
                 )
                 .environmentObject(selectionState)
             }
-            
-            // Floating undo button - completely non-blocking
-            if canUndoAutoArrange {
-                GeometryReader { geo in
-                    Button {
-                        undoAutoArrange(in: studio)
-                    } label: {
-                        Label("Undo Auto-Arrange", systemImage: "arrow.uturn.backward.circle.fill")
-                            .font(.title2)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                    .position(
-                        x: geo.size.width - 120,
-                        y: geo.size.height - 40
-                    )
-                }
-                .allowsHitTesting(true)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
-        .animation(.easeInOut(duration: 0.3), value: canUndoAutoArrange)
     }
 
     private var isExplosionReady: Bool {
@@ -3259,7 +3222,7 @@ struct StudioCanvasView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
-                .frame(width: 240, height: 80)
+                .frame(width: 260, height: 96)
                 .padding(8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -3317,6 +3280,14 @@ struct StudioCanvasView: View {
                             .fill(ConnectionVisualType.midi.color)
                             .frame(width: 12, height: 12)
                         Text("MIDI")
+                            .font(.caption)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ConnectionVisualType.cv.color)
+                            .frame(width: 12, height: 12)
+                        Text("CV")
                             .font(.caption)
                     }
                     
@@ -3409,816 +3380,287 @@ struct StudioCanvasView: View {
         #endif
     }
     
-    // MARK: - Auto-Arrange (Band-Based Layout)
-    
-    /// Arranges devices in three horizontal bands: top (outputs), middle (hubs), bottom (inputs)
-    /// Signal flow goes from bottom → middle → top
-    /// Respects pinned devices - they remain in place
-    private func autoArrangeWithHubDetection(in studio: Studio) {
-        guard !(studio.devices?.isEmpty ?? true) else { return }
-
-        // Save current positions for undo (only for non-pinned devices)
-        savedDevicePositions.removeAll()
-        for device in studio.devices ?? [] {
-            if !device.isPinned {
-                savedDevicePositions[device.id] = (x: device.posX, y: device.posY)
-            }
-        }
-        canUndoAutoArrange = true
-        
-        // Separate pinned and unpinned devices
-        let allDevices = studio.devices ?? []
-        let unpinnedDevices = allDevices.filter { !$0.isPinned }
-        // Note: Pinned devices remain at their current positions and are not rearranged
-        
-        // Get connections from the connection store
-        let links = connectionsStore.links(for: studio.id)
-        
-        // Build graph: count incoming and outgoing connections per device (only for unpinned devices)
-        var outgoingCounts: [UUID: Int] = [:]
-        var incomingCounts: [UUID: Int] = [:]
-        var totalConnections: [UUID: Int] = [:]
-        
-        for device in unpinnedDevices {
-            outgoingCounts[device.id] = 0
-            incomingCounts[device.id] = 0
-            totalConnections[device.id] = 0
+    private func exportCanvasAsSVG(studio: Studio) {
+        guard let devices = studio.devices, !devices.isEmpty else {
+            isShowingExportCanvasAlert = true
+            return
         }
         
-        for link in links {
-            outgoingCounts[link.fromDeviceId, default: 0] += 1
-            incomingCounts[link.toDeviceId, default: 0] += 1
-            totalConnections[link.fromDeviceId, default: 0] += 1
-            totalConnections[link.toDeviceId, default: 0] += 1
-        }
+        // Show loading indicator
+        isExportingCanvas = true
         
-        // Classify device roles: input, hub, output, neutral
-        enum DeviceRole {
-            case input      // Sources: more outgoing than incoming
-            case hub        // High connection count, central routing
-            case output     // Sinks: more incoming than outgoing
-            case neutral    // Effects, processors
-        }
-        
-        var deviceRoles: [UUID: DeviceRole] = [:]
-        
-        for device in unpinnedDevices {
-            let outgoing = outgoingCounts[device.id] ?? 0
-            let incoming = incomingCounts[device.id] ?? 0
-            let total = totalConnections[device.id] ?? 0
-            
-            // First, classify by category
-            let categoryRole: DeviceRole
-            switch device.category {
-            // Outputs: speakers, monitors
-            case .monitor, .videoMonitor:
-                categoryRole = .output
-                
-            // Hubs: interfaces, mixers, DAWs, patchbays
-            case .audioInterface, .mixer, .digitalMixer, .patchbay, .computer:
-                categoryRole = .hub
-                
-            // Inputs: sources
-            case .synth, .keyboard, .midiDevice, .multi:
-                categoryRole = .input
-                
-            // Neutral: effects, processors, control surfaces
-            case .effectsUnit, .compressor, .equalizer, .channelStrip, .busCompressor, .preamp, .controlSurface, .adatExpander, .usbHub, .usbExpander:
-                categoryRole = .neutral
-                
-            default:
-                categoryRole = .neutral
-            }
-            
-            // Refine by connection counts
-            if total >= 4 {
-                // High connection count → likely a hub
-                deviceRoles[device.id] = .hub
-            } else if outgoing > incoming * 2 && outgoing > 0 {
-                // Significantly more outgoing → input/source
-                deviceRoles[device.id] = .input
-            } else if incoming > outgoing * 2 && incoming > 0 {
-                // Significantly more incoming → output/sink
-                deviceRoles[device.id] = .output
-            } else {
-                // Use category-based classification
-                deviceRoles[device.id] = categoryRole
-            }
-        }
-        
-        // Assign to bands (only unpinned devices)
-        var topBand: [DeviceInstance] = []      // Outputs
-        var middleBand: [DeviceInstance] = []   // Hubs + Neutral
-        var bottomBand: [DeviceInstance] = []   // Inputs
-        var unconnectedDevices: [DeviceInstance] = []
-        
-        for device in unpinnedDevices {
-            let hasConnections = (totalConnections[device.id] ?? 0) > 0
-            
-            if !hasConnections {
-                unconnectedDevices.append(device)
-                continue
-            }
-            
-            switch deviceRoles[device.id] {
-            case .output:
-                topBand.append(device)
-            case .hub, .neutral:
-                middleBand.append(device)
-            case .input:
-                bottomBand.append(device)
-            case .none:
-                middleBand.append(device)
-            }
-        }
-        
-        // Layout constants
-        let deviceCardHeight: Double = 96
-        let deviceCardWidth: Double = 260
-        let horizontalSpacing: Double = 100
-        let padding: Double = 150
-        
-        // Calculate canvas dimensions based on widest band
-        let maxDevicesInBand = max(topBand.count, middleBand.count, bottomBand.count, 1)
-        let canvasWidth = Double(maxDevicesInBand) * (deviceCardWidth + horizontalSpacing) + padding * 2
-        let canvasHeight: Double = 1200  // Fixed height for three bands
-        
-        // Band Y positions (signal flow: bottom → middle → top)
-        let topBandY = canvasHeight * 0.20      // 20% from top
-        let middleBandY = canvasHeight * 0.50   // 50% (middle)
-        let bottomBandY = canvasHeight * 0.80   // 80% from top
-        
-        // Position devices in each band with horizontal spacing
-        positionDevicesInBand(
-            devices: topBand,
-            y: topBandY,
-            canvasWidth: canvasWidth,
-            cardWidth: deviceCardWidth,
-            spacing: horizontalSpacing,
-            padding: padding,
-            snapToGrid: studio.layoutMode == "snapToGrid",
-            gridSize: studio.gridSize
-        )
-        
-        positionDevicesInBand(
-            devices: middleBand,
-            y: middleBandY,
-            canvasWidth: canvasWidth,
-            cardWidth: deviceCardWidth,
-            spacing: horizontalSpacing,
-            padding: padding,
-            snapToGrid: studio.layoutMode == "snapToGrid",
-            gridSize: studio.gridSize
-        )
-        
-        positionDevicesInBand(
-            devices: bottomBand,
-            y: bottomBandY,
-            canvasWidth: canvasWidth,
-            cardWidth: deviceCardWidth,
-            spacing: horizontalSpacing,
-            padding: padding,
-            snapToGrid: studio.layoutMode == "snapToGrid",
-            gridSize: studio.gridSize
-        )
-        
-        // Position unconnected devices in far right column
-        if !unconnectedDevices.isEmpty {
-            let unconnectedX = canvasWidth - padding - deviceCardWidth / 2
-            let unconnectedStartY = padding + deviceCardHeight / 2
-            
-            for (index, device) in unconnectedDevices.enumerated() {
-                device.posX = unconnectedX
-                device.posY = unconnectedStartY + Double(index) * (deviceCardHeight + 50)
-            }
-        }
-        
-        // Normalize all coordinates to ensure they're positive
+        // Calculate bounds of all devices
         var minX = Double.infinity
         var minY = Double.infinity
+        var maxX = -Double.infinity
+        var maxY = -Double.infinity
         
-        for device in studio.devices ?? [] {
-            minX = min(minX, device.posX - deviceCardWidth / 2)
-            minY = min(minY, device.posY - deviceCardHeight / 2)
-        }
-        
-        let targetMin = padding
-        let shiftX = minX < targetMin ? (targetMin - minX) : 0
-        let shiftY = minY < targetMin ? (targetMin - minY) : 0
-        
-        if shiftX != 0 || shiftY != 0 {
-            for device in studio.devices ?? [] {
-                device.posX += shiftX
-                device.posY += shiftY
-            }
-        }
-        
-        // Mark all modified devices and studio for iCloud sync
-        for device in studio.devices ?? [] {
-            device.markAsModified()
-        }
-        studio.markAsModified()
-        
-        // Save changes
-        do {
-            try modelContext.save()
-        } catch {
-            print("Failed to save after auto-arrange: \(error)")
-        }
-    }
-    
-    /// Position devices in a horizontal band with even spacing and staggered vertical offsets
-    private func positionDevicesInBand(
-        devices: [DeviceInstance],
-        y: Double,
-        canvasWidth: Double,
-        cardWidth: Double,
-        spacing: Double,
-        padding: Double,
-        snapToGrid: Bool,
-        gridSize: Double
-    ) {
-        guard !devices.isEmpty else { return }
-        
-        // Sort devices by nickname for consistent ordering
-        let sortedDevices = devices.sorted { $0.nickname < $1.nickname }
-        
-        // Calculate total width needed
-        let totalWidth = Double(sortedDevices.count) * cardWidth + 
-                        Double(max(0, sortedDevices.count - 1)) * spacing
-        
-        // Center the row horizontally
-        let startX = (canvasWidth - totalWidth) / 2 + cardWidth / 2
-        
-        // Stagger pattern: alternate vertical offsets to prevent straight-line overlaps
-        // This ensures connection lines are visible even when devices are horizontally aligned
-        let verticalOffset: Double = 60  // Offset amount for alternating devices
-        
-        // Position each device with staggered vertical offsets
-        for (index, device) in sortedDevices.enumerated() {
-            var posX = startX + Double(index) * (cardWidth + spacing)
-            
-            // Apply zigzag pattern: even indices at base Y, odd indices offset
-            // Pattern: 0=base, 1=+offset, 2=base, 3=+offset, etc.
-            let yOffset = (index % 2 == 0) ? 0 : verticalOffset
-            var posY = y + yOffset
-            
-            // Snap to grid if enabled
-            if snapToGrid && gridSize > 0 {
-                posX = round(posX / gridSize) * gridSize
-                posY = round(posY / gridSize) * gridSize
-            }
-            
-            device.posX = posX
-            device.posY = posY
-        }
-    }
-    
-    /// Snap a coordinate to the nearest grid intersection
-    private func snapToGrid(_ value: Double, gridSize: Double) -> Double {
-        guard gridSize > 0 else { return value }
-        return round(value / gridSize) * gridSize
-    }
-
-    
-    /// Calculate grid dimensions (columns, rows) for a given device count
-    private func calculateGridDimensions(deviceCount: Int, maxColumns: Int) -> (columns: Int, rows: Int) {
-        guard deviceCount > 0 else { return (0, 0) }
-        let columns = min(maxColumns, deviceCount)
-        let rows = (deviceCount + columns - 1) / columns  // Ceiling division
-        return (columns, rows)
-    }
-    
-    /// Position devices in a simple centered horizontal row
-    private func positionDevicesInSimpleRow(devices: [DeviceInstance], centerX: Double, y: Double, cardWidth: Double, horizontalSpacing: Double) {
-        guard !devices.isEmpty else { return }
-        
-        let sortedDevices = devices.sorted { $0.nickname < $1.nickname }
-        let totalWidth = Double(sortedDevices.count) * cardWidth + 
-                        Double(max(0, sortedDevices.count - 1)) * horizontalSpacing
-        let startX = centerX - totalWidth / 2 + cardWidth / 2
-        
-        for (index, device) in sortedDevices.enumerated() {
-            device.posX = startX + Double(index) * (cardWidth + horizontalSpacing)
-            device.posY = y
-        }
-    }
-    
-    /// Position devices in a grid layout, grouped by category
-    private func positionDevicesInGrid(devices: [DeviceInstance], centerX: Double, baseY: Double, cardWidth: Double, cardHeight: Double, horizontalSpacing: Double, verticalSpacing: Double, maxColumns: Int, anchorTop: Bool) {
-        guard !devices.isEmpty else { return }
-        
-        // Group devices by category and sort
-        var categoryGroups: [DeviceCategory: [DeviceInstance]] = [:]
         for device in devices {
-            categoryGroups[device.category, default: []].append(device)
+            minX = min(minX, device.posX - 130) // Half card width
+            minY = min(minY, device.posY - 48)  // Half card height
+            maxX = max(maxX, device.posX + 130)
+            maxY = max(maxY, device.posY + 48)
         }
         
-        // Sort each category group by nickname
-        for (category, devicesInCategory) in categoryGroups {
-            categoryGroups[category] = devicesInCategory.sorted { $0.nickname < $1.nickname }
-        }
-        
-        // Sort categories by count (largest first)
-        let sortedCategories = categoryGroups.keys.sorted { cat1, cat2 in
-            (categoryGroups[cat1]?.count ?? 0) > (categoryGroups[cat2]?.count ?? 0)
-        }
-        
-        // Flatten into single ordered array
-        var allDevicesOrdered: [DeviceInstance] = []
-        for category in sortedCategories {
-            if let devicesInCategory = categoryGroups[category] {
-                allDevicesOrdered.append(contentsOf: devicesInCategory)
-            }
-        }
-        
-        // Calculate grid dimensions
-        let columns = min(maxColumns, allDevicesOrdered.count)
-        
-        // Calculate total grid size
-        let totalWidth = Double(columns) * cardWidth + Double(max(0, columns - 1)) * horizontalSpacing
-        
-        // Calculate starting position
-        let startX = centerX - totalWidth / 2 + cardWidth / 2
-        let startY: Double
-        if anchorTop {
-            // Start from baseY and grow downward
-            startY = baseY + cardHeight / 2
-        } else {
-            // Start from baseY and grow downward
-            startY = baseY + cardHeight / 2
-        }
-        
-        // Position devices in grid
-        for (index, device) in allDevicesOrdered.enumerated() {
-            let col = index % columns
-            let row = index / columns
-            
-            device.posX = startX + Double(col) * (cardWidth + horizontalSpacing)
-            device.posY = startY + Double(row) * (cardHeight + verticalSpacing)
-        }
-    }
-
-    private func autoArrangeDevices(in studio: Studio) {
-        guard !(studio.devices?.isEmpty ?? true) else { return }
-
-        // Save current positions for undo
-        savedDevicePositions.removeAll()
-        for device in studio.devices ?? [] {
-            savedDevicePositions[device.id] = (x: device.posX, y: device.posY)
-        }
-        canUndoAutoArrange = true
-
-        // Get connections from the connection store (not SwiftData)
-        let links = connectionsStore.links(for: studio.id)
-        
-        // Build adjacency map: device -> devices it connects to
-        var outgoing: [UUID: Set<UUID>] = [:]
-        var incoming: [UUID: Set<UUID>] = [:]
-        var deviceMap: [UUID: DeviceInstance] = [:]
-
-        // Initialize with all devices
-        for device in studio.devices ?? [] {
-            outgoing[device.id] = []
-            incoming[device.id] = []
-            deviceMap[device.id] = device
-        }
-
-        // Populate from ConnectionStore links
-        for link in links {
-            outgoing[link.fromDeviceId, default: []].insert(link.toDeviceId)
-            incoming[link.toDeviceId, default: []].insert(link.fromDeviceId)
-        }
-        
-        // Identify unconnected devices (no incoming or outgoing connections)
-        var unconnectedDevices: [DeviceInstance] = []
-        var connectedDevices: [DeviceInstance] = []
-        
-        for device in studio.devices ?? [] {
-            let hasConnections = !(outgoing[device.id]?.isEmpty ?? true) || !(incoming[device.id]?.isEmpty ?? true)
-            if hasConnections {
-                connectedDevices.append(device)
-            } else {
-                unconnectedDevices.append(device)
-            }
-        }
-        
-        // Sort unconnected devices by category and name for consistent ordering
-        unconnectedDevices.sort { d1, d2 in
-            if d1.category != d2.category {
-                return d1.category.rawValue < d2.category.rawValue
-            }
-            return d1.nickname < d2.nickname
-        }
-
-        // SIGNAL FLOW LAYOUT
-        // Audio signal flows from BOTTOM to TOP
-        // Bottom: Source devices (preamps, instruments, mics)
-        // Middle: Processing devices (compressors, effects)
-        // Upper: Converters (ADAT expanders, audio interfaces)
-        // Top: Computers
-        
-        var deviceLevels: [UUID: Int] = [:]
-        
-        // Calculate signal flow depth
-        // Depth 0 = source devices (no inputs, only outputs)
-        // Higher depth = further along signal chain toward destination
-        func calculateSignalDepth(for deviceId: UUID, visited: Set<UUID> = []) -> Int {
-            if let level = deviceLevels[deviceId] {
-                return level
-            }
-            
-            if visited.contains(deviceId) {
-                return 0  // Circular reference, treat as source
-            }
-            
-            var newVisited = visited
-            newVisited.insert(deviceId)
-            
-            // Get all devices that this device connects TO (outputs)
-            let outputs = outgoing[deviceId] ?? []
-            
-            if outputs.isEmpty {
-                // No outputs - this is a destination device (like computer)
-                // Check for special categories
-                if let device = deviceMap[deviceId] {
-                    if device.category == .computer {
-                        return 100  // Top level
-                    }
-                    if device.category == .audioInterface || device.category == .adatExpander {
-                        return 90  // Near top
-                    }
-                }
-                // Other endpoints
-                return 50
-            }
-            
-            // Find the minimum depth of output devices and subtract 1
-            // (source devices have lower depth than their destinations)
-            var minOutputDepth = 100
-            for outputId in outputs {
-                let outputDepth = calculateSignalDepth(for: outputId, visited: newVisited)
-                minOutputDepth = min(minOutputDepth, outputDepth)
-            }
-            
-            return max(0, minOutputDepth - 1)
-        }
-        
-        // Calculate depths for all devices
-        for device in studio.devices ?? [] {
-            if deviceLevels[device.id] == nil {
-                deviceLevels[device.id] = calculateSignalDepth(for: device.id)
-            }
-        }
-
-        // Invert depths so lower depth = higher on screen
-        // Find max depth to invert
-        let maxDepth = deviceLevels.values.max() ?? 0
-        for (deviceId, depth) in deviceLevels {
-            deviceLevels[deviceId] = maxDepth - depth
-        }
-
-        // Group devices by level
-        var levelGroups: [Int: [DeviceInstance]] = [:]
-        for device in studio.devices ?? [] {
-            let level = deviceLevels[device.id] ?? 0
-            levelGroups[level, default: []].append(device)
-        }
-
-        // Sort levels (0 = top of screen)
-        let sortedLevels = levelGroups.keys.sorted()
-        
-        // Category priority for sorting within levels
-        func categoryPriority(_ category: DeviceCategory) -> Int {
-            switch category {
-            case .computer: return 0
-            case .audioInterface: return 1
-            case .adatExpander: return 2
-            case .digitalMixer, .mixer: return 3
-            case .patchbay: return 4
-            case .preamp: return 5
-            case .compressor, .busCompressor: return 6
-            case .channelStrip: return 7
-            default: return 8
-            }
-        }
-        
-        // Within each level, sort devices to keep connected ones together
-        for level in sortedLevels {
-            guard var devices = levelGroups[level] else { continue }
-            
-            if devices.count <= 1 {
-                continue  // No need to sort
-            }
-            
-            // Sort by category first, then try to group connected devices
-            devices.sort { d1, d2 in
-                let p1 = categoryPriority(d1.category)
-                let p2 = categoryPriority(d2.category)
-                if p1 != p2 { return p1 < p2 }
-                return d1.nickname < d2.nickname
-            }
-            
-            // Reorder to keep connected devices adjacent
-            var orderedDevices: [DeviceInstance] = []
-            var remaining = Set(devices.map { $0.id })
-            
-            // Start with first device
-            if let first = devices.first {
-                orderedDevices.append(first)
-                remaining.remove(first.id)
-                
-                // Greedily add devices with strongest connection to already-placed devices
-                while !remaining.isEmpty {
-                    var bestDevice: DeviceInstance?
-                    var bestScore = -1
-                    
-                    for deviceId in remaining {
-                        guard let device = deviceMap[deviceId] else { continue }
-                        
-                        var score = 0
-                        let deviceInputs = incoming[deviceId] ?? []
-                        let deviceOutputs = outgoing[deviceId] ?? []
-                        
-                        // Check connectivity to already-placed devices
-                        for placedDevice in orderedDevices {
-                            // Direct connection gives high score
-                            if deviceInputs.contains(placedDevice.id) {
-                                score += 10
-                            }
-                            if deviceOutputs.contains(placedDevice.id) {
-                                score += 10
-                            }
-                            
-                            // Shared connections give lower score
-                            let placedInputs = incoming[placedDevice.id] ?? []
-                            score += deviceInputs.intersection(placedInputs).count * 2
-                        }
-                        
-                        if score > bestScore {
-                            bestScore = score
-                            bestDevice = device
-                        }
-                    }
-                    
-                    if let device = bestDevice, bestScore > 0 {
-                        orderedDevices.append(device)
-                        remaining.remove(device.id)
-                    } else {
-                        // No connections, add remaining in category/name order
-                        let remainingDevices = devices.filter { remaining.contains($0.id) }
-                        orderedDevices.append(contentsOf: remainingDevices)
-                        break
-                    }
-                }
-                
-                levelGroups[level] = orderedDevices
-            }
-        }
-
-        // Calculate layout to fit viewport
-        let deviceCardHeight: Double = 96
-        let deviceCardWidth: Double = 260
         let padding: Double = 50
-        let horizontalSpacing: Double = 80
-        let verticalSpacing: Double = 150
-
-        // Use actual viewport size
-        let targetWidth: Double = max(canvasSize.width - padding * 2, 600)
-        let targetHeight: Double = max(canvasSize.height - padding * 2, 600)
-
-        // Calculate required space
-        let numLevels = sortedLevels.count
-        let maxDevicesInLevel = levelGroups.values.map { $0.count }.max() ?? 1
+        let canvasWidth = maxX - minX + padding * 2
+        let canvasHeight = maxY - minY + padding * 2
+        let offsetX = -minX + padding
+        let offsetY = -minY + padding
         
-        // For positioning, we need space for cards AND gaps between them
-        // Device positions are CENTER points, so spacing = cardWidth + gap
-        let requiredWidth = Double(maxDevicesInLevel) * deviceCardWidth + 
-                           Double(max(0, maxDevicesInLevel - 1)) * horizontalSpacing
-        let requiredHeight = Double(numLevels) * deviceCardHeight + 
-                            Double(max(0, numLevels - 1)) * verticalSpacing
-
-        // Scale to fit if needed, but maintain minimum spacing
-        let widthScale = min(1.0, targetWidth / requiredWidth)
-        let heightScale = min(1.0, targetHeight / requiredHeight)
-        let layoutScale = min(widthScale, heightScale)
+        // Add space for title and legend
+        let titleHeight: Double = 60
+        let legendHeight: Double = 80
+        let totalHeight = titleHeight + canvasHeight + legendHeight
         
-        // Don't scale cards down - keep them full size for readability
-        // Only adjust spacing if needed
-        let finalCardWidth = deviceCardWidth
-        let finalCardHeight = deviceCardHeight
+        // Start building SVG - use viewBox only for proper scaling, no fixed width/height
+        var svg = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 \(canvasWidth) \(totalHeight)" preserveAspectRatio="xMidYMid meet" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality">
+        <defs>
+        <style>
+        * { vector-effect: non-scaling-stroke; }
+        .title { font: bold 24px -apple-system, BlinkMacSystemFont, sans-serif; fill: #000; }
+        .device-name { font: 12px -apple-system, BlinkMacSystemFont, sans-serif; fill: #000; font-weight: 600; }
+        .device-category { font: 8px -apple-system, BlinkMacSystemFont, sans-serif; fill: #666; }
+        .device-io { font: 7px -apple-system, BlinkMacSystemFont, sans-serif; fill: #666; }
+        .legend-text { font: 12px -apple-system, BlinkMacSystemFont, sans-serif; fill: #000; }
+        .legend-label { font: bold 12px -apple-system, BlinkMacSystemFont, sans-serif; fill: #000; }
+        .wc-badge { font: bold 8px -apple-system, BlinkMacSystemFont, sans-serif; fill: #f97316; }
+        .wc-note { font: 10px -apple-system, BlinkMacSystemFont, sans-serif; fill: #666; }
+        line, rect, circle, text { shape-rendering: crispEdges; }
+        text { shape-rendering: geometricPrecision; text-rendering: geometricPrecision; }
+        </style>
+        </defs>
         
-        // Calculate actual spacing based on available space
-        let finalHorizontalSpacing: Double
-        let finalVerticalSpacing: Double
+        <!-- Background -->
+        <rect width="\(canvasWidth)" height="\(totalHeight)" fill="#f5f5f5"/>
         
-        if layoutScale < 1.0 {
-            // Need to compress - reduce spacing proportionally
-            finalHorizontalSpacing = max(20, horizontalSpacing * layoutScale)
-            finalVerticalSpacing = max(30, verticalSpacing * layoutScale)
-        } else {
-            // Plenty of space - use default spacing
-            finalHorizontalSpacing = horizontalSpacing
-            finalVerticalSpacing = verticalSpacing
-        }
-
-        // SMART COLUMN-BASED POSITIONING TO AVOID LINE CROSSINGS
-        // Assign each device to a horizontal column based on its connections
-        var deviceColumns: [UUID: Int] = [:]
-        var columnsUsed: Set<Int> = []
+        <!-- Title -->
+        <text x="20" y="40" class="title">Studio Canvas: \(studio.name.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;"))</text>
         
-        // Process levels from top to bottom, assigning columns
-        for (_, level) in sortedLevels.enumerated() {
-            guard let devicesInLevel = levelGroups[level] else { continue }
-            
-            for device in devicesInLevel {
-                if deviceColumns[device.id] != nil {
-                    continue // Already assigned
-                }
+        <!-- Canvas area background -->
+        <rect x="0" y="\(titleHeight)" width="\(canvasWidth)" height="\(canvasHeight)" fill="#f5f5f5"/>
+        
+        """
+        
+        // Draw connection lines
+        let links = connectionsStore.links(for: studio.id)
+        for link in links {
+            if let fromDevice = devices.first(where: { $0.id == link.fromDeviceId }),
+               let toDevice = devices.first(where: { $0.id == link.toDeviceId }),
+               let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id) {
                 
-                // Find preferred column based on connections to already-positioned devices
-                var preferredColumn: Int? = nil
-                var columnScores: [Int: Int] = [:]
-                
-                // Check outputs (devices this connects TO in higher levels)
-                let deviceOutputs = outgoing[device.id] ?? []
-                for outputId in deviceOutputs {
-                    if let targetColumn = deviceColumns[outputId] {
-                        columnScores[targetColumn, default: 0] += 10
+                // Determine connection types
+                var typeCounts: [ConnectionVisualType: Int] = [:]
+                for edge in bundle.edges {
+                    if let device = devices.first(where: { $0.id == edge.from.deviceId }) {
+                        if let port = device.ports?.first(where: { $0.id == edge.from.portId }) {
+                            let type = ConnectionVisualType.from(portType: port.type)
+                            typeCounts[type, default: 0] += 1
+                        } else if !device.computerInterfaceCounts.isEmpty {
+                            typeCounts[.computer, default: 0] += 1
+                        }
                     }
                 }
                 
-                // Check inputs (devices that connect FROM this in lower levels)
-                let deviceInputs = incoming[device.id] ?? []
-                for inputId in deviceInputs {
-                    if let sourceColumn = deviceColumns[inputId] {
-                        columnScores[sourceColumn, default: 0] += 5
-                    }
-                }
+                let sortedTypes = typeCounts.sorted { $0.value > $1.value }.map { $0.key }
+                let connectionTypes = sortedTypes.isEmpty ? [.unknown] : sortedTypes
                 
-                // Use highest scoring column if available
-                if let bestColumn = columnScores.max(by: { $0.value < $1.value })?.key {
-                    preferredColumn = bestColumn
-                }
-                
-                // If device connects to multiple levels (skip-level connections), offset it horizontally
-                if deviceOutputs.count > 1 {
-                    // Check if outputs are at different depth levels
-                    let outputLevels = deviceOutputs.compactMap { deviceLevels[$0] }
-                    let uniqueLevels = Set(outputLevels)
+                // Draw parallel lines
+                for (index, type) in connectionTypes.enumerated() {
+                    let offset: Double = {
+                        let spacing: Double = 6.0
+                        let total = connectionTypes.count
+                        if total == 1 { return 0 }
+                        if total == 2 {
+                            return index == 0 ? -spacing / 2 : spacing / 2
+                        }
+                        let totalWidth = spacing * Double(total - 1)
+                        return Double(index) * spacing - totalWidth / 2
+                    }()
                     
-                    if uniqueLevels.count > 1 {
-                        // Device has skip-level connections - force horizontal offset
-                        let connectedColumns = deviceOutputs.compactMap { deviceColumns[$0] }
-                        if connectedColumns.count >= 2 {
-                            let minCol = connectedColumns.min()!
-                            let maxCol = connectedColumns.max()!
-                            if minCol == maxCol {
-                                // All targets in same column but at different levels - offset to the right
-                                preferredColumn = minCol + 1
-                            } else {
-                                // Targets in different columns - position in middle
-                                preferredColumn = (minCol + maxCol) / 2
-                            }
-                        } else if let firstCol = connectedColumns.first {
-                            // Single target column at different level - offset to the right
-                            preferredColumn = firstCol + 1
-                        }
-                    } else {
-                        // Multiple connections but all at same level - stay in same column as targets
-                        let connectedColumns = deviceOutputs.compactMap { deviceColumns[$0] }
-                        if connectedColumns.count >= 2 {
-                            let minCol = connectedColumns.min()!
-                            let maxCol = connectedColumns.max()!
-                            preferredColumn = (minCol + maxCol) / 2
-                        }
-                    }
+                    let fromX = fromDevice.posX + offsetX
+                    let fromY = fromDevice.posY + offsetY + titleHeight
+                    let toX = toDevice.posX + offsetX
+                    let toY = toDevice.posY + offsetY + titleHeight
+                    
+                    let dx = toX - fromX
+                    let dy = toY - fromY
+                    let distance = sqrt(dx * dx + dy * dy)
+                    
+                    let perpX = -dy / distance * offset
+                    let perpY = dx / distance * offset
+                    
+                    let x1 = fromX + perpX
+                    let y1 = fromY + perpY
+                    let x2 = toX + perpX
+                    let y2 = toY + perpY
+                    
+                    // Get color based on connection type
+                    let color = colorToHex(type.color)
+                    
+                    svg += "<line x1=\"\(x1)\" y1=\"\(y1)\" x2=\"\(x2)\" y2=\"\(y2)\" stroke=\"\(color)\" stroke-width=\"2\"/>\n"
                 }
-                
-                // Find first available column at or near preferred position
-                var finalColumn = 0
-                if let preferred = preferredColumn {
-                    // Try preferred column first
-                    if !isColumnOccupied(preferred, level: level, levelGroups: levelGroups, deviceColumns: deviceColumns) {
-                        finalColumn = preferred
-                    } else {
-                        // Try nearby columns
-                        var found = false
-                        for offset in 1...10 {
-                            let leftCol = preferred - offset
-                            let rightCol = preferred + offset
-                            
-                            if !isColumnOccupied(rightCol, level: level, levelGroups: levelGroups, deviceColumns: deviceColumns) {
-                                finalColumn = rightCol
-                                found = true
-                                break
-                            }
-                            if leftCol >= 0 && !isColumnOccupied(leftCol, level: level, levelGroups: levelGroups, deviceColumns: deviceColumns) {
-                                finalColumn = leftCol
-                                found = true
-                                break
-                            }
-                        }
-                        if !found {
-                            // Find next available column
-                            finalColumn = (columnsUsed.max() ?? -1) + 1
-                        }
-                    }
+            }
+        }
+        
+        // Draw devices
+        for device in devices {
+            let deviceColor: Color = {
+                if let customColor = device.customColor {
+                    return customColor
                 } else {
-                    // No preference, use next available column
-                    finalColumn = (columnsUsed.max() ?? -1) + 1
+                    let categoryColors = CategoryColorSettings.loadCategoryColors()
+                    return categoryColors[device.category] ?? .gray
                 }
+            }()
+            
+            let x = device.posX + offsetX - 130 // Top-left corner (half width)
+            let y = device.posY + offsetY + titleHeight - 48 // Top-left corner (half height)
+            
+            let borderColor = colorToHex(deviceColor)
+            let nickname = device.nickname.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            let category = device.category.rawValue.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            let io = ioSummary(from: device.ports).replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            
+            svg += """
+            <!-- Device: \(nickname) -->
+            <g>
+                <rect x="\(x)" y="\(y)" width="260" height="96" rx="8" fill="white" stroke="\(borderColor)" stroke-width="3"/>
+                <clipPath id="clip-\(device.id)">
+                    <rect x="\(x + 8)" y="\(y + 20)" width="244" height="68"/>
+                </clipPath>
+                <text x="\(x + 130)" y="\(y + 30)" text-anchor="middle" class="device-name">\(nickname)</text>
+                <text x="\(x + 130)" y="\(y + 45)" text-anchor="middle" class="device-category">\(category)</text>
+                <g clip-path="url(#clip-\(device.id))">
+                    <text x="\(x + 130)" y="\(y + 60)" text-anchor="middle" class="device-io">\(io)</text>
+                </g>
+            </g>
+            
+            """
+        }
+        
+        // Add legend
+        let legendY = titleHeight + canvasHeight + 20
+        svg += """
+        <!-- Legend -->
+        <text x="20" y="\(legendY)" class="legend-label">Legend:</text>
+        
+        <!-- Analog -->
+        <circle cx="100" cy="\(legendY - 4)" r="6" fill="\(colorToHex(ConnectionVisualType.analog.color))"/>
+        <text x="112" y="\(legendY)" class="legend-text">Analog</text>
+        
+        <!-- Digital -->
+        <circle cx="180" cy="\(legendY - 4)" r="6" fill="\(colorToHex(ConnectionVisualType.digital.color))"/>
+        <text x="192" y="\(legendY)" class="legend-text">Digital (ADAT/MADI/S/PDIF)</text>
+        
+        <!-- MIDI -->
+        <circle cx="420" cy="\(legendY - 4)" r="6" fill="\(colorToHex(ConnectionVisualType.midi.color))"/>
+        <text x="432" y="\(legendY)" class="legend-text">MIDI</text>
+        
+        <!-- CV -->
+        <circle cx="490" cy="\(legendY - 4)" r="6" fill="\(colorToHex(ConnectionVisualType.cv.color))"/>
+        <text x="502" y="\(legendY)" class="legend-text">CV</text>
+        
+        <!-- Computer -->
+        <circle cx="550" cy="\(legendY - 4)" r="6" fill="\(colorToHex(ConnectionVisualType.computer.color))"/>
+        <text x="562" y="\(legendY)" class="legend-text">Computer</text>
+        
+        <!-- Word Clock note -->
+        <rect x="20" y="\(legendY + 10)" width="24" height="14" rx="3" fill="#fed7aa"/>
+        <text x="26" y="\(legendY + 20)" class="wc-badge">WC</text>
+        <text x="50" y="\(legendY + 20)" class="wc-note">= Word Clock (sync only, not counted in I/O)</text>
+        
+        </svg>
+        """
+        
+        // Save SVG file
+        #if os(iOS)
+        DispatchQueue.main.async { [self] in
+            let filename = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.svg"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            
+            do {
+                try svg.write(to: tempURL, atomically: true, encoding: .utf8)
                 
-                deviceColumns[device.id] = finalColumn
-                columnsUsed.insert(finalColumn)
-            }
-        }
-        
-        // Helper function to check if column is occupied at this level
-        func isColumnOccupied(_ column: Int, level: Int, levelGroups: [Int: [DeviceInstance]], deviceColumns: [UUID: Int]) -> Bool {
-            guard let devicesAtLevel = levelGroups[level] else { return false }
-            for device in devicesAtLevel {
-                if deviceColumns[device.id] == column {
-                    return true
+                // Hide loading indicator
+                self.isExportingCanvas = false
+                
+                // Present share sheet
+                let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController {
+                    var presentingVC = rootVC
+                    while let presented = presentingVC.presentedViewController {
+                        presentingVC = presented
+                    }
+                    
+                    if let popover = activityVC.popoverPresentationController {
+                        popover.sourceView = presentingVC.view
+                        popover.sourceRect = CGRect(x: presentingVC.view.bounds.midX, y: presentingVC.view.bounds.midY, width: 0, height: 0)
+                        popover.permittedArrowDirections = []
+                    }
+                    
+                    presentingVC.present(activityVC, animated: true)
                 }
+            } catch {
+                self.isExportingCanvas = false
             }
-            return false
         }
-        
-        // Now position devices based on their assigned columns
-        let halfCardWidth = finalCardWidth / 2
-        let halfCardHeight = finalCardHeight / 2
-        
-        // Find column range for connected devices
-        let minColumn = deviceColumns.values.min() ?? 0
-        let maxColumn = deviceColumns.values.max() ?? 0
-        let columnRange = max(1, maxColumn - minColumn + 1)
-        
-        // Calculate total width needed for connected devices
-        let totalWidth = Double(columnRange) * finalCardWidth + Double(max(0, columnRange - 1)) * finalHorizontalSpacing
-        
-        // IMPORTANT: Ensure startX is always visible (never negative or off-left edge)
-        // Center if it fits, otherwise start from padding
-        let effectiveViewportWidth = max(canvasSize.width, 1024)
-        let centeredStartX = (effectiveViewportWidth - totalWidth) / 2
-        let startX = max(padding + halfCardWidth, centeredStartX)
-        
-        // Position connected devices
-        for (levelIndex, level) in sortedLevels.enumerated() {
-            guard let devicesInLevel = levelGroups[level] else { continue }
+        #elseif os(macOS)
+        DispatchQueue.main.async { [self] in
+            let filename = "\(studio.name.replacingOccurrences(of: " ", with: "_"))_Canvas.svg"
             
-            let y = padding + halfCardHeight + Double(levelIndex) * (finalCardHeight + finalVerticalSpacing)
+            let savePanel = NSSavePanel()
+            savePanel.allowedContentTypes = [.svg]
+            savePanel.nameFieldStringValue = filename
             
-            for device in devicesInLevel {
-                if let column = deviceColumns[device.id] {
-                    let columnOffset = column - minColumn
-                    let x = startX + Double(columnOffset) * (finalCardWidth + finalHorizontalSpacing)
-                    device.posX = x
-                    device.posY = y
+            savePanel.begin { response in
+                if response == .OK, let url = savePanel.url {
+                    try? svg.write(to: url, atomically: true, encoding: .utf8)
                 }
+                // Hide loading indicator after save dialog closes
+                self.isExportingCanvas = false
             }
         }
-        
-        // Position unconnected devices in a vertical column on the right side
-        if !unconnectedDevices.isEmpty {
-            // Place unconnected devices to the right of the connected layout
-            let rightEdgeOfConnected = startX + Double(columnRange - 1) * (finalCardWidth + finalHorizontalSpacing) + halfCardWidth
-            let unconnectedX = rightEdgeOfConnected + finalHorizontalSpacing * 1.5 // Extra spacing to separate
-            
-            let unconnectedSpacing: Double = 40 // Closer vertical spacing for unconnected devices
-            
-            for (index, device) in unconnectedDevices.enumerated() {
-                device.posX = unconnectedX
-                device.posY = padding + halfCardHeight + Double(index) * (finalCardHeight + unconnectedSpacing)
-            }
-        }
-
-        // Mark all modified devices and studio for iCloud sync
-        for device in studio.devices ?? [] {
-            device.markAsModified()
-        }
-        studio.markAsModified()
-        
-        // Save changes
-        try? modelContext.save()
+        #endif
     }
     
-    private func undoAutoArrange(in studio: Studio) {
-        guard !savedDevicePositions.isEmpty else { return }
-        
-        // Restore saved positions
-        for device in studio.devices ?? [] {
-            if let savedPos = savedDevicePositions[device.id] {
-                device.posX = savedPos.x
-                device.posY = savedPos.y
-            }
+    // Helper function to convert SwiftUI Color to hex string
+    private func colorToHex(_ color: Color) -> String {
+        #if os(iOS)
+        let uiColor = UIColor(color)
+        #elseif os(macOS)
+        let nsColor = NSColor(color)
+        // Convert to RGB color space
+        guard let rgbColor = nsColor.usingColorSpace(.deviceRGB) else {
+            return "#808080" // Default gray
         }
+        let uiColor = rgbColor
+        #endif
         
-        // Clear saved positions and hide undo button
-        savedDevicePositions.removeAll()
-        canUndoAutoArrange = false
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        
+        #if os(iOS)
+        uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        #elseif os(macOS)
+        uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        #endif
+        
+        let red = Int(r * 255)
+        let green = Int(g * 255)
+        let blue = Int(b * 255)
+        
+        return String(format: "#%02X%02X%02X", red, green, blue)
     }
-
+    
+    // MARK: - Connections Sync
+    
     private func syncConnectionsToSwiftData(studio: Studio) {
         // Clear existing SwiftData connections
         studio.connections?.removeAll()
@@ -4797,7 +4239,6 @@ private struct DetailCanvas: View {
     let onRequestDeleteLink: (ConnectionLinkSummary) -> Void
     let onArrowTap: ((ConnectionLinkSummary, ArrowDirection) -> Void)?
     let onExplodeDevice: (DeviceInstance) -> Void
-    let onClearAutoArrangeUndo: () -> Void
     @Binding var isDrawingMode: Bool
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
@@ -4820,7 +4261,6 @@ private struct DetailCanvas: View {
             onArrowTap: onArrowTap,
             onExplodeDevice: onExplodeDevice,
             isExplosionEnabled: isExplosionEnabled,
-            onClearAutoArrangeUndo: onClearAutoArrangeUndo,
             isDrawingMode: $isDrawingMode,
             isPlacingDeviceFromLocker: $isPlacingDeviceFromLocker,
             onPlaceDevice: onPlaceDevice
@@ -4981,7 +4421,6 @@ private struct CanvasSurfaceView: View {
     let onArrowTap: ((ConnectionLinkSummary, ArrowDirection) -> Void)?
     let onExplodeDevice: (DeviceInstance) -> Void
     let isExplosionEnabled: Bool
-    let onClearAutoArrangeUndo: () -> Void
     @Binding var isDrawingMode: Bool
     @Binding var isPlacingDeviceFromLocker: Bool
     let onPlaceDevice: ((CGPoint) -> Void)?
@@ -5165,8 +4604,6 @@ private struct CanvasSurfaceView: View {
             beginDragIfNeeded: { device in
                 if dragOrigin?.id != device.id {
                     dragOrigin = (device.id, device.posX, device.posY)
-                    // Clear undo when user manually moves a device
-                    onClearAutoArrangeUndo()
                 }
             },
             onBeginConnectionDrag: { device, startPoint in
@@ -8970,9 +8407,6 @@ private struct ConnectionLegendView: View {
                         Text(
                             "• Computer connections show two arrows (bidirectional)"
                         )
-                        Text(
-                            "• Use Auto-Arrange to organize devices by signal flow"
-                        )
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -9847,9 +9281,8 @@ private struct HelpView: View {
         ("5", "Click on a device to review it, edit or delete"),
         ("6", "Long click on a device to see all its connection details"),
         ("7", "Hold or right click a connection to delete it"),
-        ("8", "Press auto-arrange to tidy up the screen or drag devices manually"),
-        ("9", "Use pinch gesture to zoom or expand device canvas as needed"),
-        ("10", "Select Matrix to view a structured from→to diagram")
+        ("8", "Use pinch gesture to zoom or expand device canvas as needed"),
+        ("9", "Select Matrix to view a structured from→to diagram")
     ]
     
     var body: some View {
@@ -9914,10 +9347,7 @@ private struct HelpView: View {
                             Text("The canvas can be expanded by dragging devices to the right or downwards on the canvas. The top and the left borders are fixed points of reference.")
                                 .font(.body)
                             
-                            Text("The canvas can be displayed as a blank workspace or as a grid. Select the # icon to turn on the grid, define its size and to enable a \"snap to grid\" function to ease lining devices up.")
-                                .font(.body)
-                            
-                            Text("There is an \"auto-arrange\" function that will place output devices towards the top of the screen (speakers for example), hub devices (the ones with the most connections such as audio interfaces) in the middle of the canvas, and input devices (such as a synth) at the bottom of the screen. It will also offset devices so they are not parallel to enable visibility of the connection lines.")
+                            Text("The canvas can be displayed as a blank workspace or as a grid. Select the # icon to turn on the grid, define its size and to enable a \"snap to grid\" function to ease lining devices up. You can manually drag devices to arrange them as you prefer.")
                                 .font(.body)
                         }
                         .foregroundStyle(.secondary)

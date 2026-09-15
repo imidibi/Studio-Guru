@@ -459,8 +459,124 @@ final class ConnectionsStore: ObservableObject {
         bundlesByStudio[studioId] = bundles
     }
     
+    /// One-time migration: collapse the legacy "Dante In (Ethernet)" / "Dante Out (Ethernet)"
+    /// port pair into a single bidirectional "Dante (Ethernet)" port and re-point existing
+    /// edges so users' documented wiring survives. Idempotent; must run BEFORE orphan cleanup,
+    /// which would otherwise delete edges referencing the removed legacy ports.
+    /// See docs/dante-bidirectional-connections.md.
+    func migrateLegacyDantePorts(studio: Studio) {
+        let studioId = studio.id
+        var portIdMap: [UUID: UUID] = [:]      // legacy Dante portId -> new portId
+        var channelIdMap: [UUID: UUID] = [:]   // legacy channelId -> new channelId (matched by index)
+        var newDantePortIds: Set<UUID> = []
+
+        for device in studio.devices ?? [] {
+            let legacyPorts = (device.ports ?? []).filter {
+                $0.type == .ethernet
+                    && ($0.name == "Dante In (Ethernet)" || $0.name == "Dante Out (Ethernet)")
+            }
+            guard !legacyPorts.isEmpty else { continue }
+
+            // Reuse the new port if a previous partial migration already created it
+            let newPort: Port
+            if let existing = (device.ports ?? []).first(where: {
+                $0.type == .ethernet && $0.name == "Dante (Ethernet)"
+            }) {
+                newPort = existing
+            } else {
+                let created = Port(name: "Dante (Ethernet)", type: .ethernet, direction: .bidirectional)
+                created.channels = (1...64).map {
+                    Channel(index: $0, nameLong: "Dante (Ethernet) \($0)", nameShort: "\($0)")
+                }
+                device.ports?.append(created)
+                newPort = created
+            }
+            newDantePortIds.insert(newPort.id)
+
+            let newChannelsByIndex = Dictionary(
+                (newPort.channels ?? []).map { ($0.index, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            for legacy in legacyPorts {
+                portIdMap[legacy.id] = newPort.id
+                for ch in legacy.channels ?? [] {
+                    if let newCh = newChannelsByIndex[ch.index] {
+                        channelIdMap[ch.id] = newCh.id
+                    }
+                }
+            }
+
+            device.ports?.removeAll(where: { p in legacyPorts.contains(where: { $0.id == p.id }) })
+            for legacy in legacyPorts {
+                modelContext?.delete(legacy)
+            }
+            device.markAsModified()
+        }
+
+        guard !portIdMap.isEmpty else { return }
+
+        // Re-point edges from legacy ports to the new single port, collapsing duplicate
+        // edges that described the two directions of the same physical link.
+        if var studioBundles = bundlesByStudio[studioId] {
+            var storeChanged = false
+            for (key, var bundle) in studioBundles {
+                var changed = false
+                var seenDantePairs = Set<String>()
+                var newEdges: [ConnectionEdge] = []
+                for var edge in bundle.edges {
+                    if let np = portIdMap[edge.from.portId] {
+                        edge.from.portId = np
+                        if let nc = channelIdMap[edge.from.channelId] { edge.from.channelId = nc }
+                        changed = true
+                    }
+                    if let np = portIdMap[edge.to.portId] {
+                        edge.to.portId = np
+                        if let nc = channelIdMap[edge.to.channelId] { edge.to.channelId = nc }
+                        changed = true
+                    }
+
+                    // Collapse only edges involving a migrated Dante port: the same endpoint
+                    // pair (ignoring direction) describes one physical link.
+                    let involvesDante = newDantePortIds.contains(edge.from.portId)
+                        || newDantePortIds.contains(edge.to.portId)
+                    if involvesDante {
+                        let a = "\(edge.from.deviceId)|\(edge.from.portId)|\(edge.from.channelId)"
+                        let b = "\(edge.to.deviceId)|\(edge.to.portId)|\(edge.to.channelId)"
+                        let pairKey = a < b ? "\(a)||\(b)" : "\(b)||\(a)"
+                        if seenDantePairs.contains(pairKey) {
+                            changed = true
+                            continue
+                        }
+                        seenDantePairs.insert(pairKey)
+                    }
+                    newEdges.append(edge)
+                }
+                if changed {
+                    bundle.edges = newEdges
+                    studioBundles[key] = bundle
+                    storeChanged = true
+                }
+            }
+            if storeChanged {
+                bundlesByStudio[studioId] = studioBundles
+                persist(studioId: studioId)
+            }
+        }
+
+        studio.markAsModified()
+        try? modelContext?.save()
+
+        #if DEBUG
+        print("🔀 Dante migration: collapsed \(portIdMap.count) legacy port(s) into single bidirectional port(s)")
+        #endif
+    }
+
     /// Clean up orphaned connections that reference non-existent devices, ports, or channels
     func cleanupOrphanedConnections(studio: Studio) {
+        // Migrate legacy Dante In/Out ports first so their edges are re-pointed
+        // rather than deleted as orphans below.
+        migrateLegacyDantePorts(studio: studio)
+
         let studioId = studio.id
         guard var studioBundles = bundlesByStudio[studioId] else { return }
         
@@ -1356,7 +1472,8 @@ struct ConnectionsDialogView: View {
             }
         }
 
-        // --- Dante: only Dante (Ethernet) <-> Computer Ethernet ---
+        // --- Dante: single bidirectional Ethernet link. Valid peers are a computer
+        // Ethernet interface or another device's Dante port (console <-> stagebox etc.). ---
         func isDanteDevicePort(_ r: ResolvedEndpoint) -> Bool {
             if case let .devicePort(type: t, portName: n) = r.kind {
                 return t == .ethernet && n.localizedCaseInsensitiveContains("dante")
@@ -1371,9 +1488,23 @@ struct ConnectionsDialogView: View {
         let outIsDante = isDanteDevicePort(outR)
         let inIsDante = isDanteDevicePort(inR)
         if outIsDante || inIsDante {
-            let ok = (outIsDante && isComputerEthernet(inR)) || (inIsDante && isComputerEthernet(outR))
+            let ok = (outIsDante && inIsDante)
+                || (outIsDante && isComputerEthernet(inR))
+                || (inIsDante && isComputerEthernet(outR))
             if !ok {
-                return "Dante connections must connect between a Dante (Ethernet) port and a computer Ethernet interface."
+                return "Dante connections must run between a Dante (Ethernet) port and either a computer Ethernet interface or another device's Dante port."
+            }
+
+            // Capability check: sourcing audio requires Dante transmit (digital output),
+            // receiving audio requires Dante receive (digital input).
+            func device(for endpoint: IOEndpointRef) -> DeviceInstance? {
+                studio.devices?.first(where: { $0.id == endpoint.deviceId })
+            }
+            if outIsDante, let d = device(for: output), !d.digitalOutputs.contains(.dante) {
+                return "This device's Dante port is receive-only — it has no Dante transmit (output) channels."
+            }
+            if inIsDante, let d = device(for: input), !d.digitalInputs.contains(.dante) {
+                return "This device's Dante port is transmit-only — it has no Dante receive (input) channels."
             }
         }
 
@@ -1407,8 +1538,24 @@ fileprivate struct EndpointsColumnView: View {
             if let device {
                 let ports = (device.ports ?? [])
                     .filter { port in
-                        (direction == .output && port.directionRaw == "output") ||
-                        (direction == .input && port.directionRaw == "input")
+                        switch port.directionRaw {
+                        case "output":
+                            return direction == .output
+                        case "input":
+                            return direction == .input
+                        case "bidirectional":
+                            // One physical port shown in both columns. For Dante, gate each
+                            // column on the device's capability: digital output = Tx (source),
+                            // digital input = Rx (destination).
+                            if port.name.localizedCaseInsensitiveContains("dante") {
+                                return direction == .output
+                                    ? device.digitalOutputs.contains(.dante)
+                                    : device.digitalInputs.contains(.dante)
+                            }
+                            return true
+                        default:
+                            return false
+                        }
                     }
                     .sorted(by: { connectionPortSortKey($0.name) < connectionPortSortKey($1.name) })
 

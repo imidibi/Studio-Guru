@@ -2177,6 +2177,10 @@ struct StudioCanvasView: View {
         expectedPortCount += device.cvOutputPortsCount
         expectedPortCount += device.digitalInputs.count
         expectedPortCount += device.digitalOutputs.count
+        // Dante yields a single bidirectional port even when enabled in both directions
+        if device.digitalInputs.contains(.dante) && device.digitalOutputs.contains(.dante) {
+            expectedPortCount -= 1
+        }
         
         // Add computer interface ports
         for (_, count) in device.computerInterfaceCounts {
@@ -2363,15 +2367,8 @@ struct StudioCanvasView: View {
                     )
                 }
             case .dante:
-                // Represent Dante as an Ethernet-based digital input (one logical link = 64ch).
-                ports.append(
-                    digitalPort(
-                        type: .ethernet,
-                        name: "Dante In (Ethernet)",
-                        direction: .input,
-                        channels: danteChannelsPerLink
-                    )
-                )
+                // Dante is a single bidirectional Ethernet link; emitted once after both loops.
+                break
             case .spdif:
                 let p = Port(name: "Digital In (S/PDIF)", type: .spdifIn, direction: .input)
                 p.channels = [
@@ -2442,14 +2439,8 @@ struct StudioCanvasView: View {
                     )
                 }
             case .dante:
-                ports.append(
-                    digitalPort(
-                        type: .ethernet,
-                        name: "Dante Out (Ethernet)",
-                        direction: .output,
-                        channels: danteChannelsPerLink
-                    )
-                )
+                // Dante is a single bidirectional Ethernet link; emitted once after both loops.
+                break
             case .spdif:
                 let p = Port(name: "Digital Out (S/PDIF)", type: .spdifOut, direction: .output)
                 p.channels = [
@@ -2489,6 +2480,21 @@ struct StudioCanvasView: View {
                     )
                 )
             }
+        }
+
+        // Dante: one physical Ethernet link carries audio in both directions, so a device
+        // gets exactly ONE bidirectional port whether it transmits (digital output = Tx),
+        // receives (digital input = Rx), or both. Tx/Rx capability gating happens in the
+        // connections UI and edge validation, not here.
+        if digitalInputs.contains(.dante) || digitalOutputs.contains(.dante) {
+            ports.append(
+                digitalPort(
+                    type: .ethernet,
+                    name: "Dante (Ethernet)",
+                    direction: .bidirectional,
+                    channels: danteChannelsPerLink
+                )
+            )
         }
 
         // Computer Interfaces (USB / Thunderbolt / Ethernet, etc.)
@@ -4143,6 +4149,14 @@ private func ioSummary(from ports: [Port]?) -> String {
     let adatout = chCount(.adatOut, .output)
     let madiin = chCount(.madiIn, .input)
     let madiout = chCount(.madiOut, .output)
+
+    // Dante: a single bidirectional Ethernet port; split in/out by device capability
+    let dantePort = (ports ?? []).first {
+        $0.type == .ethernet && $0.name.localizedCaseInsensitiveContains("dante")
+    }
+    let danteCh = dantePort?.channels?.count ?? 0
+    let danteIn = (dantePort?.device?.digitalInputs.contains(.dante) ?? true) ? danteCh : 0
+    let danteOut = (dantePort?.device?.digitalOutputs.contains(.dante) ?? true) ? danteCh : 0
     let spdifin = chCount(.spdifIn, .input)
     let spdifout = chCount(.spdifOut, .output)
     let midiin = chCount(.midiIn, .input)
@@ -4154,6 +4168,7 @@ private func ioSummary(from ports: [Port]?) -> String {
     if ain > 0 || aout > 0 { parts.append("Analog \(ain) in / \(aout) out") }
     if adatin > 0 || adatout > 0 { parts.append("ADAT \(adatin)/\(adatout)") }
     if madiin > 0 || madiout > 0 { parts.append("MADI \(madiin)/\(madiout)") }
+    if danteIn > 0 || danteOut > 0 { parts.append("Dante \(danteIn)/\(danteOut)") }
     if spdifin > 0 || spdifout > 0 {
         parts.append("S/PDIF \(spdifin)/\(spdifout)")
     }
@@ -7986,14 +8001,12 @@ private struct DeviceExplosionDetailView: View {
     let device: DeviceInstance
     let connectionsStore: ConnectionsStore
 
-    private func endpoint(for port: Port, channel: Channel) -> IOEndpointRef {
-        let dir: IOEndpointRef.Direction =
-            (port.direction == .input) ? .input : .output
-        return IOEndpointRef(
+    private func endpoint(for port: Port, channel: Channel, as direction: IOEndpointRef.Direction) -> IOEndpointRef {
+        IOEndpointRef(
             deviceId: device.id,
             portId: port.id,
             channelId: channel.id,
-            direction: dir
+            direction: direction
         )
     }
 
@@ -8034,15 +8047,27 @@ private struct DeviceExplosionDetailView: View {
         return false
     }
 
+    /// Bidirectional ports (currently Dante) belong in both lists, gated by the
+    /// device's capability: digital input = Rx (Inputs list), digital output = Tx (Outputs list).
+    private func bidirectionalPortAppears(_ p: Port, asInput: Bool) -> Bool {
+        guard p.direction == .bidirectional else { return false }
+        if p.name.localizedCaseInsensitiveContains("dante") {
+            return asInput
+                ? device.digitalInputs.contains(.dante)
+                : device.digitalOutputs.contains(.dante)
+        }
+        return true
+    }
+
     private var inputPorts: [Port] {
         (device.ports ?? [])
-            .filter { $0.direction == .input && !isComputerInterfacePort($0) }
+            .filter { ($0.direction == .input || bidirectionalPortAppears($0, asInput: true)) && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
 
     private var outputPorts: [Port] {
         (device.ports ?? [])
-            .filter { $0.direction == .output && !isComputerInterfacePort($0) }
+            .filter { ($0.direction == .output || bidirectionalPortAppears($0, asInput: false)) && !isComputerInterfacePort($0) }
             .sorted(by: portSort)
     }
 
@@ -8120,11 +8145,15 @@ private struct DeviceExplosionDetailView: View {
                 Text(device.nickname)
                     .font(.title2)
                     .bold()
-                let used = (inputPorts + outputPorts).flatMap { p in
-                    (p.channels ?? []).map { endpoint(for: p, channel: $0) }
+                let inputEndpoints = inputPorts.flatMap { p in
+                    (p.channels ?? []).map { endpoint(for: p, channel: $0, as: .input) }
                 }
-                .filter { !isOpen($0) }
-                .count
+                let outputEndpoints = outputPorts.flatMap { p in
+                    (p.channels ?? []).map { endpoint(for: p, channel: $0, as: .output) }
+                }
+                let used = (inputEndpoints + outputEndpoints)
+                    .filter { !isOpen($0) }
+                    .count
                 let total = (inputPorts + outputPorts).reduce(0) {
                     $0 + ($1.channels?.count ?? 0)
                 }
@@ -8181,7 +8210,7 @@ private struct DeviceExplosionDetailView: View {
                         (p.channels ?? []).sorted(by: { $0.index < $1.index }),
                         id: \.id
                     ) { ch in
-                        let ep = endpoint(for: p, channel: ch)
+                        let ep = endpoint(for: p, channel: ch, as: .input)
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(rowLabel(port: p, channel: ch))
@@ -8213,7 +8242,7 @@ private struct DeviceExplosionDetailView: View {
                         (p.channels ?? []).sorted(by: { $0.index < $1.index }),
                         id: \.id
                     ) { ch in
-                        let ep = endpoint(for: p, channel: ch)
+                        let ep = endpoint(for: p, channel: ch, as: .output)
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(rowLabel(port: p, channel: ch))
@@ -8494,6 +8523,45 @@ private struct ConnectionMatrixView: View {
         }.sorted { $0.nickname.localizedCaseInsensitiveCompare($1.nickname) == .orderedAscending }
     }
     
+    /// A Dante edge represents one bidirectional cable. Audio also flows opposite to the
+    /// edge's stored direction when the far side can transmit and the near side can receive
+    /// (computer Ethernet interfaces always can; Dante ports per device Tx/Rx capability).
+    private func danteReverseCapable(_ edge: ConnectionEdge) -> Bool {
+        func endpointInfo(_ ep: IOEndpointRef) -> (isDante: Bool, canTx: Bool, canRx: Bool)? {
+            guard let device = (studio.devices ?? []).first(where: { $0.id == ep.deviceId }) else {
+                return nil
+            }
+            if let port = device.ports?.first(where: { $0.id == ep.portId }) {
+                let isDante = port.type == .ethernet
+                    && port.name.localizedCaseInsensitiveContains("dante")
+                guard isDante else { return (false, false, false) }
+                return (true,
+                        device.digitalOutputs.contains(.dante),
+                        device.digitalInputs.contains(.dante))
+            }
+            if !device.computerInterfaceCounts.isEmpty {
+                // Computer interface virtual endpoint: bidirectional
+                return (false, true, true)
+            }
+            return nil
+        }
+
+        guard let fromInfo = endpointInfo(edge.from),
+              let toInfo = endpointInfo(edge.to),
+              fromInfo.isDante || toInfo.isDante else { return false }
+        return toInfo.canTx && fromInfo.canRx
+    }
+
+    private func reversedEdge(_ edge: ConnectionEdge) -> ConnectionEdge {
+        ConnectionEdge(
+            id: edge.id,
+            from: edge.to,
+            to: edge.from,
+            fromName: edge.toName,
+            toName: edge.fromName
+        )
+    }
+
     // Build a map of device pairs to their connection info
     private var connectionMap: [String: ConnectionInfo] {
         var map: [String: ConnectionInfo] = [:]
@@ -8508,10 +8576,20 @@ private struct ConnectionMatrixView: View {
             var reverseEdges: [ConnectionEdge] = []
             
             for edge in bundle.edges {
-                if edge.from.deviceId == link.fromDeviceId {
+                let isForward = edge.from.deviceId == link.fromDeviceId
+                if isForward {
                     forwardEdges.append(edge)
                 } else {
                     reverseEdges.append(edge)
+                }
+                // Dante links are one bidirectional cable: mirror the edge into the
+                // opposite direction when both ends support the reverse flow.
+                if danteReverseCapable(edge) {
+                    if isForward {
+                        reverseEdges.append(reversedEdge(edge))
+                    } else {
+                        forwardEdges.append(reversedEdge(edge))
+                    }
                 }
             }
             
@@ -8827,6 +8905,13 @@ private struct ConnectionMatrixView: View {
         let madiOut = device.madiOutputPortsCount * 64
         if madiIn > 0 || madiOut > 0 {
             parts.append("MADI \(madiIn)/\(madiOut)")
+        }
+        
+        // Dante: single bidirectional link, 64 channels per enabled direction (in = Rx, out = Tx)
+        let danteIn = device.digitalInputs.contains(.dante) ? 64 : 0
+        let danteOut = device.digitalOutputs.contains(.dante) ? 64 : 0
+        if danteIn > 0 || danteOut > 0 {
+            parts.append("Dante \(danteIn)/\(danteOut)")
         }
         
         // S/PDIF and AES/EBU

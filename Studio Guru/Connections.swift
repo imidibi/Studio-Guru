@@ -121,10 +121,12 @@ final class ConnectionsStore: ObservableObject {
 
     init() {}
     
-    func setModelContext(_ context: ModelContext) {
+    /// - Parameter migrateLegacy: Pass false for temporary stores (such as the example studio)
+    ///   so legacy UserDefaults data is only ever migrated into the user's real store.
+    func setModelContext(_ context: ModelContext, migrateLegacy: Bool = true) {
         self.modelContext = context
         // Migrate UserDefaults data to SwiftData if needed
-        if !migrationCompleted {
+        if migrateLegacy && !migrationCompleted {
             migrateFromUserDefaults()
             migrationCompleted = true
         }

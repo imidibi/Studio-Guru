@@ -10,6 +10,9 @@ import SwiftData
 import Network
 
 struct SettingsView: View {
+    #if os(macOS)
+    @AppStorage(TouchModeSetting.storageKey) private var touchModeSetting: TouchModeSetting = .auto
+    #endif
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var storeManager: StoreManager
@@ -577,6 +580,21 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 }
+
+                #if os(macOS)
+                Section {
+                    Picker("Touch Mode", selection: $touchModeSetting) {
+                        ForEach(TouchModeSetting.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    Text("Touch mode makes Studio Guru work as it does on iPad: larger controls, swipe actions, and finger annotation. Automatic turns it on when a touch screen is detected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Touch")
+                }
+                #endif
 
                 if showDebugSection {
                     debugTestingSection

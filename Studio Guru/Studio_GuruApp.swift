@@ -24,17 +24,7 @@ struct Studio_GuruApp: App {
 
     var sharedModelContainer: ModelContainer = {
         // SwiftData schema - migration happens automatically when models change
-        let schema = Schema([
-            Studio.self,
-            DeviceInstance.self,
-            Port.self,
-            Channel.self,
-            Connection.self,
-            DocLink.self,
-            ConnectionBundleModel.self,
-            ConnectionEdgeModel.self,
-            EndpointNameModel.self
-        ])
+        let schema = AppSchema.schema
         
         // IMPORTANT: Use SwiftData's automatic CloudKit sync
         // This is Apple's recommended approach and handles:
@@ -188,6 +178,7 @@ struct Studio_GuruApp: App {
         WindowGroup {
             StudioCanvasView()
                 .environmentObject(storeManager)
+                .touchModeAware()
                 .onAppear {
                     // Start monitoring CloudKit sync events
                     setupCloudKitMonitoring()
@@ -232,7 +223,23 @@ struct Studio_GuruApp: App {
                 }
                 .keyboardShortcut("?", modifiers: .command)
             }
+            #if os(macOS)
+            ExampleStudioCommands()
+            #endif
         }
+
+        #if os(macOS)
+        // Example studios open in their own window with a temporary store
+        WindowGroup("Example Studio", id: ExampleStudioHost.windowId, for: ExampleStudio.self) { $example in
+            if let example {
+                ExampleStudioHost(example: example)
+                    .environmentObject(storeManager)
+                    .touchModeAware()
+            }
+        }
+        .modelContainer(sharedModelContainer)
+        .defaultSize(width: 1100, height: 760)
+        #endif
     }
     
     /// Log messages to a support file that users can share for troubleshooting

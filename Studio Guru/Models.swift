@@ -110,6 +110,23 @@ enum SampleRate: Int, Codable, CaseIterable {
     }
 }
 
+// MARK: - Schema
+
+enum AppSchema {
+    /// Every SwiftData model in the app. Shared by the main store and the in-memory example store.
+    static let schema = Schema([
+        Studio.self,
+        DeviceInstance.self,
+        Port.self,
+        Channel.self,
+        Connection.self,
+        DocLink.self,
+        ConnectionBundleModel.self,
+        ConnectionEdgeModel.self,
+        EndpointNameModel.self
+    ])
+}
+
 // MARK: - Studio
 
 @Model

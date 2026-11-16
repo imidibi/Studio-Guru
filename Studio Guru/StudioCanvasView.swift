@@ -51,6 +51,25 @@ struct StudioCanvasView: View {
 
     @State private var selectedStudioId: UUID?
 
+    /// When set, this view hosts a temporary in-memory copy of an example studio (see
+    /// `ExampleStudioHost`). Nothing is backed up, synced, or limited by the free tier.
+    private let example: ExampleStudio?
+    private var isExampleMode: Bool { example != nil }
+    @State private var didLoadExample: Bool = false
+    @Environment(\.isTouchMode) private var isTouchMode
+    #if os(macOS)
+    @State private var annotationTools = MacAnnotationTools()
+    #endif
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #else
+    @State private var exampleToPresent: ExampleStudio?
+    #endif
+
+    init(example: ExampleStudio? = nil) {
+        self.example = example
+    }
+
     // Paywall
     @State private var isShowingPaywall: Bool = false
     @State private var paywallReason: PaywallReason = .general
@@ -209,27 +228,44 @@ struct StudioCanvasView: View {
         mainContent
     }
     
-    private var mainContent: some View {
-        NavigationSplitView {
-            StudiosList(
-                studios: studiosSortedByName,
-                selectedStudioId: $selectedStudioId,
-                onDuplicate: { duplicateStudio(from: $0) },
-                onExport: { exportStudio($0) },
-                onRequestDelete: { studio in
-                    // Check if this is the last regular studio
-                    let regularStudios = studios.filter { !$0.isSystemStudio }
-                    if regularStudios.count <= 1 {
-                        isShowingCannotDeleteLastStudio = true
-                    } else {
-                        studioIdPendingDelete = studio.id
-                        isShowingDeleteStudioConfirm = true
+    @ViewBuilder
+    private var rootLayout: some View {
+        if isExampleMode {
+            // The example is a single temporary studio, so there is no studio list
+            NavigationStack {
+                detail
+            }
+        } else {
+            NavigationSplitView {
+                StudiosList(
+                    studios: studiosSortedByName,
+                    selectedStudioId: $selectedStudioId,
+                    onDuplicate: { duplicateStudio(from: $0) },
+                    onExport: { exportStudio($0) },
+                    onRequestDelete: { studio in
+                        // Check if this is the last regular studio
+                        let regularStudios = studios.filter { !$0.isSystemStudio }
+                        if regularStudios.count <= 1 {
+                            isShowingCannotDeleteLastStudio = true
+                        } else {
+                            studioIdPendingDelete = studio.id
+                            isShowingDeleteStudioConfirm = true
+                        }
                     }
-                }
-            )
-        } detail: {
-            detail
+                )
+            } detail: {
+                detail
+            }
         }
+    }
+
+    private var mainContent: some View {
+        rootLayout
+        #if os(iOS)
+        .sheet(item: $exampleToPresent) { example in
+            ExampleStudioHost(example: example)
+        }
+        #endif
         .alert("New Studio", isPresented: $isShowingNewStudioPrompt) {
             TextField("Studio Name", text: $newStudioNameDraft)
             Button("Create") {
@@ -421,7 +457,13 @@ struct StudioCanvasView: View {
             }
             
             // Set up model context for ConnectionsStore (enables iCloud sync)
-            connectionsStore.setModelContext(modelContext)
+            connectionsStore.setModelContext(modelContext, migrateLegacy: !isExampleMode)
+
+            // Example window: populate the temporary store once
+            if let example, !didLoadExample {
+                didLoadExample = true
+                loadExample(example)
+            }
             
             // Load existing connection bundles from SwiftData for all studios
             for studio in studios {
@@ -439,15 +481,16 @@ struct StudioCanvasView: View {
             
             // Initialize Gear Locker for Pro users ONLY if they have at least one regular studio
             // This prevents new users from being stuck in an empty Gear Locker
-            if storeManager.isPro {
+            if storeManager.isPro && !isExampleMode {
                 let regularStudios = studios.filter { !$0.isSystemStudio }
                 if !regularStudios.isEmpty {
                     StudioSeed.ensureGearLockerExists(modelContext: modelContext, studios: studios)
                 }
             }
             
-            // Create automatic backup if needed
+            // Create automatic backup if needed (never for the temporary example store)
             Task {
+                guard !isExampleMode else { return }
                 let backupManager = BackupManager()
                 
                 // Check if this is first launch of new version - create backup for safety
@@ -564,6 +607,14 @@ struct StudioCanvasView: View {
         .onChange(of: studios.count) { oldCount, newCount in
             // When studios array count changes, check for duplicate Gear Lockers
             checkAndMergeDuplicateGearLockers()
+
+            // A studio added from elsewhere (e.g. "Use as My Studio" in the example window)
+            // should be shown rather than leaving the user on the welcome screen
+            if selectedStudioId == nil,
+                let first = studios.first(where: { !$0.isSystemStudio })
+            {
+                selectedStudioId = first.id
+            }
         }
         .onChange(of: studios.map { $0.id }) { oldIds, newIds in
             // When studio IDs change (new studio synced), check for duplicate Gear Lockers
@@ -593,7 +644,7 @@ struct StudioCanvasView: View {
                 noStudioSelectedView
             }
         }
-        .navigationTitle(currentStudio?.isSystemStudio == true && currentStudio?.systemStudioType == "gear_locker" ? "Studio Guru - Gear Locker" : "Studio Guru")
+        .navigationTitle(isExampleMode ? "Studio Guru - Example" : currentStudio?.isSystemStudio == true && currentStudio?.systemStudioType == "gear_locker" ? "Studio Guru - Gear Locker" : "Studio Guru")
         .toolbar {
             // Conditional toolbar based on whether viewing Gear Locker or regular studio
             if let studio = currentStudio, studio.isSystemStudio && studio.systemStudioType == "gear_locker" {
@@ -608,7 +659,8 @@ struct StudioCanvasView: View {
                 }
             } else {
                 // REGULAR STUDIO TOOLBAR
-                // Left side: Studio Actions
+                // Left side: Studio Actions (hidden in the example window)
+                if !isExampleMode {
                 ToolbarItem(placement: .navigation) {
                     Button {
                         // Check studio limit for free tier
@@ -707,6 +759,7 @@ struct StudioCanvasView: View {
                         .help("Import a studio file")
                     }
                 }
+                }
                 
                 if let studio = currentStudio {
 
@@ -756,7 +809,7 @@ struct StudioCanvasView: View {
                         .help("Grid and layout settings")
                     }
                     
-                    #if os(iOS)
+                    if isTouchMode {
                     ToolbarItem(placement: .navigation) {
                         Button {
                             isDrawingMode.toggle()
@@ -769,7 +822,7 @@ struct StudioCanvasView: View {
                         .help(isDrawingMode ? "Exit annotation mode" : "Draw annotations on canvas")
                         .keyboardShortcut("d", modifiers: [.command])
                     }
-                    #endif
+                    }
                     
                     ToolbarItem(placement: .navigation) {
                         Button {
@@ -1114,6 +1167,15 @@ struct StudioCanvasView: View {
                     canvasSize: $canvasSize
                 )
                 .environmentObject(selectionState)
+                #if os(macOS)
+                .environment(annotationTools)
+                .overlay(alignment: .top) {
+                    // Finger drawing on touch-enabled Macs
+                    if isDrawingMode && isTouchMode {
+                        MacAnnotationPalette(tools: annotationTools) { isDrawingMode = false }
+                    }
+                }
+                #endif
             }
         }
     }
@@ -1280,18 +1342,56 @@ struct StudioCanvasView: View {
         }
     }
 
+    @ViewBuilder
     private var noStudioSelectedView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.grid.3x3")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text("No Studio Selected")
-                .font(.title3)
-            Text("Create or select a studio.")
-                .foregroundStyle(.secondary)
+        if isExampleMode {
+            // The example studio is being loaded into its temporary store
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if studios.contains(where: { !$0.isSystemStudio }) {
+            VStack(spacing: 12) {
+                Image(systemName: "square.grid.3x3")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("No Studio Selected")
+                    .font(.title3)
+                Text("Create or select a studio.")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
+        } else {
+            WelcomeView(
+                onSelectExample: { openExample($0) },
+                onStartBlank: {
+                    newStudioNameDraft = "My Studio"
+                    isShowingNewStudioPrompt = true
+                }
+            )
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+    }
+
+    /// Opens an example studio in its own window (a sheet on iOS).
+    private func openExample(_ example: ExampleStudio) {
+        #if os(macOS)
+        openWindow(id: ExampleStudioHost.windowId, value: example)
+        #else
+        exampleToPresent = example
+        #endif
+    }
+
+    /// Populates the temporary example store with the bundled example studio.
+    private func loadExample(_ example: ExampleStudio) {
+        do {
+            completeImport(
+                exportable: try example.load(),
+                customName: example.studioName,
+                showResult: false
+            )
+        } catch {
+            exportResultMessage = "Could not load example: \(error.localizedDescription)"
+            isShowingExportResult = true
+        }
     }
 
     // MARK: - View Helpers for Sheet Content
@@ -1373,7 +1473,7 @@ struct StudioCanvasView: View {
         // Check device limit for free tier
         if let studio = currentStudio {
             let deviceCount = studio.devices?.count ?? 0
-            if !storeManager.canAddDevice(currentCount: deviceCount) {
+            if !isExampleMode && !storeManager.canAddDevice(currentCount: deviceCount) {
                 paywallReason = .deviceLimit
                 isShowingPaywall = true
                 return
@@ -1846,9 +1946,14 @@ struct StudioCanvasView: View {
         device.currentEstimatedValue = draftCurrentEstimatedValue
         device.assetNotes = draftAssetNotes.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Analog channel-count edits are applied in place so existing channels keep their
+        // UUIDs (and their connections). Anything else that changed triggers a rebuild below.
+        let resizedAnalogChannels = resizeAnalogPortsInPlace(device: device)
+
         // Only rebuild ports if the port configuration has actually changed
         // This preserves existing port/channel UUIDs and prevents orphaning connections
-        if portConfigurationChanged(device: device) {
+        let rebuiltPorts = portConfigurationChanged(device: device)
+        if rebuiltPorts {
             device.ports = buildPorts(
                 audioInputs: device.audioInputsCount,
                 audioOutputs: device.audioOutputsCount,
@@ -1865,6 +1970,12 @@ struct StudioCanvasView: View {
                 computerInterfaceCounts: device.computerInterfaceCounts,
                 sampleRate: draftSampleRate
             )
+        }
+
+        // Drop connections that point at channels/ports that no longer exist so the canvas
+        // and connections editor reflect the new I/O immediately.
+        if rebuiltPorts || resizedAnalogChannels {
+            connectionsStore.cleanupOrphanedConnections(studio: targetStudio)
         }
         
         // Handle manual PDFs if any were selected (supports multiple)
@@ -2153,21 +2264,52 @@ struct StudioCanvasView: View {
         return name
     }
     
+    /// Resizes the analog in/out ports of an existing device to match its channel counts,
+    /// keeping the UUIDs of channels that survive. Ports that need to be added or removed
+    /// are left for `portConfigurationChanged` / `buildPorts` to handle.
+    /// - Returns: true if any channels were added or removed.
+    private func resizeAnalogPortsInPlace(device: DeviceInstance) -> Bool {
+        var changed = false
+
+        func resize(_ type: PortType, to count: Int, longPrefix: String, shortPrefix: String) {
+            guard count > 0,
+                let port = device.ports?.first(where: { $0.type == type })
+            else { return }
+
+            var channels = (port.channels ?? []).sorted { $0.index < $1.index }
+            guard channels.count != count else { return }
+
+            if channels.count > count {
+                for channel in channels[count...] { modelContext.delete(channel) }
+                channels.removeSubrange(count...)
+            } else {
+                for i in (channels.count + 1)...count {
+                    channels.append(
+                        Channel(
+                            index: i,
+                            nameLong: "\(longPrefix) \(i)",
+                            nameShort: "\(shortPrefix)\(i)"
+                        )
+                    )
+                }
+            }
+            port.channels = channels
+            changed = true
+        }
+
+        resize(.analogIn, to: device.audioInputsCount, longPrefix: "Analog In", shortPrefix: "In")
+        resize(.analogOut, to: device.audioOutputsCount, longPrefix: "Analog Out", shortPrefix: "Out")
+        return changed
+    }
+
     /// Check if any port configuration has changed that would require rebuilding ports
     private func portConfigurationChanged(device: DeviceInstance) -> Bool {
         // If device has no ports yet, we need to build them
         guard let existingPorts = device.ports, !existingPorts.isEmpty else {
             return true
         }
-        
-        // Compare current device configuration with what the ports represent
-        // We need to check if counts or formats have changed
-        
-        // For simplicity, we'll compare the total number of ports and channels
-        // A more sophisticated approach would compare each port type individually
-        let currentPortCount = existingPorts.count
-        
-        // Calculate expected port count based on current configuration
+
+        // Expected port count, mirroring what `buildPorts` emits
         var expectedPortCount = 0
         if device.audioInputsCount > 0 { expectedPortCount += 1 }
         if device.audioOutputsCount > 0 { expectedPortCount += 1 }
@@ -2175,30 +2317,59 @@ struct StudioCanvasView: View {
         expectedPortCount += device.midiOutputPortsCount
         expectedPortCount += device.cvInputPortsCount
         expectedPortCount += device.cvOutputPortsCount
-        expectedPortCount += device.digitalInputs.count
-        expectedPortCount += device.digitalOutputs.count
-        // Dante yields a single bidirectional port even when enabled in both directions
-        if device.digitalInputs.contains(.dante) && device.digitalOutputs.contains(.dante) {
-            expectedPortCount -= 1
+
+        func digitalPortCount(_ formats: [DigitalFormat], adat: Int, madi: Int) -> Int {
+            formats.reduce(0) { total, format in
+                switch format {
+                case .adat: return total + max(1, adat)
+                case .madi: return total + max(1, madi)
+                case .dante: return total  // Counted once below
+                default: return total + 1
+                }
+            }
         }
-        
+        expectedPortCount += digitalPortCount(
+            device.digitalInputs,
+            adat: device.adatInputPortsCount,
+            madi: device.madiInputPortsCount
+        )
+        expectedPortCount += digitalPortCount(
+            device.digitalOutputs,
+            adat: device.adatOutputPortsCount,
+            madi: device.madiOutputPortsCount
+        )
+        // Dante yields a single bidirectional port however many directions are enabled
+        if device.digitalInputs.contains(.dante) || device.digitalOutputs.contains(.dante) {
+            expectedPortCount += 1
+        }
+
         // Add computer interface ports
         for (_, count) in device.computerInterfaceCounts {
             expectedPortCount += count
         }
-        
+
         // If port counts don't match, configuration has changed
-        if currentPortCount != expectedPortCount {
+        if existingPorts.count != expectedPortCount {
             return true
         }
-        
-        // Check if sample rate changed (affects ADAT/MADI channel counts)
-        let currentSampleRate = SampleRate(rawValue: device.sampleRateRaw) ?? .hz48000
-        if currentSampleRate != draftSampleRate {
-            return true
+
+        // ADAT/MADI channels per port depend on the sample rate. The device's own sample rate
+        // has already been updated by now, so compare against the ports' actual channels.
+        let srHz = sampleRateRawHz(draftSampleRate)
+        let adatChannels = srHz >= 88_200 ? 4 : 8
+        let madiChannels = srHz >= 176_400 ? 16 : (srHz >= 88_200 ? 32 : 64)
+        for port in existingPorts {
+            let count = port.channels?.count ?? 0
+            switch port.type {
+            case .adatIn, .adatOut:
+                if count != adatChannels { return true }
+            case .madiIn, .madiOut:
+                if count != madiChannels { return true }
+            default:
+                break
+            }
         }
-        
-        // If we get here, port configuration hasn't changed
+
         return false
     }
 
@@ -3827,268 +3998,28 @@ struct StudioCanvasView: View {
 
     private func completeImport(
         exportable: ExportableStudio,
-        customName: String? = nil
+        customName: String? = nil,
+        showResult: Bool = true
     ) {
         do {
             // Create new studio with unique name
             let proposedName = customName ?? exportable.name
             let uniqueName = makeUniqueStudioName(proposedName)
-            let studio = Studio(name: uniqueName)
-
-            // Import devices
-            var deviceMap: [UUID: DeviceInstance] = [:]
-            var portMap: [UUID: Port] = [:]
-            var channelMap: [UUID: Channel] = [:]
-            var computerPortIdMap: [UUID: UUID] = [:]  // old port UUID -> new port UUID
-            var computerChannelIdMap: [UUID: UUID] = [:]  // old channel UUID -> new channel UUID
-
-            for exportableDevice in exportable.devices {
-                let device = DeviceInstance(
-                    manufacturer: exportableDevice.manufacturer,
-                    model: exportableDevice.model,
-                    nickname: exportableDevice.nickname,
-                    category: DeviceCategory(
-                        rawValue: exportableDevice.categoryRaw
-                    ) ?? .other,
-                    serialNumber: exportableDevice.serialNumber,
-                    location: exportableDevice.location,
-                    audioInputsCount: exportableDevice.audioInputsCount,
-                    audioOutputsCount: exportableDevice.audioOutputsCount,
-                    adatInputPortsCount: exportableDevice.adatInputPortsCount,
-                    adatOutputPortsCount: exportableDevice.adatOutputPortsCount,
-                    madiInputPortsCount: exportableDevice.madiInputPortsCount,
-                    madiOutputPortsCount: exportableDevice.madiOutputPortsCount,
-                    midiInputPortsCount: exportableDevice.midiInputPortsCount,
-                    midiOutputPortsCount: exportableDevice.midiOutputPortsCount,
-                    cvInputPortsCount: exportableDevice.cvInputPortsCount,
-                    cvOutputPortsCount: exportableDevice.cvOutputPortsCount,
-                    ethernetPortsCount: exportableDevice.ethernetPortsCount,
-                    sampleRate: SampleRate(
-                        rawValue: exportableDevice.sampleRateRaw
-                    ) ?? .hz48000,
-                    digitalInputs: exportableDevice.digitalInputsRaw.compactMap
-                    { DigitalFormat(rawValue: $0) },
-                    digitalOutputs: exportableDevice.digitalOutputsRaw
-                        .compactMap { DigitalFormat(rawValue: $0) },
-                    computerInterfaces: exportableDevice.computerInterfacesRaw
-                        .compactMap { ComputerInterface(rawValue: $0) },
-                    posX: exportableDevice.posX,
-                    posY: exportableDevice.posY,
-                    scale: exportableDevice.scale,
-                    zIndex: exportableDevice.zIndex
-                )
-
-                device.supportPageURLString =
-                    exportableDevice.supportPageURLString
-                device.downloadsPageURLString =
-                    exportableDevice.downloadsPageURLString
-
-                // Import ports
-                for exportablePort in exportableDevice.ports {
-                    let port = Port(
-                        name: exportablePort.name,
-                        type: PortType(rawValue: exportablePort.typeRaw)
-                            ?? .usbAudio,
-                        direction: PortDirection(
-                            rawValue: exportablePort.directionRaw
-                        ) ?? .bidirectional
-                    )
-
-                    // Import channels
-                    for exportableChannel in exportablePort.channels {
-                        let channel = Channel(
-                            index: exportableChannel.index,
-                            nameLong: exportableChannel.nameLong,
-                            nameShort: exportableChannel.nameShort,
-                            signal: SignalType(
-                                rawValue: exportableChannel.signalRaw
-                            ) ?? .audio,
-                            grouping: ChannelGrouping(
-                                rawValue: exportableChannel.groupingRaw
-                            ) ?? .mono
-                        )
-                        if port.channels == nil {
-                            port.channels = []
-                        }
-                        port.channels?.append(channel)
-                        // Map old channel UUID to new channel
-                        channelMap[exportableChannel.id] = channel
-                    }
-
-                    if device.ports == nil {
-                        device.ports = []
-                    }
-                    device.ports?.append(port)
-                    // Map old port UUID to new port
-                    portMap[exportablePort.id] = port
-                }
-
-                // Import docs (manuals, etc.)
-                for exportableDoc in exportableDevice.docs {
-                    let docLink: DocLink
-                    if let bookmarkData = exportableDoc.localBookmarkData {
-                        docLink = DocLink(
-                            title: exportableDoc.title,
-                            kind: DocKind(rawValue: exportableDoc.kindRaw)
-                                ?? .other,
-                            bookmarkData: bookmarkData
-                        )
-                    } else if let urlString = exportableDoc.urlString,
-                        let url = URL(string: urlString)
-                    {
-                        docLink = DocLink(
-                            title: exportableDoc.title,
-                            kind: DocKind(rawValue: exportableDoc.kindRaw)
-                                ?? .other,
-                            url: url
-                        )
-                    } else {
-                        // Skip docs without valid URL or bookmark
-                        continue
-                    }
-                    if device.docs == nil {
-                        device.docs = []
-                    }
-                    device.docs?.append(docLink)
-                }
-
-                if studio.devices == nil {
-                    studio.devices = []
-                }
-                studio.devices?.append(device)
-                // Map old device UUID to new device
-                deviceMap[exportableDevice.id] = device
-                
-                // Map virtual computer interface ports/channels (stable UUIDs based on device ID)
-                // The exported connections reference the OLD device UUIDs in their stable UUID generation
-                // We need to map those to the NEW device's computer interface UUIDs
-                let oldDeviceId = exportableDevice.id
-                let newDeviceId = device.id
-                let computerInterfaces = exportableDevice.computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) }
-                let counts = device.computerInterfaceCounts
-                
-                for iface in computerInterfaces {
-                    let count = counts[iface] ?? 0
-                    if count == 0 { continue }
-                    
-                    for i in 1...count {
-                        // Generate UUIDs using OLD device ID (as they were in the export)
-                        let oldPortId = stableUUID("computerPort|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
-                        let oldChannelId = stableUUID("computerCh|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
-                        
-                        // Generate UUIDs using NEW device ID (as they will be in the import)
-                        let newPortId = stableUUID("computerPort|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
-                        let newChannelId = stableUUID("computerCh|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
-                        
-                        // Store the mapping
-                        computerPortIdMap[oldPortId] = newPortId
-                        computerChannelIdMap[oldChannelId] = newChannelId
-                    }
-                }
-            }
-
-            // Import connections with UUID remapping
-            for exportableConnection in exportable.connections {
-                // Look up the new device UUIDs
-                guard let fromDevice = deviceMap[exportableConnection.fromDeviceId],
-                      let toDevice = deviceMap[exportableConnection.toDeviceId] else {
-                    continue
-                }
-                
-                // Look up port and channel UUIDs (check regular ports first, then computer interface maps)
-                let fromPortId: UUID
-                let toPortId: UUID
-                let fromChannelId: UUID
-                let toChannelId: UUID
-                
-                // From port - check regular port first, then computer interface map
-                if let port = portMap[exportableConnection.fromPortId] {
-                    fromPortId = port.id
-                } else if let mappedPortId = computerPortIdMap[exportableConnection.fromPortId] {
-                    fromPortId = mappedPortId
-                } else {
-                    continue
-                }
-                
-                // To port - check regular port first, then computer interface map
-                if let port = portMap[exportableConnection.toPortId] {
-                    toPortId = port.id
-                } else if let mappedPortId = computerPortIdMap[exportableConnection.toPortId] {
-                    toPortId = mappedPortId
-                } else {
-                    continue
-                }
-                
-                // From channel - check regular channel first, then computer interface map
-                if let channel = channelMap[exportableConnection.fromChannelId] {
-                    fromChannelId = channel.id
-                } else if let mappedChannelId = computerChannelIdMap[exportableConnection.fromChannelId] {
-                    fromChannelId = mappedChannelId
-                } else {
-                    continue
-                }
-                
-                // To channel - check regular channel first, then computer interface map
-                if let channel = channelMap[exportableConnection.toChannelId] {
-                    toChannelId = channel.id
-                } else if let mappedChannelId = computerChannelIdMap[exportableConnection.toChannelId] {
-                    toChannelId = mappedChannelId
-                } else {
-                    continue
-                }
-
-                let connection = Connection(
-                    fromDeviceId: fromDevice.id,
-                    fromPortId: fromPortId,
-                    fromChannelId: fromChannelId,
-                    toDeviceId: toDevice.id,
-                    toPortId: toPortId,
-                    toChannelId: toChannelId,
-                    cable: CableType(rawValue: exportableConnection.cableRaw)
-                        ?? .other,
-                    label: exportableConnection.label,
-                    notes: exportableConnection.notes
-                )
-                if studio.connections == nil {
-                    studio.connections = []
-                }
-                studio.connections?.append(connection)
-            }
-
-            // Import canvas annotations
-            studio.canvasDrawingData = exportable.canvasDrawingData
-            
-            // Save to model context
-            modelContext.insert(studio)
-            try modelContext.save()
-
-            #if DEBUG
-            // Log import statistics
-            print("✅ Studio import complete:")
-            print("   Devices imported: \(studio.devices?.count ?? 0)")
-            print("   Connections imported: \(studio.connections?.count ?? 0)")
-            #endif
-            
-            // Rebuild ConnectionsStore from the imported connections
-            connectionsStore.rebuildFromConnections(studio: studio, markAsModified: true)
-            
-            #if DEBUG
-            // Verify the rebuild worked
-            let rebuiltBundles = connectionsStore.links(for: studio.id)
-            print("   ConnectionsStore bundles after rebuild: \(rebuiltBundles.count)")
-            for link in rebuiltBundles {
-                if let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id) {
-                    print("   Bundle: \(bundle.fromDeviceId) -> \(bundle.toDeviceId), edges: \(bundle.edges.count)")
-                }
-            }
-            #endif
+            let studio = try StudioImporter.insertStudio(
+                from: exportable,
+                name: uniqueName,
+                into: modelContext,
+                connectionsStore: connectionsStore
+            )
 
             // Select the imported studio
             selectedStudioId = studio.id
 
-            exportResultMessage =
-                "Studio '\(studio.name)' imported successfully!"
-            isShowingExportResult = true
+            if showResult {
+                exportResultMessage =
+                    "Studio '\(studio.name)' imported successfully!"
+                isShowingExportResult = true
+            }
 
         } catch {
             exportResultMessage = "Import failed: \(error.localizedDescription)"
@@ -4290,6 +4221,7 @@ private struct DetailCanvas: View {
 // MARK: - Studios List Subview
 
 private struct StudiosList: View {
+    @Environment(\.isTouchMode) private var isTouchMode
     let studios: [Studio]
     @Binding var selectedStudioId: UUID?
     let onDuplicate: (Studio) -> Void
@@ -4341,11 +4273,12 @@ private struct StudiosList: View {
                                 Label("Delete Studio", systemImage: "trash")
                             }
                         }
-                        #if os(iOS)
-                            .swipeActions(
-                                edge: .leading,
-                                allowsFullSwipe: false
-                            ) {
+                        // Swipe actions are for fingers; on a Mac they only appear in touch mode
+                        .swipeActions(
+                            edge: .leading,
+                            allowsFullSwipe: false
+                        ) {
+                            if isTouchMode {
                                 Button {
                                     onDuplicate(studio)
                                 } label: {
@@ -4366,10 +4299,12 @@ private struct StudiosList: View {
                                 }
                                 .tint(.green)
                             }
-                            .swipeActions(
-                                edge: .trailing,
-                                allowsFullSwipe: true
-                            ) {
+                        }
+                        .swipeActions(
+                            edge: .trailing,
+                            allowsFullSwipe: true
+                        ) {
+                            if isTouchMode {
                                 Button(role: .destructive) {
                                     onRequestDelete(studio)
                                 } label: {
@@ -4377,7 +4312,7 @@ private struct StudiosList: View {
                                 }
                                 .tint(.red)
                             }
-                        #endif
+                        }
                 }
                 .onDelete { indexSet in
                     if let first = indexSet.first,
@@ -5619,6 +5554,7 @@ struct ConnectionRouter {
 // MARK: - Connection Line Row Helper
 
 private struct ConnectionLineRow: View {
+    @Environment(\.isTouchMode) private var isTouchMode
     let link: ConnectionLinkSummary
     let studio: Studio
     let connectionsStore: ConnectionsStore
@@ -5814,11 +5750,11 @@ private struct ConnectionLineRow: View {
                 )
                 // IMPORTANT: give the line a full-size layout box so macOS can attach a context menu
                 // while hit-testing still remains constrained to the stroked curve via ConnectionLineView.contentShape.
-                // On iOS, skip this frame modifier to prevent visual glitch during long press gesture.
+                // On iOS (and in touch mode), skip this frame modifier to prevent visual glitch during long press gesture.
                 #if os(macOS)
                 .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
+                    maxWidth: isTouchMode ? nil : .infinity,
+                    maxHeight: isTouchMode ? nil : .infinity,
                     alignment: .topLeading
                 )
                 #endif
@@ -5835,13 +5771,16 @@ private struct ConnectionLineRow: View {
                 .onLongPressGesture(minimumDuration: 0.5) {
                     onDelete()
                 }
-                // Right-click on macOS (context menu causes visual glitch with long press on iOS)
+                // Right-click on macOS (context menu causes visual glitch with long press on iOS,
+                // and a touch long-press already deletes, so touch mode has no context menu)
                 #if os(macOS)
                 .contextMenu {
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Label("Delete Connection", systemImage: "trash")
+                    if !isTouchMode {
+                        Button(role: .destructive) {
+                            onDelete()
+                        } label: {
+                            Label("Delete Connection", systemImage: "trash")
+                        }
                     }
                 }
                 #endif
@@ -9561,5 +9500,271 @@ private struct HelpView: View {
         #if os(macOS)
         .frame(minWidth: 600, minHeight: 700)
         #endif
+    }
+}
+
+// MARK: - Studio Importer
+
+/// Builds a new studio (devices, ports, channels, connections) from an `ExportableStudio`.
+/// All identifiers are regenerated, and connection references are remapped to match.
+enum StudioImporter {
+    @MainActor
+    static func insertStudio(
+        from exportable: ExportableStudio,
+        name: String,
+        into context: ModelContext,
+        connectionsStore: ConnectionsStore
+    ) throws -> Studio {
+        let studio = Studio(name: name)
+
+        // Import devices
+        var deviceMap: [UUID: DeviceInstance] = [:]
+        var portMap: [UUID: Port] = [:]
+        var channelMap: [UUID: Channel] = [:]
+        var computerPortIdMap: [UUID: UUID] = [:]  // old port UUID -> new port UUID
+        var computerChannelIdMap: [UUID: UUID] = [:]  // old channel UUID -> new channel UUID
+
+        for exportableDevice in exportable.devices {
+            let device = DeviceInstance(
+                manufacturer: exportableDevice.manufacturer,
+                model: exportableDevice.model,
+                nickname: exportableDevice.nickname,
+                category: DeviceCategory(
+                    rawValue: exportableDevice.categoryRaw
+                ) ?? .other,
+                serialNumber: exportableDevice.serialNumber,
+                location: exportableDevice.location,
+                audioInputsCount: exportableDevice.audioInputsCount,
+                audioOutputsCount: exportableDevice.audioOutputsCount,
+                adatInputPortsCount: exportableDevice.adatInputPortsCount,
+                adatOutputPortsCount: exportableDevice.adatOutputPortsCount,
+                madiInputPortsCount: exportableDevice.madiInputPortsCount,
+                madiOutputPortsCount: exportableDevice.madiOutputPortsCount,
+                midiInputPortsCount: exportableDevice.midiInputPortsCount,
+                midiOutputPortsCount: exportableDevice.midiOutputPortsCount,
+                cvInputPortsCount: exportableDevice.cvInputPortsCount,
+                cvOutputPortsCount: exportableDevice.cvOutputPortsCount,
+                ethernetPortsCount: exportableDevice.ethernetPortsCount,
+                sampleRate: SampleRate(
+                    rawValue: exportableDevice.sampleRateRaw
+                ) ?? .hz48000,
+                digitalInputs: exportableDevice.digitalInputsRaw.compactMap
+                { DigitalFormat(rawValue: $0) },
+                digitalOutputs: exportableDevice.digitalOutputsRaw
+                    .compactMap { DigitalFormat(rawValue: $0) },
+                computerInterfaces: exportableDevice.computerInterfacesRaw
+                    .compactMap { ComputerInterface(rawValue: $0) },
+                posX: exportableDevice.posX,
+                posY: exportableDevice.posY,
+                scale: exportableDevice.scale,
+                zIndex: exportableDevice.zIndex
+            )
+
+            device.supportPageURLString =
+                exportableDevice.supportPageURLString
+            device.downloadsPageURLString =
+                exportableDevice.downloadsPageURLString
+
+            // Import ports
+            for exportablePort in exportableDevice.ports {
+                let port = Port(
+                    name: exportablePort.name,
+                    type: PortType(rawValue: exportablePort.typeRaw)
+                        ?? .usbAudio,
+                    direction: PortDirection(
+                        rawValue: exportablePort.directionRaw
+                    ) ?? .bidirectional
+                )
+
+                // Import channels
+                for exportableChannel in exportablePort.channels {
+                    let channel = Channel(
+                        index: exportableChannel.index,
+                        nameLong: exportableChannel.nameLong,
+                        nameShort: exportableChannel.nameShort,
+                        signal: SignalType(
+                            rawValue: exportableChannel.signalRaw
+                        ) ?? .audio,
+                        grouping: ChannelGrouping(
+                            rawValue: exportableChannel.groupingRaw
+                        ) ?? .mono
+                    )
+                    if port.channels == nil {
+                        port.channels = []
+                    }
+                    port.channels?.append(channel)
+                    // Map old channel UUID to new channel
+                    channelMap[exportableChannel.id] = channel
+                }
+
+                if device.ports == nil {
+                    device.ports = []
+                }
+                device.ports?.append(port)
+                // Map old port UUID to new port
+                portMap[exportablePort.id] = port
+            }
+
+            // Import docs (manuals, etc.)
+            for exportableDoc in exportableDevice.docs {
+                let docLink: DocLink
+                if let bookmarkData = exportableDoc.localBookmarkData {
+                    docLink = DocLink(
+                        title: exportableDoc.title,
+                        kind: DocKind(rawValue: exportableDoc.kindRaw)
+                            ?? .other,
+                        bookmarkData: bookmarkData
+                    )
+                } else if let urlString = exportableDoc.urlString,
+                    let url = URL(string: urlString)
+                {
+                    docLink = DocLink(
+                        title: exportableDoc.title,
+                        kind: DocKind(rawValue: exportableDoc.kindRaw)
+                            ?? .other,
+                        url: url
+                    )
+                } else {
+                    // Skip docs without valid URL or bookmark
+                    continue
+                }
+                if device.docs == nil {
+                    device.docs = []
+                }
+                device.docs?.append(docLink)
+            }
+
+            if studio.devices == nil {
+                studio.devices = []
+            }
+            studio.devices?.append(device)
+            // Map old device UUID to new device
+            deviceMap[exportableDevice.id] = device
+            
+            // Map virtual computer interface ports/channels (stable UUIDs based on device ID)
+            // The exported connections reference the OLD device UUIDs in their stable UUID generation
+            // We need to map those to the NEW device's computer interface UUIDs
+            let oldDeviceId = exportableDevice.id
+            let newDeviceId = device.id
+            let computerInterfaces = exportableDevice.computerInterfacesRaw.compactMap { ComputerInterface(rawValue: $0) }
+            let counts = device.computerInterfaceCounts
+            
+            for iface in computerInterfaces {
+                let count = counts[iface] ?? 0
+                if count == 0 { continue }
+                
+                for i in 1...count {
+                    // Generate UUIDs using OLD device ID (as they were in the export)
+                    let oldPortId = stableUUID("computerPort|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    let oldChannelId = stableUUID("computerCh|\(oldDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    
+                    // Generate UUIDs using NEW device ID (as they will be in the import)
+                    let newPortId = stableUUID("computerPort|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    let newChannelId = stableUUID("computerCh|\(newDeviceId.uuidString)|\(iface.rawValue)|\(i)")
+                    
+                    // Store the mapping
+                    computerPortIdMap[oldPortId] = newPortId
+                    computerChannelIdMap[oldChannelId] = newChannelId
+                }
+            }
+        }
+
+        // Import connections with UUID remapping
+        for exportableConnection in exportable.connections {
+            // Look up the new device UUIDs
+            guard let fromDevice = deviceMap[exportableConnection.fromDeviceId],
+                  let toDevice = deviceMap[exportableConnection.toDeviceId] else {
+                continue
+            }
+            
+            // Look up port and channel UUIDs (check regular ports first, then computer interface maps)
+            let fromPortId: UUID
+            let toPortId: UUID
+            let fromChannelId: UUID
+            let toChannelId: UUID
+            
+            // From port - check regular port first, then computer interface map
+            if let port = portMap[exportableConnection.fromPortId] {
+                fromPortId = port.id
+            } else if let mappedPortId = computerPortIdMap[exportableConnection.fromPortId] {
+                fromPortId = mappedPortId
+            } else {
+                continue
+            }
+            
+            // To port - check regular port first, then computer interface map
+            if let port = portMap[exportableConnection.toPortId] {
+                toPortId = port.id
+            } else if let mappedPortId = computerPortIdMap[exportableConnection.toPortId] {
+                toPortId = mappedPortId
+            } else {
+                continue
+            }
+            
+            // From channel - check regular channel first, then computer interface map
+            if let channel = channelMap[exportableConnection.fromChannelId] {
+                fromChannelId = channel.id
+            } else if let mappedChannelId = computerChannelIdMap[exportableConnection.fromChannelId] {
+                fromChannelId = mappedChannelId
+            } else {
+                continue
+            }
+            
+            // To channel - check regular channel first, then computer interface map
+            if let channel = channelMap[exportableConnection.toChannelId] {
+                toChannelId = channel.id
+            } else if let mappedChannelId = computerChannelIdMap[exportableConnection.toChannelId] {
+                toChannelId = mappedChannelId
+            } else {
+                continue
+            }
+
+            let connection = Connection(
+                fromDeviceId: fromDevice.id,
+                fromPortId: fromPortId,
+                fromChannelId: fromChannelId,
+                toDeviceId: toDevice.id,
+                toPortId: toPortId,
+                toChannelId: toChannelId,
+                cable: CableType(rawValue: exportableConnection.cableRaw)
+                    ?? .other,
+                label: exportableConnection.label,
+                notes: exportableConnection.notes
+            )
+            if studio.connections == nil {
+                studio.connections = []
+            }
+            studio.connections?.append(connection)
+        }
+
+        // Import canvas annotations
+        studio.canvasDrawingData = exportable.canvasDrawingData
+        
+        // Save to model context
+        context.insert(studio)
+        try context.save()
+
+        #if DEBUG
+        // Log import statistics
+        print("✅ Studio import complete:")
+        print("   Devices imported: \(studio.devices?.count ?? 0)")
+        print("   Connections imported: \(studio.connections?.count ?? 0)")
+        #endif
+        
+        // Rebuild ConnectionsStore from the imported connections
+        connectionsStore.rebuildFromConnections(studio: studio, markAsModified: true)
+        
+        #if DEBUG
+        // Verify the rebuild worked
+        let rebuiltBundles = connectionsStore.links(for: studio.id)
+        print("   ConnectionsStore bundles after rebuild: \(rebuiltBundles.count)")
+        for link in rebuiltBundles {
+            if let bundle = connectionsStore.bundle(for: studio.id, linkId: link.id) {
+                print("   Bundle: \(bundle.fromDeviceId) -> \(bundle.toDeviceId), edges: \(bundle.edges.count)")
+            }
+        }
+        #endif
+
+        return studio
     }
 }

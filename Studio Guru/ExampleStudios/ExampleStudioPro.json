@@ -1,0 +1,1326 @@
+{
+  "appVersion" : "1.0",
+  "connections" : [
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "2931E333-81C1-4E34-BEFA-70BCA246BAFE",
+      "fromDeviceId" : "72DABDD6-CB7C-4AF5-BD7D-66222D3D2362",
+      "fromPortId" : "E31B6502-D347-457F-88E3-7609CD87BAAA",
+      "id" : "9CF80E4E-0B08-4C5D-8D1E-A5D511383EA1",
+      "label" : "",
+      "toChannelId" : "A222DFB4-227A-4571-90BF-670221015557",
+      "toDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "toPortId" : "B593D852-D72B-4DE3-AE29-CC796B53CBFF"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "478D95A9-3A0B-4B45-94AD-AAB9A38D106C",
+      "fromDeviceId" : "F9FB1649-A0E2-4B5C-A51C-71E9A80F2D9D",
+      "fromPortId" : "D7D0EC52-1FC9-49D9-B0D4-5F4D27EBB512",
+      "id" : "64C02D97-30B7-45CE-9193-202F49BE4ECC",
+      "label" : "",
+      "toChannelId" : "A2EBCDDA-BB07-4DA6-9512-C98BC61B7567",
+      "toDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "toPortId" : "B593D852-D72B-4DE3-AE29-CC796B53CBFF"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "7F221C79-A2D3-4620-B4C8-9F27A57DB3B2",
+      "fromDeviceId" : "F9FB1649-A0E2-4B5C-A51C-71E9A80F2D9D",
+      "fromPortId" : "D7D0EC52-1FC9-49D9-B0D4-5F4D27EBB512",
+      "id" : "EBB9BFDC-1B68-446A-9A35-6A58024C2C83",
+      "label" : "",
+      "toChannelId" : "4E8B0B77-2C53-4CEF-9581-B8A22855F99C",
+      "toDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "toPortId" : "B593D852-D72B-4DE3-AE29-CC796B53CBFF"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "8DA94BCE-3569-42B9-B7B3-64D38F0D76AE",
+      "fromDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "fromPortId" : "203BECA7-0E50-4B7C-B0D1-14EF3CF001A0",
+      "id" : "E8D72847-2A61-4DCB-ADCC-92F2705A7C71",
+      "label" : "",
+      "toChannelId" : "85D7CE2A-B2A0-49F9-AE70-03BDA88DA637",
+      "toDeviceId" : "AA13295C-3A6F-446D-ADA7-3AE2CAE9DCE4",
+      "toPortId" : "BCE40560-85DA-48D6-AC12-9E52851EB3E0"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "4440EEEF-9549-7C24-EF4F-AD8A172BB79F",
+      "fromDeviceId" : "853E8920-D4F7-4726-9703-9EB7D77B6C26",
+      "fromPortId" : "FE27F9F0-1D48-685F-8E75-2BEBBC1157CB",
+      "id" : "BEF73A0A-7931-46B4-A79A-70464F229B99",
+      "label" : "",
+      "toChannelId" : "9D9C1B46-BD99-BB96-6BB8-8D47CC7C68D4",
+      "toDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "toPortId" : "4A7225AB-D3D2-0B72-A783-22645F798DD2"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "BF291311-029F-4C7E-BA75-AB07F6D42E21",
+      "fromDeviceId" : "A482DAC0-7FDD-45FD-B61D-0CADBBFE889E",
+      "fromPortId" : "6F1703EC-ACB7-4349-A50E-B7D57E4E4B8E",
+      "id" : "0865AD2E-A982-4741-BC2C-756D6F92F5DB",
+      "label" : "",
+      "toChannelId" : "DD390788-F2B3-4108-81C1-78CA3D2095EC",
+      "toDeviceId" : "B232A2EA-067B-4917-989F-05F166058732",
+      "toPortId" : "AF676345-11D5-4416-AC57-2AED1280316D"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "3DC85E0C-0385-4140-8EC9-6ECF80FA8BE7",
+      "fromDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "fromPortId" : "203BECA7-0E50-4B7C-B0D1-14EF3CF001A0",
+      "id" : "26BD3B20-C3F8-4541-BEE1-9F12C7D29974",
+      "label" : "",
+      "toChannelId" : "AB11F9D5-9605-4636-912B-015EDD691A84",
+      "toDeviceId" : "A49EAD6B-3600-419A-99A8-076D628DF131",
+      "toPortId" : "4CE74D48-A318-417A-A173-2BFEF31E1573"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "A7E81EA5-ED60-EBCD-5642-B3A72792F084",
+      "fromDeviceId" : "A482DAC0-7FDD-45FD-B61D-0CADBBFE889E",
+      "fromPortId" : "196A0B2D-2E1D-4AF6-65DB-9C8111AFBEDC",
+      "id" : "81DF7409-E43C-41D9-ACFA-0DADE244AD42",
+      "label" : "",
+      "toChannelId" : "23E4C3D8-1220-6484-5A25-1FA0DAAA3BCD",
+      "toDeviceId" : "853E8920-D4F7-4726-9703-9EB7D77B6C26",
+      "toPortId" : "2C5D4474-E329-0917-F89B-CFB2B9F5DF88"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "B4114298-6C81-4109-93F5-A28544BF9C3E",
+      "fromDeviceId" : "22DC2994-FCF1-4447-9224-6837DA6D2C03",
+      "fromPortId" : "E8ADE324-FBDB-4E56-9FA2-37B0846DE35F",
+      "id" : "4460AD81-25AE-4977-9DDC-DD576F2CA6B6",
+      "label" : "",
+      "toChannelId" : "CBBD49FE-653F-4018-8350-47B488CE0FF0",
+      "toDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "toPortId" : "B593D852-D72B-4DE3-AE29-CC796B53CBFF"
+    },
+    {
+      "cableRaw" : "other",
+      "fromChannelId" : "72486A36-6FEC-4422-9919-96C800499B81",
+      "fromDeviceId" : "22DC2994-FCF1-4447-9224-6837DA6D2C03",
+      "fromPortId" : "E8ADE324-FBDB-4E56-9FA2-37B0846DE35F",
+      "id" : "59D22AF8-6C1D-4DFD-B93F-44B2C7C18EBB",
+      "label" : "",
+      "toChannelId" : "146443FE-5C25-46EF-A9B7-E6552CDF539C",
+      "toDeviceId" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "toPortId" : "B593D852-D72B-4DE3-AE29-CC796B53CBFF"
+    }
+  ],
+  "devices" : [
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 1,
+      "audioOutputsCount" : 0,
+      "categoryRaw" : "Studio Monitor",
+      "computerInterfacesRaw" : [
+
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "AA13295C-3A6F-446D-ADA7-3AE2CAE9DCE4",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 0,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Left speaker",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "85D7CE2A-B2A0-49F9-AE70-03BDA88DA637",
+              "index" : 1,
+              "nameLong" : "Analog In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "BCE40560-85DA-48D6-AC12-9E52851EB3E0",
+          "name" : "Analog In",
+          "typeRaw" : "analogIn"
+        }
+      ],
+      "posX" : 456,
+      "posY" : 216,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 0,
+      "audioOutputsCount" : 2,
+      "categoryRaw" : "Computer",
+      "computerInterfacesRaw" : [
+        "Ethernet",
+        "USB",
+        "USB",
+        "USB-C",
+        "USB-C"
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "853E8920-D4F7-4726-9703-9EB7D77B6C26",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 0,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Your computer",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "66EC1896-21D8-49B5-880B-AB06A615365C",
+              "index" : 1,
+              "nameLong" : "Ethernet 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "108B4003-9CA8-44CB-AE3B-082BCBA15655",
+          "name" : "Ethernet",
+          "typeRaw" : "ethernet"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "0EE96CCB-3013-4E9D-A1B6-5CC6F4EE4CA2",
+              "index" : 1,
+              "nameLong" : "USB 1 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "507C660A-610F-4035-BDDF-AF6D51CB9BB5",
+          "name" : "USB 1",
+          "typeRaw" : "usbAudio"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "19D50E96-7205-4205-BA16-D4C507D35462",
+              "index" : 1,
+              "nameLong" : "USB 2 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "C16E3BFF-AA8A-4053-9937-CCFF377B6BEB",
+          "name" : "USB 2",
+          "typeRaw" : "usbAudio"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "8AEAD742-D44E-443D-AD50-6FFDC16BFB4C",
+              "index" : 2,
+              "nameLong" : "Analog Out 2",
+              "nameShort" : "Out2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "99CEE158-4D61-4836-A5C6-D434ACA946CA",
+              "index" : 1,
+              "nameLong" : "Analog Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "FDF678BF-B581-4D91-ACD2-34E10BBB53DF",
+          "name" : "Analog Out",
+          "typeRaw" : "analogOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "20CB2DD4-5F3B-479E-AEE3-72FC18BFB0D8",
+              "index" : 1,
+              "nameLong" : "USB-C 2 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "BB5AE555-091A-498E-857A-35347A35A6F9",
+          "name" : "USB-C 2",
+          "typeRaw" : "usbAudio"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "4CCAAC7F-F1AB-4D52-B8DC-30EBD16C6A3D",
+              "index" : 1,
+              "nameLong" : "USB-C 1 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "07C1A790-E358-4504-AD3E-8EBD99936D38",
+          "name" : "USB-C 1",
+          "typeRaw" : "usbAudio"
+        }
+      ],
+      "posX" : 720,
+      "posY" : 504,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 0,
+      "audioOutputsCount" : 0,
+      "categoryRaw" : "Other",
+      "computerInterfacesRaw" : [
+        "USB"
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "A482DAC0-7FDD-45FD-B61D-0CADBBFE889E",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 1,
+      "midiOutputPortsCount" : 1,
+      "model" : "",
+      "nickname" : "MIDI Keyboard",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "BF291311-029F-4C7E-BA75-AB07F6D42E21",
+              "index" : 1,
+              "nameLong" : "MIDI Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "6F1703EC-ACB7-4349-A50E-B7D57E4E4B8E",
+          "name" : "MIDI Out 1",
+          "typeRaw" : "midiOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "6D329000-222D-4CEA-AF6E-B0A81B40D403",
+              "index" : 1,
+              "nameLong" : "MIDI In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "F217FF0C-B678-4774-A1CB-FEDC0C36948C",
+          "name" : "MIDI In 1",
+          "typeRaw" : "midiIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "799FF829-CC05-4BB9-9373-22A3B9BBA982",
+              "index" : 1,
+              "nameLong" : "USB 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "A9AEC4AE-DA29-42FD-A7A2-276CD2C57709",
+          "name" : "USB",
+          "typeRaw" : "usbAudio"
+        }
+      ],
+      "posX" : 720,
+      "posY" : 648,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 1,
+      "audioOutputsCount" : 0,
+      "categoryRaw" : "Studio Monitor",
+      "computerInterfacesRaw" : [
+
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "A49EAD6B-3600-419A-99A8-076D628DF131",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 0,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Right Speaker",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "AB11F9D5-9605-4636-912B-015EDD691A84",
+              "index" : 1,
+              "nameLong" : "Analog In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "4CE74D48-A318-417A-A173-2BFEF31E1573",
+          "name" : "Analog In",
+          "typeRaw" : "analogIn"
+        }
+      ],
+      "posX" : 960,
+      "posY" : 216,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 0,
+      "audioOutputsCount" : 2,
+      "categoryRaw" : "Synth",
+      "computerInterfacesRaw" : [
+
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "B232A2EA-067B-4917-989F-05F166058732",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 1,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Synthesizer",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "DD390788-F2B3-4108-81C1-78CA3D2095EC",
+              "index" : 1,
+              "nameLong" : "MIDI In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "AF676345-11D5-4416-AC57-2AED1280316D",
+          "name" : "MIDI In 1",
+          "typeRaw" : "midiIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "4A4B74AD-0306-4144-AA12-097F27F84E46",
+              "index" : 1,
+              "nameLong" : "Analog Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "6C5AECF2-2958-4A87-A98A-1815E5879E8B",
+              "index" : 2,
+              "nameLong" : "Analog Out 2",
+              "nameShort" : "Out2",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "ADC41242-F9EB-4BBD-A48A-A5DA903D6D3F",
+          "name" : "Analog Out",
+          "typeRaw" : "analogOut"
+        }
+      ],
+      "posX" : 312,
+      "posY" : 456,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 2,
+      "adatOutputPortsCount" : 2,
+      "audioInputsCount" : 8,
+      "audioOutputsCount" : 8,
+      "categoryRaw" : "Audio Interface",
+      "computerInterfacesRaw" : [
+        "USB-C"
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+        "S\/PDIF",
+        "Word Clock",
+        "ADAT"
+      ],
+      "digitalOutputsRaw" : [
+        "ADAT",
+        "Word Clock",
+        "S\/PDIF"
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "E46E5249-B3C4-440E-A513-4F0311356B91",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 1,
+      "midiOutputPortsCount" : 1,
+      "model" : "",
+      "nickname" : "Your Audio Interface",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "B131B4F6-D765-4580-B6DF-0F08A799C670",
+              "index" : 1,
+              "nameLong" : "Digital Out (S\/PDIF) L\/R",
+              "nameShort" : "L\/R",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "EA8128C9-1B25-4CC2-8892-BEED196B0E4E",
+          "name" : "Digital Out (S\/PDIF)",
+          "typeRaw" : "spdifOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "B71948B9-CB4B-41FC-9AE7-43B4FAC21EE2",
+              "index" : 1,
+              "nameLong" : "Word Clock In 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "3E0E96AE-767D-4ECA-932F-CB5E91C41E75",
+          "name" : "Word Clock In",
+          "typeRaw" : "wordClockIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "51058F05-A5CA-4C69-A00C-47115DE2FAB9",
+              "index" : 5,
+              "nameLong" : "ADAT In B 5",
+              "nameShort" : "5",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "3B823E03-D0F8-407D-AD56-37D951D263DE",
+              "index" : 4,
+              "nameLong" : "ADAT In B 4",
+              "nameShort" : "4",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "BC51F9BA-5D54-4F66-BED1-AD3CED6C66E7",
+              "index" : 2,
+              "nameLong" : "ADAT In B 2",
+              "nameShort" : "2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "4849C823-3E97-4B87-A201-0861EA024364",
+              "index" : 8,
+              "nameLong" : "ADAT In B 8",
+              "nameShort" : "8",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "BB547163-3686-42EB-AB8E-08657A80BC95",
+              "index" : 7,
+              "nameLong" : "ADAT In B 7",
+              "nameShort" : "7",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "341C255D-A5E1-4A4E-9181-F3FF89B91B72",
+              "index" : 1,
+              "nameLong" : "ADAT In B 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "D98EBD6E-BF90-45C4-B40A-90ED764F6827",
+              "index" : 6,
+              "nameLong" : "ADAT In B 6",
+              "nameShort" : "6",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "831BC902-2F9C-4F6D-B424-A24D7047C99D",
+              "index" : 3,
+              "nameLong" : "ADAT In B 3",
+              "nameShort" : "3",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "737DFD3E-68AA-4955-83FA-49FEB28EDD73",
+          "name" : "ADAT In B",
+          "typeRaw" : "adatIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "AB4465D2-59F4-46B4-A9A4-2B3575093E0D",
+              "index" : 8,
+              "nameLong" : "ADAT In A 8",
+              "nameShort" : "8",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "68D61FA5-C0D8-4EFE-AF3A-D0BC2A4061C6",
+              "index" : 1,
+              "nameLong" : "ADAT In A 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "6DFFE670-CB0D-41EB-9BEF-ADB3E443E564",
+              "index" : 5,
+              "nameLong" : "ADAT In A 5",
+              "nameShort" : "5",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "1C260DF5-86B3-4307-9433-144AEAD31598",
+              "index" : 7,
+              "nameLong" : "ADAT In A 7",
+              "nameShort" : "7",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "6BBA3A8D-1377-44CA-8B44-D56CC28F689F",
+              "index" : 6,
+              "nameLong" : "ADAT In A 6",
+              "nameShort" : "6",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "0066CD56-0594-46CC-BE5C-2481D03241AE",
+              "index" : 3,
+              "nameLong" : "ADAT In A 3",
+              "nameShort" : "3",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "FA678B75-9D66-4074-96C0-1B812DA40CCE",
+              "index" : 4,
+              "nameLong" : "ADAT In A 4",
+              "nameShort" : "4",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "AC744D6E-AE13-4983-B15A-EE23FEA7FB3A",
+              "index" : 2,
+              "nameLong" : "ADAT In A 2",
+              "nameShort" : "2",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "0C5B3C57-FBF6-45AB-A538-3F0F90604739",
+          "name" : "ADAT In A",
+          "typeRaw" : "adatIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "4E8B0B77-2C53-4CEF-9581-B8A22855F99C",
+              "index" : 3,
+              "nameLong" : "Analog In 3",
+              "nameShort" : "In3",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "CBBD49FE-653F-4018-8350-47B488CE0FF0",
+              "index" : 5,
+              "nameLong" : "Analog In 5",
+              "nameShort" : "In5",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "D0925B70-7CC0-40CA-95ED-33AB4D2973AE",
+              "index" : 7,
+              "nameLong" : "Analog In 7",
+              "nameShort" : "In7",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "95153EFD-14E4-4877-BEB7-26E749D16B7A",
+              "index" : 8,
+              "nameLong" : "Analog In 8",
+              "nameShort" : "In8",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "9C692E95-B345-41C0-BE73-3562737BDE95",
+              "index" : 2,
+              "nameLong" : "Analog In 2",
+              "nameShort" : "In2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "146443FE-5C25-46EF-A9B7-E6552CDF539C",
+              "index" : 6,
+              "nameLong" : "Analog In 6",
+              "nameShort" : "In6",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "A222DFB4-227A-4571-90BF-670221015557",
+              "index" : 1,
+              "nameLong" : "Analog In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "A2EBCDDA-BB07-4DA6-9512-C98BC61B7567",
+              "index" : 4,
+              "nameLong" : "Analog In 4",
+              "nameShort" : "In4",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "B593D852-D72B-4DE3-AE29-CC796B53CBFF",
+          "name" : "Analog In",
+          "typeRaw" : "analogIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "D3DA68D9-1B7B-4413-8A2C-39FB986AAE71",
+              "index" : 1,
+              "nameLong" : "Digital In (S\/PDIF) L\/R",
+              "nameShort" : "L\/R",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "99EA2682-73BB-4AE9-9044-D9C57B104CFC",
+          "name" : "Digital In (S\/PDIF)",
+          "typeRaw" : "spdifIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "18955325-8CD8-4AC2-A791-83C20D42C580",
+              "index" : 1,
+              "nameLong" : "Word Clock Out 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "48DDD6A6-B964-4B9B-B302-0F107E92623E",
+          "name" : "Word Clock Out",
+          "typeRaw" : "wordClockOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "88010E0B-82F1-43E3-BE39-3539E5C6B7C5",
+              "index" : 7,
+              "nameLong" : "ADAT Out B 7",
+              "nameShort" : "7",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "0B9DAB66-F100-4728-B53E-E3C6D299C77C",
+              "index" : 5,
+              "nameLong" : "ADAT Out B 5",
+              "nameShort" : "5",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "7E2826B9-D32C-407F-9C24-BA8DEEBA1F3E",
+              "index" : 3,
+              "nameLong" : "ADAT Out B 3",
+              "nameShort" : "3",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "6585E6D0-E13D-4D4C-BF5D-91CFEDF0180F",
+              "index" : 6,
+              "nameLong" : "ADAT Out B 6",
+              "nameShort" : "6",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "D26DB5E7-A176-4ADE-BAE0-2A070AD25373",
+              "index" : 8,
+              "nameLong" : "ADAT Out B 8",
+              "nameShort" : "8",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "E0542166-CD36-4411-AADD-4728AEBC943D",
+              "index" : 2,
+              "nameLong" : "ADAT Out B 2",
+              "nameShort" : "2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "631E9293-5F4A-41B7-A44B-4F3DAE0C90AB",
+              "index" : 1,
+              "nameLong" : "ADAT Out B 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "31FA4676-9FFC-40EC-B542-2C1DDC59DA0B",
+              "index" : 4,
+              "nameLong" : "ADAT Out B 4",
+              "nameShort" : "4",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "768C25A0-92CE-47C0-96C7-ABAB94744A25",
+          "name" : "ADAT Out B",
+          "typeRaw" : "adatOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "B99956D3-9FB4-4CB8-B4BE-2A168A85495D",
+              "index" : 1,
+              "nameLong" : "MIDI In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "62929BE4-A56F-4003-82F2-7A663A23ABE5",
+          "name" : "MIDI In 1",
+          "typeRaw" : "midiIn"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "353F887D-5A87-46F1-AC72-DE06B939D6CC",
+              "index" : 2,
+              "nameLong" : "ADAT Out A 2",
+              "nameShort" : "2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "881A3730-75F2-4C9D-9C6C-F3092C059EBF",
+              "index" : 8,
+              "nameLong" : "ADAT Out A 8",
+              "nameShort" : "8",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "460CEE22-7793-4E26-801C-4230342FF6E9",
+              "index" : 7,
+              "nameLong" : "ADAT Out A 7",
+              "nameShort" : "7",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "92776C05-E6AB-4F06-A3FE-C442BB746E8F",
+              "index" : 6,
+              "nameLong" : "ADAT Out A 6",
+              "nameShort" : "6",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "896A4EF0-7B19-4D61-8C23-C756ECF3C956",
+              "index" : 1,
+              "nameLong" : "ADAT Out A 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "F79AC2A2-8359-4640-9838-1ADDC0495C6D",
+              "index" : 4,
+              "nameLong" : "ADAT Out A 4",
+              "nameShort" : "4",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "D6161663-4125-46BD-89BE-26CFB4BDBF5A",
+              "index" : 5,
+              "nameLong" : "ADAT Out A 5",
+              "nameShort" : "5",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "205718C7-2349-45D2-A06E-AFE2E79FB48D",
+              "index" : 3,
+              "nameLong" : "ADAT Out A 3",
+              "nameShort" : "3",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "500E94A8-B0BE-4691-96BB-8137A444059E",
+          "name" : "ADAT Out A",
+          "typeRaw" : "adatOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "8AAE837A-A8CF-48D9-80E2-B1B179BCF508",
+              "index" : 1,
+              "nameLong" : "MIDI Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "346606E6-6E10-4F8C-BAE2-B1FC335BAF42",
+          "name" : "MIDI Out 1",
+          "typeRaw" : "midiOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "41F6EF45-2C37-4422-8811-89742655B5E2",
+              "index" : 1,
+              "nameLong" : "USB-C 1",
+              "nameShort" : "1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "CDB172B2-3F3C-45BB-A149-BF2A32F30AEB",
+          "name" : "USB-C",
+          "typeRaw" : "usbAudio"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "8DA94BCE-3569-42B9-B7B3-64D38F0D76AE",
+              "index" : 1,
+              "nameLong" : "Analog Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "4FE5C573-15A2-4B0B-8CD7-911D8D43F34F",
+              "index" : 4,
+              "nameLong" : "Analog Out 4",
+              "nameShort" : "Out4",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "F1CAE264-3BDB-4681-84AC-922801B679DB",
+              "index" : 3,
+              "nameLong" : "Analog Out 3",
+              "nameShort" : "Out3",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "4E2B4823-AED1-4980-95C0-9539F7A87488",
+              "index" : 7,
+              "nameLong" : "Analog Out 7",
+              "nameShort" : "Out7",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "3DC85E0C-0385-4140-8EC9-6ECF80FA8BE7",
+              "index" : 2,
+              "nameLong" : "Analog Out 2",
+              "nameShort" : "Out2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "D947CDDC-B252-4E4A-97B4-8648900BC4B3",
+              "index" : 8,
+              "nameLong" : "Analog Out 8",
+              "nameShort" : "Out8",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "0D63FF42-4D88-4DF9-B26E-1DEF1D99AC94",
+              "index" : 5,
+              "nameLong" : "Analog Out 5",
+              "nameShort" : "Out5",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "C6B44B02-8FAE-4F81-A5EC-35C0239DC8D6",
+              "index" : 6,
+              "nameLong" : "Analog Out 6",
+              "nameShort" : "Out6",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "203BECA7-0E50-4B7C-B0D1-14EF3CF001A0",
+          "name" : "Analog Out",
+          "typeRaw" : "analogOut"
+        }
+      ],
+      "posX" : 724.0090470011287,
+      "posY" : 366.00118801349095,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 1,
+      "audioOutputsCount" : 2,
+      "categoryRaw" : "Effects Unit",
+      "computerInterfacesRaw" : [
+
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "22DC2994-FCF1-4447-9224-6837DA6D2C03",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 0,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Guitar Effects",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "B4114298-6C81-4109-93F5-A28544BF9C3E",
+              "index" : 1,
+              "nameLong" : "Analog Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "72486A36-6FEC-4422-9919-96C800499B81",
+              "index" : 2,
+              "nameLong" : "Analog Out 2",
+              "nameShort" : "Out2",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "E8ADE324-FBDB-4E56-9FA2-37B0846DE35F",
+          "name" : "Analog Out",
+          "typeRaw" : "analogOut"
+        },
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "50EE3DE0-E1D1-4D9E-B8F2-806C6A569369",
+              "index" : 1,
+              "nameLong" : "Analog In 1",
+              "nameShort" : "In1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "input",
+          "id" : "7D3AF9FB-9A3D-466B-A8CB-3E4C1414B8E0",
+          "name" : "Analog In",
+          "typeRaw" : "analogIn"
+        }
+      ],
+      "posX" : 312,
+      "posY" : 600,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 0,
+      "audioOutputsCount" : 2,
+      "categoryRaw" : "Other",
+      "computerInterfacesRaw" : [
+
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "F9FB1649-A0E2-4B5C-A51C-71E9A80F2D9D",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 0,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Electronic Drums",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "478D95A9-3A0B-4B45-94AD-AAB9A38D106C",
+              "index" : 2,
+              "nameLong" : "Analog Out 2",
+              "nameShort" : "Out2",
+              "signalRaw" : "audio"
+            },
+            {
+              "groupingRaw" : "mono",
+              "id" : "7F221C79-A2D3-4620-B4C8-9F27A57DB3B2",
+              "index" : 1,
+              "nameLong" : "Analog Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "D7D0EC52-1FC9-49D9-B0D4-5F4D27EBB512",
+          "name" : "Analog Out",
+          "typeRaw" : "analogOut"
+        }
+      ],
+      "posX" : 1080,
+      "posY" : 456,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    },
+    {
+      "adatInputPortsCount" : 0,
+      "adatOutputPortsCount" : 0,
+      "audioInputsCount" : 0,
+      "audioOutputsCount" : 1,
+      "categoryRaw" : "Microphone",
+      "computerInterfacesRaw" : [
+
+      ],
+      "cvInputPortsCount" : 0,
+      "cvOutputPortsCount" : 0,
+      "digitalInputsRaw" : [
+
+      ],
+      "digitalOutputsRaw" : [
+
+      ],
+      "docs" : [
+
+      ],
+      "ethernetPortsCount" : 0,
+      "id" : "72DABDD6-CB7C-4AF5-BD7D-66222D3D2362",
+      "location" : "",
+      "madiInputPortsCount" : 0,
+      "madiOutputPortsCount" : 0,
+      "manufacturer" : "Unknown",
+      "midiInputPortsCount" : 0,
+      "midiOutputPortsCount" : 0,
+      "model" : "",
+      "nickname" : "Microphone 1",
+      "ports" : [
+        {
+          "channels" : [
+            {
+              "groupingRaw" : "mono",
+              "id" : "2931E333-81C1-4E34-BEFA-70BCA246BAFE",
+              "index" : 1,
+              "nameLong" : "Analog Out 1",
+              "nameShort" : "Out1",
+              "signalRaw" : "audio"
+            }
+          ],
+          "directionRaw" : "output",
+          "id" : "E31B6502-D347-457F-88E3-7609CD87BAAA",
+          "name" : "Analog Out",
+          "typeRaw" : "analogOut"
+        }
+      ],
+      "posX" : 1080,
+      "posY" : 600,
+      "sampleRateRaw" : 44100,
+      "scale" : 1,
+      "serialNumber" : "",
+      "zIndex" : 0
+    }
+  ],
+  "exportDate" : "2026-10-20T20:07:51Z",
+  "name" : "Example Studio-Pro"
+}
